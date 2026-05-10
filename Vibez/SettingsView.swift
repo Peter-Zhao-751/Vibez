@@ -39,6 +39,23 @@ struct SettingsView: View {
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
     @FocusState private var ntfyFieldFocused: Bool
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.colorScheme) private var systemColorScheme
+
+    private var preferredScheme: ColorScheme? {
+        let pref = AppearancePref(rawValue: appearanceRaw) ?? .system
+        switch pref {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    private func dismissSheet() {
+        ntfyFieldFocused = false
+        isPresented = false
+        dismiss()
+    }
 
     var body: some View {
         NavigationStack {
@@ -52,16 +69,9 @@ struct SettingsView: View {
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") {
-                        ntfyFieldFocused = false
-                        isPresented = false
-                    }
-                    .fontWeight(.semibold)
-                }
-                ToolbarItemGroup(placement: .keyboard) {
-                    Spacer()
-                    Button("Done") { ntfyFieldFocused = false }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done", action: dismissSheet)
+                        .fontWeight(.semibold)
                 }
             }
             .familyActivityPicker(
@@ -74,6 +84,7 @@ struct SettingsView: View {
                 }
             }
         }
+        .preferredColorScheme(preferredScheme)
     }
 
     // MARK: Sections
