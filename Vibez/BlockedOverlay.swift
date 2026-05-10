@@ -63,6 +63,8 @@ struct BlockedOverlay: View {
                     .tracking(-0.4)
                     .foregroundStyle(theme.fg)
                     .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
                     .padding(.horizontal, 32)
                     .padding(.bottom, 8)
 
@@ -70,6 +72,8 @@ struct BlockedOverlay: View {
                     .font(.system(size: 14))
                     .foregroundStyle(theme.fgMute)
                     .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .truncationMode(.tail)
                     .padding(.horizontal, 40)
                     .padding(.bottom, 24)
 

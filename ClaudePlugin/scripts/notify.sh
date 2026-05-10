@@ -85,9 +85,13 @@ jq_get() {
 }
 
 # Read the current "last assistant text" from the transcript file.
+# Truncates to 160 chars and appends a single-char ellipsis when cut,
+# so consumers can tell the body was clipped instead of just stopping
+# mid-sentence.
 read_last_text() {
     local transcript="$1"
-    jq -r '
+    local raw
+    raw=$(jq -r '
         select(.type == "assistant")
         | .message.content[]?
         | select(.type == "text")
@@ -95,8 +99,15 @@ read_last_text() {
     ' "${transcript}" 2>/dev/null \
         | grep -v '^[[:space:]]*$' \
         | tail -n 1 \
-        | tr '\n' ' ' \
-        | cut -c 1-160
+        | tr '\n' ' ')
+    # Drop trailing space from the tr above.
+    raw="${raw% }"
+
+    if [ "${#raw}" -gt 160 ]; then
+        printf '%s…' "${raw:0:159}"
+    else
+        printf '%s' "${raw}"
+    fi
 }
 
 last_assistant_excerpt() {
