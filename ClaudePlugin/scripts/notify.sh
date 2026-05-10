@@ -213,17 +213,22 @@ case "${EVENT}" in
         message="$(jq_get '.message')"
         transcript="$(jq_get '.transcript_path')"
         cwd="$(jq_get '.cwd')"
+        sid="$(jq_get '.session_id' 'nosid')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}")"
         if [ -z "${message}" ]; then
             ntype="$(jq_get '.notification_type' 'unknown')"
             message="Claude needs your attention (${ntype})"
         fi
-        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell"
+        # Control tag _vibez:block:<sid> lets the iOS app match this
+        # block request against an upcoming UserPromptSubmit and
+        # auto-unblock when the user replies in this exact conversation.
+        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell,_vibez:block:${sid}"
         ;;
 
     stop)
         cwd="$(jq_get '.cwd')"
+        sid="$(jq_get '.session_id' 'nosid')"
         proj="$(basename "${cwd:-unknown}")"
         transcript="$(jq_get '.transcript_path')"
         convo_title="$(read_conversation_title "${transcript}" "${proj}")"
@@ -231,7 +236,26 @@ case "${EVENT}" in
         if [ -z "${excerpt}" ]; then
             excerpt="Claude finished a turn."
         fi
-        post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark"
+        post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark,_vibez:block:${sid}"
+        ;;
+
+    user-prompt-submit)
+        # User replied in Claude — fire a low-priority push tagged
+        # _vibez:unblock:<sid> so the iOS app can release the matching
+        # block. Body is mostly for the official ntfy app's history;
+        # the Vibez app routes on the control tag.
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
+        prompt="$(jq_get '.prompt')"
+        # Truncate prompt to a short excerpt for the body
+        if [ "${#prompt}" -gt 80 ]; then
+            prompt="${prompt:0:79}…"
+        fi
+        [ -z "${prompt}" ] && prompt="(replied)"
+        post_ntfy "${convo_title} — replied" "${prompt}" "low" "leftwards_arrow_with_hook,_vibez:unblock:${sid}"
         ;;
 
     *)

@@ -15,11 +15,21 @@
 import Foundation
 import UserNotifications
 
+enum NtfyMessageKind: Equatable {
+    case block        // Notification or Stop hook → block apps for this session
+    case unblock      // UserPromptSubmit → user replied, release this session
+    case unknown      // Plain ntfy ping, no Vibez control tag
+}
+
 struct NtfyMessage: Equatable {
     let id: String
     let title: String
     let body: String
     let receivedAt: Date
+    /// Kind derived from a "_vibez:<kind>:<sid>" tag, if present.
+    var kind: NtfyMessageKind = .unknown
+    /// Claude Code session_id when the tag is present.
+    var sessionId: String? = nil
 }
 
 @MainActor
@@ -70,13 +80,17 @@ final class NotifyClient {
     /// button so the user can see the overlay + local notification flow
     /// without the network in the loop.
     func injectFakeMessage(title: String = "Claude Code — needs you",
-                           body: String = "Permission required to run a tool.") {
-        let msg = NtfyMessage(
+                           body: String = "Permission required to run a tool.",
+                           kind: NtfyMessageKind = .block,
+                           sessionId: String? = "test-session") {
+        var msg = NtfyMessage(
             id: UUID().uuidString,
             title: title,
             body: body,
             receivedAt: Date()
         )
+        msg.kind = kind
+        msg.sessionId = sessionId
         deliver(msg)
     }
 
@@ -144,12 +158,28 @@ final class NotifyClient {
         }
         guard payload.event == "message" else { return } // ignore open/keepalive
 
-        let msg = NtfyMessage(
+        var msg = NtfyMessage(
             id: payload.id ?? UUID().uuidString,
             title: payload.title ?? "Vibez",
             body: payload.message ?? "",
             receivedAt: Date()
         )
+        // Look for our control tag "_vibez:<kind>:<sessionId>".
+        for tag in payload.tags ?? [] {
+            guard tag.hasPrefix("_vibez:") else { continue }
+            let parts = tag.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
+            // ["_vibez", "<kind>", "<sessionId>"]
+            guard parts.count == 3 else { continue }
+            let kindRaw = String(parts[1])
+            let sid = String(parts[2])
+            switch kindRaw {
+            case "block":   msg.kind = .block
+            case "unblock": msg.kind = .unblock
+            default:        continue
+            }
+            msg.sessionId = sid
+            break
+        }
         deliver(msg)
     }
 
@@ -226,4 +256,5 @@ private struct NtfyPayload: Decodable {
     let message: String?
     let time: Int?
     let priority: Int?
+    let tags: [String]?
 }

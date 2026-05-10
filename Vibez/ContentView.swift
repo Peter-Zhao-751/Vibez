@@ -75,10 +75,7 @@ struct ContentView: View {
         }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             guard let newValue else { return }
-            recordTrigger(from: newValue)
-            withAnimation(.easeOut(duration: 0.45)) {
-                overlayMessage = newValue
-            }
+            handleIncoming(newValue)
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(
@@ -137,6 +134,39 @@ struct ContentView: View {
                 blockSeconds: blockSeconds
             )
         )
+    }
+
+    private func handleIncoming(_ message: NtfyMessage) {
+        switch message.kind {
+        case .unblock:
+            // Match against pendingTriggers — the user just replied in
+            // this conversation, so release the auto-block for it.
+            if let sid = message.sessionId {
+                manager.resolveTrigger(sessionId: sid)
+            }
+            // Dismiss the overlay if it was for this same session.
+            if let current = overlayMessage,
+               current.sessionId == message.sessionId {
+                withAnimation { overlayMessage = nil }
+            }
+
+        case .block:
+            if let sid = message.sessionId {
+                manager.addTrigger(sessionId: sid)
+            }
+            recordTrigger(from: message)
+            withAnimation(.easeOut(duration: 0.45)) {
+                overlayMessage = message
+            }
+
+        case .unknown:
+            // Plain ntfy ping (test push, third-party producer, etc.)
+            // — show the overlay as we always did.
+            recordTrigger(from: message)
+            withAnimation(.easeOut(duration: 0.45)) {
+                overlayMessage = message
+            }
+        }
     }
 
     @ViewBuilder
