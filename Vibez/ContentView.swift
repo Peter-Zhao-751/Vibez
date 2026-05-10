@@ -80,12 +80,6 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
         }
-        .background(
-            AccentGlow(theme: theme, dark: dark)
-                .frame(maxWidth: .infinity, alignment: .top)
-                .frame(maxHeight: .infinity, alignment: .top),
-            alignment: .top
-        )
     }
 
     @ViewBuilder

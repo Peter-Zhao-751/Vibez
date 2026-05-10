@@ -93,11 +93,6 @@ struct TopBar: View {
 
     var body: some View {
         HStack {
-            Text("vibez")
-                .font(.system(size: 20, weight: .heavy))
-                .italic()
-                .tracking(-0.8)
-                .foregroundStyle(theme.fg)
             Spacer()
             Button {
                 withAnimation(.easeInOut(duration: 0.4)) { dark.toggle() }
