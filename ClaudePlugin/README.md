@@ -19,7 +19,7 @@ A Claude Code plugin that pushes session events to your phone via [ntfy.sh](http
 
    ```
    /plugin marketplace add Peter-Zhao-751/Vibez
-   /plugin install vibez@vibez
+   /plugin install vibez@pz
    ```
 
    For local development against a checkout, swap the first command for `/plugin marketplace add /path/to/Vibez`. See [Claude Code plugins docs](https://code.claude.com/docs/en/plugins).
