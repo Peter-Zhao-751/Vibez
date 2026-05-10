@@ -468,11 +468,16 @@ struct RecentTriggersSection: View {
             } else {
                 // Refresh the "Nm ago" labels every 30s without a manual timer.
                 TimelineView(.periodic(from: .now, by: 30)) { context in
-                    VStack(spacing: 6) {
-                        ForEach(events) { event in
-                            TriggerRow(event: event, theme: theme, now: context.date)
+                    ScrollView {
+                        VStack(spacing: 6) {
+                            ForEach(events) { event in
+                                TriggerRow(event: event, theme: theme, now: context.date)
+                            }
                         }
                     }
+                    .frame(maxHeight: 260) // ~5 rows × (46pt row + 6pt spacing); scrolls past 5
+                    .scrollDisabled(events.count <= 5)
+                    .scrollIndicators(.hidden)
                 }
             }
         }
