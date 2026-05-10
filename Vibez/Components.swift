@@ -451,6 +451,10 @@ struct RecentTriggersSection: View {
     let events: [TriggerEvent]
     let theme: Theme
 
+    @State private var atEnd = false
+
+    private var showFade: Bool { events.count > 5 && !atEnd }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
@@ -478,6 +482,23 @@ struct RecentTriggersSection: View {
                     .frame(maxHeight: 260) // ~5 rows × (46pt row + 6pt spacing); scrolls past 5
                     .scrollDisabled(events.count <= 5)
                     .scrollIndicators(.hidden)
+                    .onScrollGeometryChange(for: Bool.self) { geo in
+                        let maxOffset = max(0, geo.contentSize.height - geo.containerSize.height)
+                        return geo.contentOffset.y >= maxOffset - 1
+                    } action: { _, newValue in
+                        withAnimation(.easeOut(duration: 0.18)) { atEnd = newValue }
+                    }
+                    .mask(
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black, location: 0.0),
+                                .init(color: .black, location: showFade ? 0.80 : 1.0),
+                                .init(color: showFade ? .clear : .black, location: 1.0),
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
                 }
             }
         }
