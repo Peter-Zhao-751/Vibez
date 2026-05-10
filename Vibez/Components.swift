@@ -362,6 +362,11 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
     var id: UUID
     var receivedAt: Date
     var source: Source
+    /// Conversation name (e.g. "Plan plugin distribution"). May be nil
+    /// for older persisted events from before this field existed.
+    var title: String?
+    /// Body / description of the ping (e.g. "Permission required to
+    /// run npm install").
     var label: String
     var blockSeconds: Int
 
@@ -369,14 +374,25 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         id: UUID = UUID(),
         receivedAt: Date = Date(),
         source: Source,
+        title: String? = nil,
         label: String,
         blockSeconds: Int
     ) {
         self.id = id
         self.receivedAt = receivedAt
         self.source = source
+        self.title = title
         self.label = label
         self.blockSeconds = blockSeconds
+    }
+
+    /// Strip the " — done" / " — needs you" / " — replied" suffix
+    /// that the plugin appends, so the conversation name renders alone.
+    static func cleanedTitle(from rawTitle: String) -> String {
+        guard let range = rawTitle.range(of: " — ", options: .backwards) else {
+            return rawTitle
+        }
+        return String(rawTitle[..<range.lowerBound])
     }
 
     func relativeTime(from now: Date) -> String {
@@ -411,8 +427,22 @@ struct TriggerRow: View {
     let theme: Theme
     let now: Date
 
+    /// Conversation name; falls back to the body when older persisted
+    /// events have no title.
+    private var topLine: String {
+        if let t = event.title, !t.isEmpty { return t }
+        return event.label
+    }
+
+    /// Description / body text. Empty when there's no separate body
+    /// (older events that only had a single label).
+    private var descriptionLine: String? {
+        guard let title = event.title, !title.isEmpty else { return nil }
+        return event.label.isEmpty ? nil : event.label
+    }
+
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .top, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(event.source == .codex ? Theme.codexBlue : Theme.claudeOrange)
@@ -422,15 +452,22 @@ struct TriggerRow: View {
             }
             .frame(width: 28, height: 28)
 
-            VStack(alignment: .leading, spacing: 2) {
-                Text(event.label)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(topLine)
                     .font(.system(size: 12.5, weight: .semibold))
                     .foregroundStyle(theme.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
+                if let description = descriptionLine {
+                    Text(description)
+                        .font(.system(size: 11))
+                        .foregroundStyle(theme.fgMute)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
+                }
                 Text("\(event.relativeTime(from: now)) · blocked \(event.formattedDuration)")
                     .font(.system(size: 10.5, design: .monospaced))
-                    .foregroundStyle(theme.fgMute)
+                    .foregroundStyle(theme.fgFaint)
             }
             Spacer(minLength: 0)
         }

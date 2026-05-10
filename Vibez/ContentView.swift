@@ -120,7 +120,8 @@ struct ContentView: View {
     }
 
     private func recordTrigger(from message: NtfyMessage) {
-        let label = message.body.isEmpty ? message.title : message.body
+        let conversationName = TriggerEvent.cleanedTitle(from: message.title)
+        let description = message.body
         let source = TriggerEvent.detectSource(
             title: message.title,
             body: message.body,
@@ -130,7 +131,8 @@ struct ContentView: View {
             TriggerEvent(
                 receivedAt: message.receivedAt,
                 source: source,
-                label: label,
+                title: conversationName,
+                label: description,
                 blockSeconds: blockSeconds
             )
         )

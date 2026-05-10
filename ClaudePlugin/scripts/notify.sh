@@ -84,10 +84,12 @@ jq_get() {
     fi
 }
 
-# Read Claude Code's auto-generated conversation title from the
-# transcript ("ai-title" records, latest wins). Returns the project
-# basename as a fallback if the title hasn't been generated yet
-# (titles only appear after a few turns).
+# Best identifier we can give the user for "which conversation this is".
+# Tries, in order:
+#   1. ai-title (Claude Code's auto-generated short label)
+#   2. lastPrompt (most recent user prompt, truncated)
+#   3. the fallback argument (usually the project basename)
+# Caps at 80 chars with a trailing ellipsis if longer.
 read_conversation_title() {
     local transcript="$1"
     local fallback="${2:-Claude Code}"
@@ -103,14 +105,28 @@ read_conversation_title() {
         | grep -v '^[[:space:]]*$' \
         | tail -n 1)
 
+    # New conversations don't have an ai-title yet — Claude Code only
+    # generates one after a few turns. Fall back to the most recent
+    # user prompt, which is always present once Claude has responded.
+    if [ -z "${title}" ]; then
+        title=$(jq -r '
+            select(.type == "last-prompt")
+            | .lastPrompt // empty
+        ' "${transcript}" 2>/dev/null \
+            | grep -v '^[[:space:]]*$' \
+            | tail -n 1 \
+            | tr '\n' ' ')
+    fi
+
     if [ -z "${title}" ]; then
         printf '%s' "${fallback}"
         return
     fi
 
-    # Cap at 80 chars so iOS notification banners don't wrap awkwardly.
-    if [ "${#title}" -gt 80 ]; then
-        printf '%s…' "${title:0:79}"
+    # Cap at 60 chars (slightly tighter than before to leave room for
+    # the " — done"/" — needs you" suffix in the iOS notification title).
+    if [ "${#title}" -gt 60 ]; then
+        printf '%s…' "${title:0:59}"
     else
         printf '%s' "${title}"
     fi
