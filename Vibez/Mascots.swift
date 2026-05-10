@@ -9,6 +9,54 @@
 
 import SwiftUI
 
+// MARK: - Zzz (sleeping z's that float up and fade)
+//
+// Three monospaced z characters, each on a 2.6 s cycle, staggered by
+// 0.35 s so they trail. During the cycle the z fades in (0–30 %),
+// fades out (30–100 %), drifts up 14 pt, and scales from 0.6 to 1.1.
+
+struct Zzz: View {
+    let color: Color
+    /// Anchor in mascot-viewBox coordinates (matches the SVG x/y).
+    let originX: CGFloat
+    let originY: CGFloat
+    /// One viewBox unit in points (size / viewBoxWidth).
+    let unit: CGFloat
+
+    private let period: Double = 2.6
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            ZStack(alignment: .topLeading) {
+                puff(at: t, delay: 0.0,  fontUnit: 10, dx: 0,  dy: 0)
+                puff(at: t, delay: 0.35, fontUnit: 8,  dx: 8,  dy: -8)
+                puff(at: t, delay: 0.70, fontUnit: 6,  dx: 14, dy: -14)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func puff(at t: TimeInterval, delay: Double, fontUnit: CGFloat, dx: CGFloat, dy: CGFloat) -> some View {
+        let raw = ((t - delay) / period).truncatingRemainder(dividingBy: 1.0)
+        let p = raw < 0 ? raw + 1 : raw
+        // Opacity rises 0→1 over the first 30 %, falls 1→0 over the rest.
+        let opacity = p < 0.3 ? p / 0.3 : max(0, 1 - (p - 0.3) / 0.7)
+        let driftY = -14.0 * p
+        let scale = 0.6 + 0.5 * p
+
+        Text("z")
+            .font(.system(size: fontUnit * unit, weight: .heavy, design: .monospaced))
+            .foregroundStyle(color)
+            .opacity(opacity)
+            .scaleEffect(scale, anchor: .bottomLeading)
+            .offset(
+                x: (originX + dx) * unit,
+                y: (originY + dy) * unit + CGFloat(driftY) * unit
+            )
+    }
+}
+
 // MARK: - Public API
 
 struct MascotForAgent: View {
@@ -103,6 +151,7 @@ struct ClaudeMascot: View {
 
     var body: some View {
         let h = size * 0.9 // viewBox 100×90
+        let unit = size / 100
         ZStack(alignment: .topLeading) {
             ClaudeBodyShape()
                 .fill(bodyColor)
@@ -115,6 +164,12 @@ struct ClaudeMascot: View {
             // Eyes
             ClaudeEyes(expression: listening ? expression : .blink, color: dark)
                 .frame(width: size, height: h)
+            // Sleeping z's
+            if !listening {
+                Zzz(color: bodyShade, originX: 84, originY: 20, unit: unit)
+                    .frame(width: size, height: h, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(width: size, height: h, alignment: .topLeading)
         .modifier(ExpressionCycler(listening: listening, expression: $expression))
@@ -309,6 +364,13 @@ struct CodexMascot: View {
                 .fill(.black.opacity(0.15))
                 .frame(width: w * 48 / 110, height: h * 5 / 130)
                 .offset(x: w * 31 / 110, y: h * 122 / 130)
+
+            // Sleeping z's (matches react mascot at x=92, y=14 in 110×130 viewBox)
+            if !listening {
+                Zzz(color: blueDeep, originX: 92, originY: 14, unit: w / 110)
+                    .frame(width: w, height: h, alignment: .topLeading)
+                    .allowsHitTesting(false)
+            }
         }
         .frame(width: w, height: h, alignment: .topLeading)
         .modifier(ExpressionCycler(listening: listening, expression: $expression))

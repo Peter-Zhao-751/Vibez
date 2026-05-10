@@ -9,6 +9,75 @@
 import SwiftUI
 import UIKit
 
+// MARK: - BlockerKnob (waveform inside the pill toggle)
+//
+// ON  → silent: a single flat baseline.
+// OFF → noisy: three vertical bars rising and falling at different
+//       periods, like an audio meter being "chaotic" because nothing's
+//       blocking the doom-scroll yet.
+
+struct BlockerKnob: View {
+    let listening: Bool
+    let size: CGFloat
+    let stroke: Color
+
+    var body: some View {
+        if listening {
+            silentBaseline
+        } else {
+            chaoticBars
+        }
+    }
+
+    private var silentBaseline: some View {
+        Canvas { ctx, sz in
+            var path = Path()
+            path.move(to: CGPoint(x: sz.width * 0.22, y: sz.height * 0.5))
+            path.addLine(to: CGPoint(x: sz.width * 0.78, y: sz.height * 0.5))
+            ctx.stroke(
+                path,
+                with: .color(stroke),
+                style: StrokeStyle(lineWidth: sz.width * 0.04, lineCap: .round)
+            )
+        }
+        .frame(width: size, height: size)
+    }
+
+    private var chaoticBars: some View {
+        TimelineView(.animation) { context in
+            Canvas { ctx, sz in
+                let t = context.date.timeIntervalSinceReferenceDate
+                let lineWidth = sz.width * 0.05
+                // Three bars, each at a different x and oscillating with
+                // a different period so they look uncorrelated.
+                let bars: [(cx: CGFloat, period: Double, phase: Double, amp: CGFloat)] = [
+                    (cx: 0.30, period: 1.4, phase: 0.0, amp: 0.20),
+                    (cx: 0.50, period: 1.6, phase: 0.7, amp: 0.28),
+                    (cx: 0.70, period: 1.2, phase: 1.4, amp: 0.18),
+                ]
+                for bar in bars {
+                    let p = (t / bar.period + bar.phase) * 2 * .pi
+                    // |sin| keeps the amplitude in [0, 1]; scaling by
+                    // 0.5 + 0.5*|sin| makes the minimum a non-zero
+                    // resting amplitude so the bar never collapses.
+                    let amp = bar.amp * sz.height * (0.5 + 0.5 * abs(sin(p)))
+                    let x = bar.cx * sz.width
+                    let mid = sz.height * 0.5
+                    var path = Path()
+                    path.move(to: CGPoint(x: x, y: mid - amp))
+                    path.addLine(to: CGPoint(x: x, y: mid + amp))
+                    ctx.stroke(
+                        path,
+                        with: .color(stroke),
+                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                    )
+                }
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
 // MARK: - Big WARP-style toggle
 
 struct BigToggle: View {
@@ -62,7 +131,7 @@ struct BigToggle: View {
                 }
                 .frame(width: pillW, height: pillH)
 
-                // Knob (sliding circle with mascot inside)
+                // Knob (sliding circle with waveform inside)
                 Circle()
                     .fill(theme.knobBg)
                     .frame(width: knobSize, height: knobSize)
@@ -71,11 +140,10 @@ struct BigToggle: View {
                         Circle().stroke(.black.opacity(0.04), lineWidth: 1)
                     )
                     .overlay(
-                        MascotForAgent(
-                            agent: agent,
+                        BlockerKnob(
                             listening: enabled,
-                            size: agent == .both ? 64 : 86,
-                            gap: 2
+                            size: 92,
+                            stroke: theme.fg
                         )
                     )
                     .padding(.leading, knobX)
