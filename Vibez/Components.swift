@@ -88,34 +88,56 @@ struct BigToggle: View {
 // MARK: - Top bar
 
 struct TopBar: View {
-    @Binding var dark: Bool
+    let isDark: Bool
     let theme: Theme
+    let onToggleAppearance: () -> Void
+    let onOpenSettings: () -> Void
 
     var body: some View {
         HStack {
+            ChipIconButton(
+                systemName: isDark ? "sun.max" : "moon",
+                theme: theme,
+                accessibilityLabel: isDark ? "Switch to light mode" : "Switch to dark mode",
+                action: onToggleAppearance
+            )
             Spacer()
-            Button {
-                withAnimation(.easeInOut(duration: 0.4)) { dark.toggle() }
-            } label: {
-                Image(systemName: dark ? "sun.max" : "moon")
-                    .font(.system(size: 14, weight: .bold))
-                    .foregroundStyle(theme.fg)
-                    .frame(width: 34, height: 34)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(theme.bgChip)
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(theme.hairline, lineWidth: 1)
-                    )
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(dark ? "Switch to light mode" : "Switch to dark mode")
+            ChipIconButton(
+                systemName: "gearshape",
+                theme: theme,
+                accessibilityLabel: "Open settings",
+                action: onOpenSettings
+            )
         }
         .padding(.horizontal, 22)
         .padding(.top, 4)
         .padding(.bottom, 6)
+    }
+}
+
+struct ChipIconButton: View {
+    let systemName: String
+    let theme: Theme
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemName)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(theme.fg)
+                .frame(width: 34, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(theme.bgChip)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.hairline, lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 

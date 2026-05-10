@@ -7,18 +7,36 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var manager = ScreenTimeManager()
-    @AppStorage("vibez.dark") private var dark = false
+    @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
+
+    @Environment(\.colorScheme) private var systemColorScheme
+
     @State private var showBlockedOverlay = false
-    @State private var sessionSeconds: Int = 0
-    @State private var sessionTimerTask: Task<Void, Never>?
+    @State private var showSettings = false
 
     private var agent: Agent {
         Agent(rawValue: agentRaw) ?? .claude
     }
 
+    private var appearance: AppearancePref {
+        AppearancePref(rawValue: appearanceRaw) ?? .system
+    }
+
+    private var effectiveDark: Bool {
+        appearance.effectiveDark(systemIsDark: systemColorScheme == .dark)
+    }
+
     private var theme: Theme {
-        Theme.make(agent: agent, dark: dark)
+        Theme.make(agent: agent, dark: effectiveDark)
+    }
+
+    private var preferredScheme: ColorScheme? {
+        switch appearance {
+        case .system: nil
+        case .light: .light
+        case .dark: .dark
+        }
     }
 
     var body: some View {
@@ -32,21 +50,22 @@ struct ContentView: View {
                 BlockedOverlay(
                     agent: agent,
                     theme: theme,
-                    dark: dark,
+                    dark: effectiveDark,
                     onDismiss: { withAnimation { showBlockedOverlay = false } }
                 )
                 .zIndex(5)
             }
         }
-        .preferredColorScheme(dark ? .dark : .light)
-        .animation(.easeInOut(duration: 0.4), value: dark)
+        .preferredColorScheme(preferredScheme)
+        .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .animation(.easeInOut(duration: 0.4), value: agent)
-        .onAppear { syncTimer(enabled: manager.isBlocking) }
-        .onChange(of: manager.isBlocking) { _, newValue in syncTimer(enabled: newValue) }
         .task {
             if manager.authState == .notDetermined {
                 await manager.requestAuthorization()
             }
+        }
+        .sheet(isPresented: $showSettings) {
+            SettingsView(manager: manager)
         }
     }
 
@@ -54,8 +73,10 @@ struct ContentView: View {
     private var mainScreen: some View {
         VStack(spacing: 0) {
             TopBar(
-                dark: Binding(get: { dark }, set: { dark = $0 }),
-                theme: theme
+                isDark: effectiveDark,
+                theme: theme,
+                onToggleAppearance: toggleAppearance,
+                onOpenSettings: { showSettings = true }
             )
 
             hero
@@ -96,7 +117,6 @@ struct ContentView: View {
                 .lineSpacing(2)
                 .padding(.bottom, 14)
 
-            // Big mascot above the toggle
             MascotForAgent(
                 agent: agent,
                 listening: manager.isBlocking,
@@ -114,43 +134,17 @@ struct ContentView: View {
                 agent: agent,
                 theme: theme
             )
-
-            HStack(spacing: 0) {
-                Text("session · ")
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(manager.isBlocking ? theme.fg : theme.fgFaint)
-                Text(formattedSession)
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .foregroundStyle(theme.accent)
-            }
-            .padding(.top, 10)
         }
     }
 
-    private var formattedSession: String {
-        let s = sessionSeconds
-        let h = s / 3600
-        let m = (s % 3600) / 60
-        let sec = s % 60
-        return String(format: "%d:%02d:%02d", h, m, sec)
-    }
-
-    private func syncTimer(enabled: Bool) {
-        sessionTimerTask?.cancel()
-        if !enabled {
-            sessionSeconds = 0
-            return
-        }
-        sessionTimerTask = Task {
-            while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 1_000_000_000)
-                if Task.isCancelled { break }
-                sessionSeconds += 1
-            }
-        }
+    private func toggleAppearance() {
+        // Tapping the chip "commits" the user to an explicit choice — they
+        // never accidentally fall back to .system. Settings page lets them
+        // return to .system if they want.
+        appearanceRaw = (effectiveDark ? AppearancePref.light : AppearancePref.dark).rawValue
     }
 }
 
-#Preview("Light · Claude") {
+#Preview("bruh") {
     ContentView()
 }

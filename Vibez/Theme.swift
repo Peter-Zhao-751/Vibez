@@ -24,6 +24,28 @@ enum Agent: String, CaseIterable, Identifiable {
     }
 }
 
+enum AppearancePref: String, CaseIterable, Identifiable {
+    case system, light, dark
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .system: "System"
+        case .light: "Light"
+        case .dark: "Dark"
+        }
+    }
+
+    func effectiveDark(systemIsDark: Bool) -> Bool {
+        switch self {
+        case .system: systemIsDark
+        case .light: false
+        case .dark: true
+        }
+    }
+}
+
 struct Theme {
     let bg: Color
     let bgPanel: Color
