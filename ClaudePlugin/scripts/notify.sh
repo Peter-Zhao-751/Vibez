@@ -84,6 +84,38 @@ jq_get() {
     fi
 }
 
+# Read Claude Code's auto-generated conversation title from the
+# transcript ("ai-title" records, latest wins). Returns the project
+# basename as a fallback if the title hasn't been generated yet
+# (titles only appear after a few turns).
+read_conversation_title() {
+    local transcript="$1"
+    local fallback="${2:-Claude Code}"
+    [ -z "${transcript}" ] && { printf '%s' "${fallback}"; return; }
+    [ ! -f "${transcript}" ] && { printf '%s' "${fallback}"; return; }
+    command -v jq >/dev/null 2>&1 || { printf '%s' "${fallback}"; return; }
+
+    local title
+    title=$(jq -r '
+        select(.type == "ai-title")
+        | .aiTitle // empty
+    ' "${transcript}" 2>/dev/null \
+        | grep -v '^[[:space:]]*$' \
+        | tail -n 1)
+
+    if [ -z "${title}" ]; then
+        printf '%s' "${fallback}"
+        return
+    fi
+
+    # Cap at 80 chars so iOS notification banners don't wrap awkwardly.
+    if [ "${#title}" -gt 80 ]; then
+        printf '%s…' "${title:0:79}"
+    else
+        printf '%s' "${title}"
+    fi
+}
+
 # Read the current "last assistant text" from the transcript file.
 # Truncates to 160 chars and appends a single-char ellipsis when cut,
 # so consumers can tell the body was clipped instead of just stopping
@@ -179,22 +211,27 @@ case "${EVENT}" in
 
     notification)
         message="$(jq_get '.message')"
-        title="$(jq_get '.title' 'Claude Code')"
+        transcript="$(jq_get '.transcript_path')"
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
         if [ -z "${message}" ]; then
             ntype="$(jq_get '.notification_type' 'unknown')"
             message="Claude needs your attention (${ntype})"
         fi
-        post_ntfy "${title} — needs you" "${message}" "high" "bell"
+        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell"
         ;;
 
     stop)
         cwd="$(jq_get '.cwd')"
         proj="$(basename "${cwd:-unknown}")"
+        transcript="$(jq_get '.transcript_path')"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
         excerpt="$(last_assistant_excerpt)"
         if [ -z "${excerpt}" ]; then
-            excerpt="Claude finished a turn in ${proj}."
+            excerpt="Claude finished a turn."
         fi
-        post_ntfy "Claude finished — ${proj}" "${excerpt}" "default" "white_check_mark"
+        post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark"
         ;;
 
     *)
