@@ -1,0 +1,13 @@
+{
+  "name": "vibez",
+  "owner": {
+    "name": "Peter Zhao"
+  },
+  "plugins": [
+    {
+      "name": "vibez-ntfy",
+      "source": "./ClaudePlugin",
+      "description": "Push Claude Code notifications and stop events to your phone via ntfy.sh."
+    }
+  ]
+}

@@ -18,11 +18,11 @@ A Claude Code plugin that pushes session events to your phone via [ntfy.sh](http
 3. Add this plugin in Claude Code:
 
    ```
-   /plugin marketplace add /Users/peter/Desktop/Vibez
-   /plugin install vibez-ntfy
+   /plugin marketplace add Peter-Zhao-751/Vibez
+   /plugin install vibez-ntfy@vibez
    ```
 
-   Or, simpler for local-only dev: point Claude Code's settings at this directory directly. See [Claude Code plugins docs](https://code.claude.com/docs/en/plugins).
+   For local development against a checkout, swap the first command for `/plugin marketplace add /path/to/Vibez`. See [Claude Code plugins docs](https://code.claude.com/docs/en/plugins).
 
 4. **Open Claude Code as normal.** The first session after install auto-generates your private topic and shows you a banner with the subscribe URL.
 
