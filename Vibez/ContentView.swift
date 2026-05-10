@@ -34,14 +34,6 @@ struct ContentView: View {
         Theme.make(agent: agent, dark: effectiveDark)
     }
 
-    private var preferredScheme: ColorScheme? {
-        switch appearance {
-        case .system: nil
-        case .light: .light
-        case .dark: .dark
-        }
-    }
-
     var body: some View {
         ZStack {
             theme.bg
@@ -60,9 +52,12 @@ struct ContentView: View {
                 .zIndex(5)
             }
         }
-        .preferredColorScheme(preferredScheme)
         .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .animation(.easeInOut(duration: 0.4), value: agent)
+        .onAppear { appearance.applyToWindows() }
+        .onChange(of: appearance) { _, newPref in
+            newPref.applyToWindows()
+        }
         .task {
             // Subscribe immediately — don't block on permission prompts,
             // otherwise the WebSocket sits idle while the user is staring

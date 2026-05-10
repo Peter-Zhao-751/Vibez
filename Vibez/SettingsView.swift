@@ -43,15 +43,6 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
 
-    private var preferredScheme: ColorScheme? {
-        let pref = AppearancePref(rawValue: appearanceRaw) ?? .system
-        switch pref {
-        case .system: return nil
-        case .light: return .light
-        case .dark: return .dark
-        }
-    }
-
     private func dismissSheet() {
         ntfyFieldFocused = false
         isPresented = false
@@ -84,8 +75,10 @@ struct SettingsView: View {
                     manager.updateSelection(draftSelection)
                 }
             }
+            .onChange(of: appearanceRaw) { _, newRaw in
+                (AppearancePref(rawValue: newRaw) ?? .system).applyToWindows()
+            }
         }
-        .preferredColorScheme(preferredScheme)
     }
 
     // MARK: Sections

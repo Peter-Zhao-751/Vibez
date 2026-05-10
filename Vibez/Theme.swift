@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 enum Agent: String, CaseIterable, Identifiable {
     case claude
@@ -43,6 +44,24 @@ enum AppearancePref: String, CaseIterable, Identifiable {
         case .light: false
         case .dark: true
         }
+    }
+
+    /// Override the window's userInterfaceStyle directly via UIKit.
+    /// SwiftUI's `.preferredColorScheme(nil)` doesn't reliably revert
+    /// a prior override — the window stays at the last explicit value.
+    /// Setting `overrideUserInterfaceStyle = .unspecified` is the only
+    /// way to *unstick* it back to the OS preference.
+    @MainActor
+    func applyToWindows() {
+        let style: UIUserInterfaceStyle = switch self {
+        case .system: .unspecified
+        case .light:  .light
+        case .dark:   .dark
+        }
+        UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap(\.windows)
+            .forEach { $0.overrideUserInterfaceStyle = style }
     }
 }
 
