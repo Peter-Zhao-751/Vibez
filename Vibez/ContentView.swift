@@ -65,7 +65,7 @@ struct ContentView: View {
             }
         }
         .sheet(isPresented: $showSettings) {
-            SettingsView(manager: manager)
+            SettingsView(isPresented: $showSettings, manager: manager)
         }
     }
 

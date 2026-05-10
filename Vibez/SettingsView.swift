@@ -10,16 +10,35 @@
 import SwiftUI
 import FamilyControls
 
+// Discrete duration stops for the slider — non-linear by design so a
+// single slider covers seconds, minutes, and hours without burning
+// resolution on values nobody picks.
+private let durationStops: [Int] = [
+    5, 15, 30,                    // seconds
+    60, 120, 180, 240, 300,       // 1–5 minutes
+    600, 900, 1800, 2700,         // 10, 15, 30, 45 minutes
+    3600, 7200, 14400, 28800,     // 1h, 2h, 4h, 8h
+]
+
+private func formatDuration(_ seconds: Int) -> String {
+    if seconds < 60 { return "\(seconds)s" }
+    if seconds < 3600 { return "\(seconds / 60)m" }
+    let h = seconds / 3600
+    let rem = (seconds % 3600) / 60
+    return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
+}
+
 struct SettingsView: View {
+    @Binding var isPresented: Bool
     @Bindable var manager: ScreenTimeManager
+
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
-    @AppStorage("vibez.blockDuration") private var blockDurationMinutes = 30
+    @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
-
-    @Environment(\.dismiss) private var dismiss
+    @FocusState private var ntfyFieldFocused: Bool
 
     var body: some View {
         NavigationStack {
@@ -29,12 +48,20 @@ struct SettingsView: View {
                 durationSection
                 notificationsSection
             }
+            .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .fontWeight(.semibold)
+                    Button("Done") {
+                        ntfyFieldFocused = false
+                        isPresented = false
+                    }
+                    .fontWeight(.semibold)
+                }
+                ToolbarItemGroup(placement: .keyboard) {
+                    Spacer()
+                    Button("Done") { ntfyFieldFocused = false }
                 }
             }
             .familyActivityPicker(
@@ -103,23 +130,54 @@ struct SettingsView: View {
             HStack {
                 Text("Duration")
                 Spacer()
-                Text("\(blockDurationMinutes) min")
+                Text(formatDuration(blockSeconds))
                     .monospaced()
+                    .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
             }
-            Stepper(
-                value: $blockDurationMinutes,
-                in: 1...720,
-                step: 5
+            Slider(
+                value: durationIndexBinding,
+                in: 0...Double(durationStops.count - 1),
+                step: 1
             ) {
-                Text("Adjust")
+                Text("Duration")
+            } minimumValueLabel: {
+                Text("5s")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
+            } maximumValueLabel: {
+                Text("8h")
+                    .font(.caption2.monospaced())
+                    .foregroundStyle(.tertiary)
             }
-            .labelsHidden()
         } header: {
             Text("Block duration")
         } footer: {
-            Text("How long apps stay shielded after Claude or Codex pings you. Auto-unlocks after this.")
+            Text("How long apps stay shielded after Claude or Codex pings you. Stops are 5s, 15s, 30s, 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 4h, 8h.")
         }
+    }
+
+    private var durationIndexBinding: Binding<Double> {
+        Binding(
+            get: {
+                let idx = durationStops.firstIndex(of: blockSeconds)
+                    ?? closestStopIndex(to: blockSeconds)
+                return Double(idx)
+            },
+            set: { newValue in
+                blockSeconds = durationStops[Int(newValue.rounded())]
+            }
+        )
+    }
+
+    private func closestStopIndex(to seconds: Int) -> Int {
+        var best = 0
+        var bestDelta = Int.max
+        for (i, s) in durationStops.enumerated() {
+            let d = abs(s - seconds)
+            if d < bestDelta { bestDelta = d; best = i }
+        }
+        return best
     }
 
     @ViewBuilder
@@ -129,6 +187,9 @@ struct SettingsView: View {
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
+                .focused($ntfyFieldFocused)
+                .submitLabel(.done)
+                .onSubmit { ntfyFieldFocused = false }
             if !ntfyURL.isEmpty {
                 Button("Clear", role: .destructive) {
                     ntfyURL = ""
@@ -143,5 +204,5 @@ struct SettingsView: View {
 }
 
 #Preview {
-    SettingsView(manager: ScreenTimeManager())
+    SettingsView(isPresented: .constant(true), manager: ScreenTimeManager())
 }
