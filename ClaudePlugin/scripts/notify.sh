@@ -152,11 +152,11 @@ case "${EVENT}" in
                 log "generated topic ${TOPIC}"
 
                 url="${SERVER}/${TOPIC}"
-                msg="vibez-ntfy plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  or run /ntfy-setup for a QR code. Until you subscribe, push notifications won't reach your phone."
+                msg="vibez-ntfy plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  or run /vibez-setup for a QR code. Until you subscribe, push notifications won't reach your phone."
 
                 # systemMessage = visible warning banner shown to the user.
                 # additionalContext = injected so Claude can answer follow-ups.
-                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez-ntfy plugin first-run setup complete. Subscribe URL: %s. Run /ntfy-setup for a QR code."}}\n' \
+                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez-ntfy plugin first-run setup complete. Subscribe URL: %s. Run /vibez-setup for a QR code."}}\n' \
                     "${msg}" "${url}"
             else
                 log "topic generation failed"

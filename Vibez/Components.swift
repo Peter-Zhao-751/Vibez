@@ -7,6 +7,7 @@
 //
 
 import SwiftUI
+import UIKit
 
 // MARK: - Big WARP-style toggle
 
@@ -23,6 +24,11 @@ struct BigToggle: View {
         Button {
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                 enabled.toggle()
+            }
+            if (!enabled){
+                UINotificationFeedbackGenerator().notificationOccurred(.success)
+            }else{
+                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             }
         } label: {
             ZStack(alignment: .leading) {

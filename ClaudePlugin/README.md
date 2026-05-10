@@ -26,9 +26,9 @@ A Claude Code plugin that pushes session events to your phone via [ntfy.sh](http
 
 4. **Open Claude Code as normal.** The first session after install auto-generates your private topic and shows you a banner with the subscribe URL.
 
-5. Run `/ntfy-setup` to display the URL again with an inline QR code. Open ntfy on your phone, tap **+**, paste the URL (or scan the QR), done.
+5. Run `/vibez-setup` to display the URL again with an inline QR code. Open ntfy on your phone, tap **+**, paste the URL (or scan the QR), done.
 
-6. Verify: `/ntfy-setup test` — you should get a push within a few seconds.
+6. Verify: `/vibez-setup test` — you should get a push within a few seconds.
 
 ## Configuration
 
@@ -42,9 +42,9 @@ The auto-generated topic lives at `~/.config/claude-ntfy/topic`. The plugin also
 
 ## Slash commands
 
-- `/ntfy-setup` — show subscribe URL + QR.
-- `/ntfy-setup test` — send a test push.
-- `/ntfy-setup regenerate` — discard the current topic and create a new one. You'll need to resubscribe on your phone.
+- `/vibez-setup` — show subscribe URL + QR.
+- `/vibez-setup test` — send a test push.
+- `/vibez-setup regenerate` — discard the current topic and create a new one. You'll need to resubscribe on your phone.
 
 ## Privacy and security
 
@@ -63,7 +63,7 @@ ClaudePlugin/
   .claude-plugin/plugin.json       manifest
   hooks/hooks.json                 SessionStart / Notification / Stop wiring
   scripts/notify.sh                hook dispatcher
-  scripts/ntfy-setup.sh            /ntfy-setup implementation
-  commands/ntfy-setup.md           slash command definition
+  scripts/vibez-setup.sh           /vibez-setup implementation
+  commands/vibez-setup.md          slash command definition
   README.md
 ```

@@ -73,21 +73,21 @@ struct BlockedOverlay: View {
                     .padding(.horizontal, 40)
                     .padding(.bottom, 24)
 
-                Button {
-                    onDismiss()
-                } label: {
-                    Text("Open \(agent.label) →")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(theme.onAccent)
-                        .padding(.horizontal, 28)
-                        .padding(.vertical, 14)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(theme.accent)
-                        )
-                        .shadow(color: theme.accentDeep.opacity(0.55), radius: 14, x: 0, y: 8)
-                }
-                .buttonStyle(.plain)
+//                Button {
+//                    onDismiss()
+//                } label: {
+//                    Text("Open \(agent.label) →")
+//                        .font(.system(size: 15, weight: .semibold))
+//                        .foregroundStyle(theme.onAccent)
+//                        .padding(.horizontal, 28)
+//                        .padding(.vertical, 14)
+//                        .background(
+//                            RoundedRectangle(cornerRadius: 14)
+//                                .fill(theme.accent)
+//                        )
+//                        .shadow(color: theme.accentDeep.opacity(0.55), radius: 14, x: 0, y: 8)
+//                }
+//                .buttonStyle(.plain)
 
                 Button(action: onDismiss) {
                     Text("Dismiss")

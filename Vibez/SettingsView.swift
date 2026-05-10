@@ -17,7 +17,7 @@ private let durationStops: [Int] = [
     5, 15, 30,                    // seconds
     60, 120, 180, 240, 300,       // 1–5 minutes
     600, 900, 1800, 2700,         // 10, 15, 30, 45 minutes
-    3600, 7200, 14400, 28800,     // 1h, 2h, 4h, 8h
+    3600,     // 1h
 ]
 
 private func formatDuration(_ seconds: Int) -> String {
@@ -151,14 +151,14 @@ struct SettingsView: View {
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             } maximumValueLabel: {
-                Text("8h")
+                Text("1h")
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             }
         } header: {
             Text("Block duration")
         } footer: {
-            Text("How long apps stay shielded after Claude or Codex pings you. Stops are 5s, 15s, 30s, 1m, 2m, 3m, 4m, 5m, 10m, 15m, 30m, 45m, 1h, 2h, 4h, 8h.")
+            Text("How long apps stay shielded after Claude or Codex pings you.")
         }
     }
 
@@ -188,7 +188,7 @@ struct SettingsView: View {
     @ViewBuilder
     private var notificationsSection: some View {
         Section {
-            TextField("https://ntfy.sh/your-topic", text: $ntfyURL)
+            TextField("https://ntfy.sh/ur-generated-url", text: $ntfyURL)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .keyboardType(.URL)
@@ -203,12 +203,6 @@ struct SettingsView: View {
                     .foregroundStyle(connectionColor)
                     .monospaced()
                     .font(.caption)
-            }
-
-            Button {
-                notifyClient.injectFakeMessage()
-            } label: {
-                Label("Send test notification", systemImage: "bell.badge")
             }
 
             if !ntfyURL.isEmpty {

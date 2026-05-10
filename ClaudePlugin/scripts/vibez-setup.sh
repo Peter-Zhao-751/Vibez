@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Show the user's ntfy.sh subscribe URL and a QR code.
-# Invoked from the /ntfy-setup slash command.
+# Invoked from the /vibez-setup slash command.
 #
 # Args:
 #   regenerate    discard the existing topic and create a new one
@@ -47,7 +47,7 @@ case "${ACTION}" in
         ;;
     test)
         if [ -z "${TOPIC}" ]; then
-            printf 'No topic configured yet. Run /ntfy-setup first.\n'
+            printf 'No topic configured yet. Run /vibez-setup first.\n'
             exit 0
         fi
         auth_args=()
@@ -76,7 +76,7 @@ case "${ACTION}" in
         ;;
     *)
         printf 'Unknown action: %s\n' "${ACTION}"
-        printf 'Usage: ntfy-setup.sh [show|regenerate|test]\n'
+        printf 'Usage: vibez-setup.sh [show|regenerate|test]\n'
         exit 1
         ;;
 esac
@@ -96,6 +96,6 @@ fi
 
 printf '\nNTFY_TOPIC override:  export NTFY_TOPIC=%s\n' "${TOPIC}"
 printf 'Topic file:           %s\n' "${TOPIC_FILE}"
-printf '\nTry it:  bash %s test\n' "$(cd "$(dirname "$0")" && pwd)/ntfy-setup.sh"
+printf '\nTry it:  bash %s test\n' "$(cd "$(dirname "$0")" && pwd)/vibez-setup.sh"
 
 exit 0
