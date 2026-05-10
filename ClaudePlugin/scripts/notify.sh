@@ -84,14 +84,9 @@ jq_get() {
     fi
 }
 
-last_assistant_excerpt() {
-    local transcript
-    transcript="$(jq_get '.transcript_path')"
-    [ -z "${transcript}" ] && return 0
-    [ ! -f "${transcript}" ] && return 0
-    command -v jq >/dev/null 2>&1 || return 0
-
-    # Pull the last non-empty text block from any assistant turn.
+# Read the current "last assistant text" from the transcript file.
+read_last_text() {
+    local transcript="$1"
     jq -r '
         select(.type == "assistant")
         | .message.content[]?
@@ -102,6 +97,48 @@ last_assistant_excerpt() {
         | tail -n 1 \
         | tr '\n' ' ' \
         | cut -c 1-160
+}
+
+last_assistant_excerpt() {
+    local transcript
+    transcript="$(jq_get '.transcript_path')"
+    [ -z "${transcript}" ] && return 0
+    [ ! -f "${transcript}" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    # Per-transcript cache: stores the last excerpt we've already sent
+    # for this session. Stop fires before Claude flushes the
+    # just-finished assistant.text — a naive read returns the prior
+    # turn's text. Polling + dedupe against this cache fixes the
+    # off-by-one.
+    local hash cache_file previous=""
+    hash="$(printf '%s' "${transcript}" | shasum 2>/dev/null | cut -c 1-12)"
+    cache_file="${CONFIG_DIR}/last_excerpt.${hash}"
+    [ -f "${cache_file}" ] && previous="$(cat "${cache_file}" 2>/dev/null)"
+
+    # Brief initial pause so an in-flight write has a chance to land.
+    sleep 0.4
+
+    local excerpt="" attempt
+    for attempt in 1 2 3 4 5 6; do
+        excerpt="$(read_last_text "${transcript}")"
+        if [ -n "${excerpt}" ] && [ "${excerpt}" != "${previous}" ]; then
+            break
+        fi
+        sleep 0.35
+    done
+
+    # If after ~2.5s of polling the excerpt is still empty or identical
+    # to what we sent last turn, the just-finished response hasn't been
+    # flushed yet. Return empty so the caller falls back to a generic
+    # message — better than misleading the user with stale text.
+    if [ -z "${excerpt}" ] || [ "${excerpt}" = "${previous}" ]; then
+        log "stop: no fresh excerpt after polling (transcript=${transcript})"
+        return 0
+    fi
+
+    printf '%s' "${excerpt}" >"${cache_file}"
+    printf '%s' "${excerpt}"
 }
 
 case "${EVENT}" in
