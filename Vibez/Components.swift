@@ -356,24 +356,60 @@ struct BlockingPanel: View {
 
 // MARK: - Recent triggers
 
-struct TriggerEvent: Identifiable {
-    enum Source { case claude, codex }
-    let id = UUID()
-    let time: String
-    let source: Source
-    let label: String
-    let duration: String
+struct TriggerEvent: Identifiable, Codable, Equatable {
+    enum Source: String, Codable { case claude, codex }
 
-    static let demoSet: [TriggerEvent] = [
-        .init(time: "2m ago",  source: .claude, label: "Claude Code asked for bash permission", duration: "4m 12s"),
-        .init(time: "18m ago", source: .codex,  label: "Codex finished running tests",          duration: "1m 30s"),
-        .init(time: "47m ago", source: .claude, label: "Claude paused — manual intervention",   duration: "6m 04s"),
-    ]
+    var id: UUID
+    var receivedAt: Date
+    var source: Source
+    var label: String
+    var blockSeconds: Int
+
+    init(
+        id: UUID = UUID(),
+        receivedAt: Date = Date(),
+        source: Source,
+        label: String,
+        blockSeconds: Int
+    ) {
+        self.id = id
+        self.receivedAt = receivedAt
+        self.source = source
+        self.label = label
+        self.blockSeconds = blockSeconds
+    }
+
+    func relativeTime(from now: Date) -> String {
+        let delta = max(0, Int(now.timeIntervalSince(receivedAt)))
+        if delta < 60 { return "just now" }
+        if delta < 3600 { return "\(delta / 60)m ago" }
+        if delta < 86_400 { return "\(delta / 3600)h ago" }
+        return "\(delta / 86_400)d ago"
+    }
+
+    var formattedDuration: String {
+        let s = blockSeconds
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s / 60)m" }
+        let h = s / 3600
+        let rem = (s % 3600) / 60
+        return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
+    }
+
+    /// Sniff "Claude" / "Codex" out of the ntfy message; fall back to the
+    /// user's currently selected agent so a generic ping still picks a side.
+    static func detectSource(title: String, body: String, fallback: Agent) -> Source {
+        let blob = (title + " " + body).lowercased()
+        if blob.contains("codex") { return .codex }
+        if blob.contains("claude") { return .claude }
+        return fallback == .codex ? .codex : .claude
+    }
 }
 
 struct TriggerRow: View {
     let event: TriggerEvent
     let theme: Theme
+    let now: Date
 
     var body: some View {
         HStack(spacing: 10) {
@@ -392,7 +428,7 @@ struct TriggerRow: View {
                     .foregroundStyle(theme.fg)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("\(event.time) · blocked \(event.duration)")
+                Text("\(event.relativeTime(from: now)) · blocked \(event.formattedDuration)")
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(theme.fgMute)
             }
@@ -423,16 +459,44 @@ struct RecentTriggersSection: View {
                     .tracking(0.5)
                     .foregroundStyle(theme.fg)
                 Spacer()
-                Text("today")
+                Text(events.isEmpty ? "—" : "last \(events.count)")
                     .font(.system(size: 11, design: .monospaced))
                     .foregroundStyle(theme.fgMute)
             }
-            VStack(spacing: 6) {
-                ForEach(events) { event in
-                    TriggerRow(event: event, theme: theme)
+            if events.isEmpty {
+                emptyState
+            } else {
+                // Refresh the "Nm ago" labels every 30s without a manual timer.
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    VStack(spacing: 6) {
+                        ForEach(events) { event in
+                            TriggerRow(event: event, theme: theme, now: context.date)
+                        }
+                    }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var emptyState: some View {
+        HStack {
+            Text("No triggers yet — pings from Claude or Codex will land here.")
+                .font(.system(size: 12))
+                .foregroundStyle(theme.fgMute)
+                .multilineTextAlignment(.leading)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 14)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.bgPanel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(theme.hairline, lineWidth: 1)
+        )
     }
 }
 

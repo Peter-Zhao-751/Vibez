@@ -8,10 +8,12 @@ import SwiftUI
 struct ContentView: View {
     @State private var manager = ScreenTimeManager()
     @State private var notifyClient = NotifyClient()
+    @State private var triggerStore = TriggerStore()
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
+    @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
 
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -73,6 +75,7 @@ struct ContentView: View {
         }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             guard let newValue else { return }
+            recordTrigger(from: newValue)
             withAnimation(.easeOut(duration: 0.45)) {
                 overlayMessage = newValue
             }
@@ -109,7 +112,7 @@ struct ContentView: View {
             .padding(.bottom, 12)
 
             RecentTriggersSection(
-                events: TriggerEvent.demoSet,
+                events: triggerStore.events,
                 theme: theme
             )
             .padding(.horizontal, 20)
@@ -117,6 +120,23 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    private func recordTrigger(from message: NtfyMessage) {
+        let label = message.body.isEmpty ? message.title : message.body
+        let source = TriggerEvent.detectSource(
+            title: message.title,
+            body: message.body,
+            fallback: agent
+        )
+        triggerStore.record(
+            TriggerEvent(
+                receivedAt: message.receivedAt,
+                source: source,
+                label: label,
+                blockSeconds: blockSeconds
+            )
+        )
     }
 
     @ViewBuilder
