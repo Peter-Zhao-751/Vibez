@@ -2,8 +2,9 @@
 //  BlockedOverlay.swift
 //  Vibez
 //
-//  "Blocking in progress" full-screen overlay shown when an agent has
-//  pinged the user. Animates in, dismisses on tap.
+//  Full-screen overlay shown when an agent has pinged the user.
+//  Animates in, dismisses on tap. When given a `message` it shows the
+//  ntfy text verbatim; otherwise falls back to agent-themed copy.
 //
 
 import SwiftUI
@@ -12,9 +13,21 @@ struct BlockedOverlay: View {
     let agent: Agent
     let theme: Theme
     let dark: Bool
+    var message: NtfyMessage?
     let onDismiss: () -> Void
 
     @State private var appeared = false
+
+    private var titleText: String {
+        message?.title.isEmpty == false
+            ? message!.title
+            : "\(agent.label) needs you."
+    }
+
+    private var bodyText: String {
+        if let msg = message, !msg.body.isEmpty { return msg.body }
+        return "Permission requested · 0:42 ago"
+    }
 
     var body: some View {
         ZStack(alignment: .top) {
@@ -45,7 +58,7 @@ struct BlockedOverlay: View {
                     .foregroundStyle(theme.accent)
                     .padding(.bottom, 10)
 
-                Text("\(agent.label) needs you.")
+                Text(titleText)
                     .font(.system(size: 26, weight: .bold))
                     .tracking(-0.4)
                     .foregroundStyle(theme.fg)
@@ -53,9 +66,10 @@ struct BlockedOverlay: View {
                     .padding(.horizontal, 32)
                     .padding(.bottom, 8)
 
-                Text("Permission requested · 0:42 ago")
+                Text(bodyText)
                     .font(.system(size: 14))
                     .foregroundStyle(theme.fgMute)
+                    .multilineTextAlignment(.center)
                     .padding(.horizontal, 40)
                     .padding(.bottom, 24)
 
@@ -76,7 +90,7 @@ struct BlockedOverlay: View {
                 .buttonStyle(.plain)
 
                 Button(action: onDismiss) {
-                    Text("Snooze 60s")
+                    Text("Dismiss")
                         .font(.system(size: 13))
                         .foregroundStyle(theme.fgMute)
                         .padding(.vertical, 12)

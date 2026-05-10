@@ -31,6 +31,7 @@ private func formatDuration(_ seconds: Int) -> String {
 struct SettingsView: View {
     @Binding var isPresented: Bool
     @Bindable var manager: ScreenTimeManager
+    @Bindable var notifyClient: NotifyClient
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
@@ -201,19 +202,57 @@ struct SettingsView: View {
                 .focused($ntfyFieldFocused)
                 .submitLabel(.done)
                 .onSubmit { ntfyFieldFocused = false }
+
+            HStack {
+                Text("Connection")
+                Spacer()
+                Text(connectionLabel)
+                    .foregroundStyle(connectionColor)
+                    .monospaced()
+                    .font(.caption)
+            }
+
+            Button {
+                notifyClient.injectFakeMessage()
+            } label: {
+                Label("Send test notification", systemImage: "bell.badge")
+            }
+
             if !ntfyURL.isEmpty {
-                Button("Clear", role: .destructive) {
+                Button("Clear URL", role: .destructive) {
                     ntfyURL = ""
                 }
             }
         } header: {
-            Text("Notify link")
+            Text("Notifications")
         } footer: {
-            Text("Run /ntfy-setup in Claude Code on your Mac to get this URL. Used as a hint inside the iOS app — actual subscribing happens in the ntfy app.")
+            Text("Run /ntfy-setup in Claude Code on your Mac to get the URL. The app subscribes via WebSocket while open and posts a local notification on every message.")
+        }
+    }
+
+    private var connectionLabel: String {
+        switch notifyClient.state {
+        case .idle: return "off"
+        case .connecting: return "connecting…"
+        case .connected: return "live"
+        case .error(let m): return "error: \(m.prefix(20))"
+        }
+    }
+
+    private var connectionColor: Color {
+        switch notifyClient.state {
+        case .connected: return .green
+        case .connecting: return .orange
+        case .error: return .red
+        case .idle: return .secondary
         }
     }
 }
 
 #Preview {
-    SettingsView(isPresented: .constant(true), manager: ScreenTimeManager())
+    SettingsView(
+        isPresented: .constant(true),
+        manager: ScreenTimeManager(),
+        notifyClient: NotifyClient()
+    )
 }

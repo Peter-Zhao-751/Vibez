@@ -7,12 +7,15 @@ import SwiftUI
 
 struct ContentView: View {
     @State private var manager = ScreenTimeManager()
+    @State private var notifyClient = NotifyClient()
+
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
+    @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @Environment(\.colorScheme) private var systemColorScheme
 
-    @State private var showBlockedOverlay = false
+    @State private var overlayMessage: NtfyMessage?
     @State private var showSettings = false
 
     private var agent: Agent {
@@ -46,12 +49,13 @@ struct ContentView: View {
 
             mainScreen
 
-            if showBlockedOverlay {
+            if let msg = overlayMessage {
                 BlockedOverlay(
                     agent: agent,
                     theme: theme,
                     dark: effectiveDark,
-                    onDismiss: { withAnimation { showBlockedOverlay = false } }
+                    message: msg,
+                    onDismiss: { withAnimation { overlayMessage = nil } }
                 )
                 .zIndex(5)
             }
@@ -60,12 +64,30 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .animation(.easeInOut(duration: 0.4), value: agent)
         .task {
+            // Subscribe immediately — don't block on permission prompts,
+            // otherwise the WebSocket sits idle while the user is staring
+            // at "Allow Notifications?" and incoming messages get dropped.
+            notifyClient.updateURL(ntfyURL)
+            await NotifyClient.requestAuthorization()
             if manager.authState == .notDetermined {
                 await manager.requestAuthorization()
             }
         }
+        .onChange(of: ntfyURL) { _, newValue in
+            notifyClient.updateURL(newValue)
+        }
+        .onChange(of: notifyClient.lastMessage) { _, newValue in
+            guard let newValue else { return }
+            withAnimation(.easeOut(duration: 0.45)) {
+                overlayMessage = newValue
+            }
+        }
         .sheet(isPresented: $showSettings) {
-            SettingsView(isPresented: $showSettings, manager: manager)
+            SettingsView(
+                isPresented: $showSettings,
+                manager: manager,
+                notifyClient: notifyClient
+            )
         }
     }
 
@@ -138,9 +160,6 @@ struct ContentView: View {
     }
 
     private func toggleAppearance() {
-        // Tapping the chip "commits" the user to an explicit choice — they
-        // never accidentally fall back to .system. Settings page lets them
-        // return to .system if they want.
         appearanceRaw = (effectiveDark ? AppearancePref.light : AppearancePref.dark).rawValue
     }
 }
