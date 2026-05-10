@@ -1,5 +1,5 @@
 ---
-description: Show your ntfy.sh subscribe URL and QR code (also: /vibez-setup test, /vibez-setup regenerate)
+description: Show your ntfy.sh subscribe URL and QR code (also: /vibez:setup test, /vibez:setup regenerate)
 argument-hint: "[show|test|regenerate]"
 allowed-tools: Bash
 ---
@@ -7,7 +7,7 @@ allowed-tools: Bash
 Run the ntfy setup script with the user's argument and show its full output verbatim. Do not summarize — the user wants to see the URL and the QR code as printed.
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/scripts/vibez-setup.sh" $ARGUMENTS
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" $ARGUMENTS
 ```
 
 After showing the output, briefly tell the user what they should do next based on which action ran:

@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "vibez-ntfy",
+      "name": "vibez",
       "source": "./ClaudePlugin",
       "description": "Push Claude Code notifications and stop events to your phone via ntfy.sh."
     }
