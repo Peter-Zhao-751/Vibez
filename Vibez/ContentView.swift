@@ -92,14 +92,13 @@ struct ContentView: View {
             TopBar(
                 isDark: effectiveDark,
                 theme: theme,
-                onToggleAppearance: toggleAppearance,
                 onOpenSettings: { showSettings = true }
             )
 
             hero
                 .padding(.horizontal, 20)
                 .padding(.top, 8)
-                .padding(.bottom, 14)
+                .padding(.bottom, 20)
 
             BlockingPanel(
                 apps: BlockedApp.demoSet,
@@ -123,16 +122,8 @@ struct ContentView: View {
     @ViewBuilder
     private var hero: some View {
         VStack(spacing: 0) {
-            StatusPill(listening: manager.isBlocking, theme: theme)
-                .padding(.bottom, 10)
-
-            Text("Doomscroll apps lock the moment \(agent.label) pings you.")
-                .font(.system(size: 13))
-                .foregroundStyle(theme.fgMute)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 280)
-                .lineSpacing(2)
-                .padding(.bottom, 14)
+            
+            
 
             MascotForAgent(
                 agent: agent,
@@ -141,7 +132,7 @@ struct ContentView: View {
                 gap: 4
             )
             .frame(height: 110, alignment: .bottom)
-            .padding(.bottom, 6)
+            .padding(.bottom, 20)
 
             BigToggle(
                 enabled: Binding(
@@ -151,11 +142,10 @@ struct ContentView: View {
                 agent: agent,
                 theme: theme
             )
-        }
-    }
+            StatusPill(listening: manager.isBlocking, theme: theme)
+                .padding(.top, 10)
 
-    private func toggleAppearance() {
-        appearanceRaw = (effectiveDark ? AppearancePref.light : AppearancePref.dark).rawValue
+        }
     }
 }
 

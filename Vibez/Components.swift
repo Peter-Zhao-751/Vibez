@@ -96,17 +96,11 @@ struct BigToggle: View {
 struct TopBar: View {
     let isDark: Bool
     let theme: Theme
-    let onToggleAppearance: () -> Void
     let onOpenSettings: () -> Void
 
     var body: some View {
         HStack {
-            ChipIconButton(
-                systemName: isDark ? "sun.max" : "moon",
-                theme: theme,
-                accessibilityLabel: isDark ? "Switch to light mode" : "Switch to dark mode",
-                action: onToggleAppearance
-            )
+            //vibez
             Spacer()
             ChipIconButton(
                 systemName: "gearshape",
