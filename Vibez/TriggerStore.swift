@@ -35,6 +35,20 @@ final class TriggerStore {
         save()
     }
 
+    /// Marks any TriggerEvent for the given session id as no-longer-
+    /// awaiting-reply. Called when a `_vibez:unblock:<sid>` arrives
+    /// because the user just replied in that conversation.
+    func clearNeedsReply(forSession sid: String) {
+        var changed = false
+        for i in events.indices where events[i].sessionId == sid && events[i].needsReply {
+            events[i].needsReply = false
+            changed = true
+        }
+        if changed {
+            save()
+        }
+    }
+
     private func load() {
         guard let data = defaults.data(forKey: key) else { return }
         if let decoded = try? JSONDecoder().decode([TriggerEvent].self, from: data) {
