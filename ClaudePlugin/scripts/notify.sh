@@ -261,6 +261,53 @@ last_assistant_excerpt() {
     printf '%s' "${excerpt}"
 }
 
+# Returns 0 (true) when the assistant excerpt looks like Claude is waiting
+# on the user (last sentence ends with "?", or matches a common asking
+# phrase). 1 (false) otherwise. Operates on the already-extracted excerpt
+# so we don't re-read the transcript.
+last_turn_is_asking() {
+    local text="$1"
+    [ -z "${text}" ] && return 1
+
+    # Strip triple-fenced code blocks so a "?" inside a code sample
+    # doesn't false-positive.
+    local cleaned
+    cleaned="$(printf '%s' "${text}" \
+        | awk 'BEGIN{infence=0}
+               /^```/ { infence = 1 - infence; next }
+               { if (!infence) print }')"
+
+    # Last non-empty sentence. Split on terminators "."/"!"/"?" followed
+    # by whitespace. The terminator is preserved on the segment it
+    # belongs to so step "trailing ?" still works.
+    local last
+    last="$(printf '%s' "${cleaned}" \
+        | tr '\n' ' ' \
+        | sed -E 's/([.!?]+)[[:space:]]+/\1\n/g' \
+        | grep -v '^[[:space:]]*$' \
+        | tail -n 1 \
+        | sed -E 's/^[[:space:]]+//')"
+
+    [ -z "${last}" ] && return 1
+
+    # Trailing "?"
+    case "${last}" in
+        *\?) return 0 ;;
+    esac
+
+    # Common interrogative openers, case-insensitive.
+    local lower
+    lower="$(printf '%s' "${last}" | tr '[:upper:]' '[:lower:]')"
+    case "${lower}" in
+        "should i "*|"do you want"*|"would you like"*|"would you prefer"*|\
+        "want me to"*|"shall i"*|"ready to"*|"let me know"*|\
+        "which one"*|"which of"*|"how would you"*|"do we"*)
+            return 0 ;;
+    esac
+
+    return 1
+}
+
 case "${EVENT}" in
 
     session-start)
@@ -336,6 +383,31 @@ case "${EVENT}" in
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
         post_ntfy "${convo_title} — replied" "${prompt}" "low" "leftwards_arrow_with_hook,_vibez:unblock:${sid}"
+        ;;
+
+    _selftest)
+        pass=0; fail=0
+        check() {
+            local name="$1" input="$2" expected="$3" got
+            if last_turn_is_asking "$input"; then got=1; else got=0; fi
+            if [ "$got" = "$expected" ]; then
+                pass=$((pass+1))
+                printf 'PASS %s\n' "$name"
+            else
+                fail=$((fail+1))
+                printf 'FAIL %s (expected=%s got=%s)\n' "$name" "$expected" "$got"
+            fi
+        }
+        check "trailing-q"       "Should I commit this?"          1
+        check "mid-q"            "I changed X. Did that work?"     1
+        check "no-q"             "I committed the change."         0
+        check "code-fence"       "$(printf 'See:\n```bash\nrm -rf /?\n```\nDone.')" 0
+        check "phrase-letmeknow" "Let me know if you want this."   1
+        check "phrase-done"      "All done."                       0
+        check "phrase-shouldi"   "Should I rebase before merging?" 1
+        check "trailing-period"  "Looks good."                     0
+        printf '%d passed, %d failed\n' "$pass" "$fail"
+        if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
         ;;
 
     *)
