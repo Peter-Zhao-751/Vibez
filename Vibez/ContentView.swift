@@ -133,7 +133,9 @@ struct ContentView: View {
                 source: source,
                 title: conversationName,
                 label: description,
-                blockSeconds: blockSeconds
+                blockSeconds: blockSeconds,
+                sessionId: message.sessionId,
+                needsReply: message.needsReply
             )
         )
     }
@@ -145,6 +147,7 @@ struct ContentView: View {
             // this conversation, so release the auto-block for it.
             if let sid = message.sessionId {
                 manager.resolveTrigger(sessionId: sid)
+                triggerStore.clearNeedsReply(forSession: sid)
             }
             // Dismiss the overlay if it was for this same session.
             if let current = overlayMessage,
