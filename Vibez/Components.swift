@@ -491,9 +491,16 @@ struct RecentTriggersSection: View {
     let events: [TriggerEvent]
     let theme: Theme
 
+    private struct ScrollEdges: Equatable {
+        var atTop: Bool
+        var atEnd: Bool
+    }
+
+    @State private var atTop = true
     @State private var atEnd = false
 
-    private var showFade: Bool { events.count > 5 && !atEnd }
+    private var showTopFade: Bool { events.count > 5 && !atTop }
+    private var showBottomFade: Bool { events.count > 5 && !atEnd }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -522,18 +529,29 @@ struct RecentTriggersSection: View {
                     .frame(maxHeight: 260) // ~5 rows × (46pt row + 6pt spacing); scrolls past 5
                     .scrollDisabled(events.count <= 5)
                     .scrollIndicators(.hidden)
-                    .onScrollGeometryChange(for: Bool.self) { geo in
+                    .onScrollGeometryChange(for: ScrollEdges.self) { geo in
                         let maxOffset = max(0, geo.contentSize.height - geo.containerSize.height)
-                        return geo.contentOffset.y >= maxOffset - 1
+                        return ScrollEdges(
+                            atTop: geo.contentOffset.y <= 1,
+                            atEnd: geo.contentOffset.y >= maxOffset - 1
+                        )
                     } action: { _, newValue in
-                        withAnimation(.easeOut(duration: 0.18)) { atEnd = newValue }
+                        withAnimation(.easeInOut(duration: 0.35)) {
+                            atTop = newValue.atTop
+                            atEnd = newValue.atEnd
+                        }
                     }
                     .mask(
+                        // Fixed-location stops with animated opacity at the
+                        // edges — interpolating opacity is smoother than
+                        // sliding stop positions, so the fade reads as a
+                        // fade rather than a wipe.
                         LinearGradient(
                             stops: [
-                                .init(color: .black, location: 0.0),
-                                .init(color: .black, location: showFade ? 0.80 : 1.0),
-                                .init(color: showFade ? .clear : .black, location: 1.0),
+                                .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
+                                .init(color: .black, location: 0.20),
+                                .init(color: .black, location: 0.80),
+                                .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
                             ],
                             startPoint: .top,
                             endPoint: .bottom
