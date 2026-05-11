@@ -30,6 +30,10 @@ struct NtfyMessage: Equatable {
     var kind: NtfyMessageKind = .unknown
     /// Claude Code session_id when the tag is present.
     var sessionId: String? = nil
+    /// True when a "_vibez:waiting" tag is present — Claude is parked
+    /// on a user reply (either a Notification event or a Stop that
+    /// looked like a question).
+    var needsReply: Bool = false
 }
 
 @MainActor
@@ -82,7 +86,8 @@ final class NotifyClient {
     func injectFakeMessage(title: String = "Claude Code — needs you",
                            body: String = "Permission required to run a tool.",
                            kind: NtfyMessageKind = .block,
-                           sessionId: String? = "test-session") {
+                           sessionId: String? = "test-session",
+                           needsReply: Bool = true) {
         var msg = NtfyMessage(
             id: UUID().uuidString,
             title: title,
@@ -91,6 +96,7 @@ final class NotifyClient {
         )
         msg.kind = kind
         msg.sessionId = sessionId
+        msg.needsReply = needsReply
         deliver(msg)
     }
 
@@ -164,9 +170,16 @@ final class NotifyClient {
             body: payload.message ?? "",
             receivedAt: Date()
         )
-        // Look for our control tag "_vibez:<kind>:<sessionId>".
+        // Look for our control tags:
+        //   "_vibez:<kind>:<sessionId>"  → block/unblock + session id
+        //   "_vibez:waiting"             → orthogonal "awaiting user" flag
+        // No early-out: both tags may be present on the same message.
         for tag in payload.tags ?? [] {
             guard tag.hasPrefix("_vibez:") else { continue }
+            if tag == "_vibez:waiting" {
+                msg.needsReply = true
+                continue
+            }
             let parts = tag.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
             // ["_vibez", "<kind>", "<sessionId>"]
             guard parts.count == 3 else { continue }
@@ -178,7 +191,6 @@ final class NotifyClient {
             default:        continue
             }
             msg.sessionId = sid
-            break
         }
         deliver(msg)
     }
