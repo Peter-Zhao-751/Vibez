@@ -86,36 +86,63 @@ jq_get() {
 
 # Best identifier we can give the user for "which conversation this is".
 # Tries, in order:
-#   1. ai-title (Claude Code's auto-generated short label)
-#   2. lastPrompt (most recent user prompt, truncated)
-#   3. the fallback argument (usually the project basename)
-# Caps at 80 chars with a trailing ellipsis if longer.
+#   1. ai-title (CLI auto-generated label, present after a few turns)
+#   2. lastPrompt (CLI writes this synchronously; desktop app writes
+#      it AFTER Stop/UserPromptSubmit hooks fire, so it's often empty
+#      at the time we look)
+#   3. The latest "user" record's string content. The desktop app
+#      writes user records synchronously with .message.content as a
+#      plain string. This is the only thing reliably present at Stop
+#      time for desktop sessions.
+#   4. The $hint argument, used by user-prompt-submit which has the
+#      typed prompt directly even when the transcript file hasn't
+#      been created yet.
+#   5. The $fallback argument (usually the project basename).
+# Caps at 60 chars with a trailing ellipsis if longer.
 read_conversation_title() {
     local transcript="$1"
     local fallback="${2:-Claude Code}"
-    [ -z "${transcript}" ] && { printf '%s' "${fallback}"; return; }
-    [ ! -f "${transcript}" ] && { printf '%s' "${fallback}"; return; }
-    command -v jq >/dev/null 2>&1 || { printf '%s' "${fallback}"; return; }
+    local hint="${3:-}"
 
-    local title
-    title=$(jq -r '
-        select(.type == "ai-title")
-        | .aiTitle // empty
-    ' "${transcript}" 2>/dev/null \
-        | grep -v '^[[:space:]]*$' \
-        | tail -n 1)
+    local title=""
 
-    # New conversations don't have an ai-title yet — Claude Code only
-    # generates one after a few turns. Fall back to the most recent
-    # user prompt, which is always present once Claude has responded.
-    if [ -z "${title}" ]; then
+    if [ -n "${transcript}" ] && [ -f "${transcript}" ] && command -v jq >/dev/null 2>&1; then
         title=$(jq -r '
-            select(.type == "last-prompt")
-            | .lastPrompt // empty
+            select(.type == "ai-title")
+            | .aiTitle // empty
         ' "${transcript}" 2>/dev/null \
             | grep -v '^[[:space:]]*$' \
-            | tail -n 1 \
-            | tr '\n' ' ')
+            | tail -n 1)
+
+        if [ -z "${title}" ]; then
+            title=$(jq -r '
+                select(.type == "last-prompt")
+                | .lastPrompt // empty
+            ' "${transcript}" 2>/dev/null \
+                | grep -v '^[[:space:]]*$' \
+                | tail -n 1 \
+                | tr '\n' ' ')
+        fi
+
+        # Desktop app's path: pull the latest user record whose
+        # content is a plain string (CLI user records are arrays of
+        # objects, which we skip — last-prompt covers the CLI case).
+        if [ -z "${title}" ]; then
+            title=$(jq -r '
+                select(.type == "user" and (.message.content | type == "string"))
+                | .message.content
+            ' "${transcript}" 2>/dev/null \
+                | grep -v '^[[:space:]]*$' \
+                | tail -n 1 \
+                | tr '\n' ' ')
+        fi
+    fi
+
+    # Hint path: typically .prompt from a user-prompt-submit hook,
+    # used when the transcript file doesn't exist yet (desktop app
+    # creates the file lazily on first user message).
+    if [ -z "${title}" ] && [ -n "${hint}" ]; then
+        title="${hint}"
     fi
 
     if [ -z "${title}" ]; then
@@ -264,8 +291,11 @@ case "${EVENT}" in
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
-        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
         prompt="$(jq_get '.prompt')"
+        # Pass the current prompt as a hint — for desktop sessions the
+        # transcript file frequently doesn't exist yet at this point,
+        # so falling back to .prompt beats falling back to basename.
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "${prompt}")"
         # Truncate prompt to a short excerpt for the body
         if [ "${#prompt}" -gt 80 ]; then
             prompt="${prompt:0:79}…"
