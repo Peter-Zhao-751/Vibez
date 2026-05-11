@@ -482,11 +482,19 @@ struct TriggerRow: View {
             .frame(width: 28, height: 28)
 
             VStack(alignment: .leading, spacing: 3) {
-                Text(topLine)
-                    .font(.system(size: 12.5, weight: .semibold))
-                    .foregroundStyle(theme.fg)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 5) {
+                    if event.needsReply {
+                        Circle()
+                            .fill(Color.yellow)
+                            .frame(width: 6, height: 6)
+                            .accessibilityLabel("Waiting for reply")
+                    }
+                    Text(topLine)
+                        .font(.system(size: 12.5, weight: .semibold))
+                        .foregroundStyle(theme.fg)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
                 if let description = descriptionLine {
                     Text(description)
                         .font(.system(size: 11))
