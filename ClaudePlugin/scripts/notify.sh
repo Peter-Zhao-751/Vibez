@@ -262,9 +262,9 @@ last_assistant_excerpt() {
 }
 
 # Returns 0 (true) when the assistant excerpt looks like Claude is waiting
-# on the user (last sentence ends with "?", or matches a common asking
-# phrase). 1 (false) otherwise. Operates on the already-extracted excerpt
-# so we don't re-read the transcript.
+# on the user (a "?" anywhere outside code fences, or last sentence
+# matches a common asking phrase). 1 (false) otherwise. Operates on the
+# already-extracted excerpt so we don't re-read the transcript.
 last_turn_is_asking() {
     local text="$1"
     [ -z "${text}" ] && return 1
@@ -277,9 +277,15 @@ last_turn_is_asking() {
                /^```/ { infence = 1 - infence; next }
                { if (!infence) print }')"
 
-    # Last non-empty sentence. Split on terminators "."/"!"/"?" followed
-    # by whitespace. The terminator is preserved on the segment it
-    # belongs to so step "trailing ?" still works.
+    # A "?" anywhere in the cleaned text → asking. Catches mid-paragraph
+    # questions that a last-sentence-only check would miss (e.g.
+    # "Want me to retry? Anyway, moving on.").
+    case "${cleaned}" in
+        *\?*) return 0 ;;
+    esac
+
+    # No "?". Fall back to phrase matching on the last sentence so
+    # directive asks ("Let me know what you want.") still register.
     local last
     last="$(printf '%s' "${cleaned}" \
         | tr '\n' ' ' \
@@ -289,11 +295,6 @@ last_turn_is_asking() {
         | sed -E 's/^[[:space:]]+//')"
 
     [ -z "${last}" ] && return 1
-
-    # Trailing "?"
-    case "${last}" in
-        *\?) return 0 ;;
-    esac
 
     # Common interrogative openers, case-insensitive.
     local lower
@@ -410,6 +411,8 @@ case "${EVENT}" in
         check "phrase-done"      "All done."                       0
         check "phrase-shouldi"   "Should I rebase before merging?" 1
         check "trailing-period"  "Looks good."                     0
+        check "mid-q-not-trailing" "Want me to retry? Anyway, moving on." 1
+        check "mid-q-multi-sentence" "Implemented X. Curious about that bug? Done for now." 1
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
         ;;
