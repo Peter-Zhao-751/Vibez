@@ -82,7 +82,9 @@ struct ContentView: View {
             SettingsView(
                 isPresented: $showSettings,
                 manager: manager,
-                notifyClient: notifyClient
+                notifyClient: notifyClient,
+                triggerStore: triggerStore,
+                ignoreStore: ignoreStore
             )
         }
     }

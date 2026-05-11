@@ -32,6 +32,8 @@ struct SettingsView: View {
     @Binding var isPresented: Bool
     @Bindable var manager: ScreenTimeManager
     @Bindable var notifyClient: NotifyClient
+    @Bindable var triggerStore: TriggerStore
+    @Bindable var ignoreStore: IgnoreStore
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
@@ -39,6 +41,7 @@ struct SettingsView: View {
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
+    @State private var ignoreQuery: String = ""
     @FocusState private var ntfyFieldFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
@@ -56,6 +59,7 @@ struct SettingsView: View {
                 appsSection
                 durationSection
                 notificationsSection
+                ignoredConversationsSection
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings")
@@ -236,10 +240,91 @@ struct SettingsView: View {
     }
 }
 
+// MARK: - Ignored conversations
+
+private struct IgnoreRow: Identifiable, Hashable {
+    let sessionId: String
+    let name: String
+    var id: String { sessionId }
+}
+
+extension SettingsView {
+
+    fileprivate var ignoreRows: [IgnoreRow] {
+        // Currently-ignored rows always come first.
+        let ignored = ignoreStore.conversations.map {
+            IgnoreRow(sessionId: $0.sessionId, name: $0.name)
+        }
+        var seen = Set(ignored.map(\.sessionId))
+        // Append recent triggers with a usable sid + non-empty name,
+        // de-duped against the ignored set (and against themselves —
+        // the same conversation can ping more than once).
+        var recent: [IgnoreRow] = []
+        for event in triggerStore.events {
+            guard let sid = event.sessionId,
+                  !sid.isEmpty, sid != "nosid",
+                  let name = event.title, !name.isEmpty,
+                  seen.insert(sid).inserted
+            else { continue }
+            recent.append(IgnoreRow(sessionId: sid, name: name))
+        }
+        return ignored + recent
+    }
+
+    fileprivate var filteredIgnoreRows: [IgnoreRow] {
+        let q = ignoreQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return ignoreRows }
+        return ignoreRows.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    }
+
+    fileprivate func ignoreBinding(for row: IgnoreRow) -> Binding<Bool> {
+        Binding(
+            get: { ignoreStore.contains(row.sessionId) },
+            set: { newValue in
+                if newValue {
+                    ignoreStore.ignore(sessionId: row.sessionId, name: row.name)
+                } else {
+                    ignoreStore.unignore(sessionId: row.sessionId)
+                }
+            }
+        )
+    }
+
+    @ViewBuilder
+    fileprivate var ignoredConversationsSection: some View {
+        Section {
+            TextField("Search by name…", text: $ignoreQuery)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+
+            let rows = filteredIgnoreRows
+            if rows.isEmpty {
+                Text(ignoreQuery.isEmpty
+                     ? "No conversations yet — pings from Claude or Codex will appear here."
+                     : "No matches.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            } else {
+                ForEach(rows) { row in
+                    Toggle(row.name, isOn: ignoreBinding(for: row))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+            }
+        } header: {
+            Text("Conversations to ignore")
+        } footer: {
+            Text("Ignored conversations still appear in Recent triggers but don't block apps.")
+        }
+    }
+}
+
 #Preview {
     SettingsView(
         isPresented: .constant(true),
         manager: ScreenTimeManager(),
-        notifyClient: NotifyClient()
+        notifyClient: NotifyClient(),
+        triggerStore: TriggerStore(),
+        ignoreStore: IgnoreStore()
     )
 }
