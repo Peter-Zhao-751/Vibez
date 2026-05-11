@@ -347,7 +347,7 @@ case "${EVENT}" in
         # Control tag _vibez:block:<sid> lets the iOS app match this
         # block request against an upcoming UserPromptSubmit and
         # auto-unblock when the user replies in this exact conversation.
-        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell,_vibez:block:${sid}"
+        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell,_vibez:block:${sid},_vibez:waiting"
         ;;
 
     stop)
@@ -360,7 +360,11 @@ case "${EVENT}" in
         if [ -z "${excerpt}" ]; then
             excerpt="Claude finished a turn."
         fi
-        post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark,_vibez:block:${sid}"
+        if last_turn_is_asking "${excerpt}"; then
+            post_ntfy "${convo_title} — needs you" "${excerpt}" "high" "bell,_vibez:block:${sid},_vibez:waiting"
+        else
+            post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark,_vibez:block:${sid}"
+        fi
         ;;
 
     user-prompt-submit)
