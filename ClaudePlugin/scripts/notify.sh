@@ -84,29 +84,63 @@ jq_get() {
     fi
 }
 
+# Look up the desktop Claude app's own conversation title. The desktop
+# app stores per-session metadata under
+#   ~/Library/Application Support/Claude/claude-code-sessions/<workspace>/<some>/local_<uuid>.json
+# with a .title field ("auto"-generated like "Fix plugin showing environment name…")
+# and a .cliSessionId that matches the hook's session_id. This is the
+# title the user actually sees in the desktop app's sidebar.
+read_desktop_app_title() {
+    local sid="$1"
+    [ -z "${sid}" ] && return 0
+    [ "${sid}" = "nosid" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    local base="${HOME}/Library/Application Support/Claude/claude-code-sessions"
+    [ -d "${base}" ] || return 0
+
+    # Fast pre-filter via grep — the bare UUID is unique enough to land
+    # on the right file with no false positives. Then validate via jq
+    # so we don't accidentally pick a file that mentions the UUID for
+    # some other reason.
+    local match
+    match=$(grep -rl --include='local_*.json' -F "${sid}" "${base}" 2>/dev/null | head -n 1)
+    [ -z "${match}" ] && return 0
+
+    jq -r --arg sid "${sid}" '
+        select(.cliSessionId == $sid)
+        | .title // empty
+    ' "${match}" 2>/dev/null
+}
+
 # Best identifier we can give the user for "which conversation this is".
 # Tries, in order:
-#   1. ai-title (CLI auto-generated label, present after a few turns)
-#   2. lastPrompt (CLI writes this synchronously; desktop app writes
-#      it AFTER Stop/UserPromptSubmit hooks fire, so it's often empty
-#      at the time we look)
-#   3. The latest "user" record's string content. The desktop app
-#      writes user records synchronously with .message.content as a
-#      plain string. This is the only thing reliably present at Stop
-#      time for desktop sessions.
-#   4. The $hint argument, used by user-prompt-submit which has the
-#      typed prompt directly even when the transcript file hasn't
-#      been created yet.
-#   5. The $fallback argument (usually the project basename).
+#   1. The desktop Claude app's own .title for this session (lookup
+#      by cliSessionId in ~/Library/Application Support/Claude/...).
+#      This is the title the user actually sees in the app.
+#   2. ai-title in the transcript (CLI auto-generated label).
+#   3. lastPrompt in the transcript (CLI writes this synchronously;
+#      desktop app writes it AFTER hooks fire, so often empty).
+#   4. The latest "user" record's string content (desktop app's
+#      synchronously-written prompt text, used while the app hasn't
+#      generated its real title yet).
+#   5. The $hint argument, used by user-prompt-submit which has the
+#      typed prompt directly even when the transcript doesn't exist.
+#   6. The $fallback argument (usually the project basename).
 # Caps at 60 chars with a trailing ellipsis if longer.
 read_conversation_title() {
     local transcript="$1"
     local fallback="${2:-Claude Code}"
     local hint="${3:-}"
+    local sid="${4:-}"
 
     local title=""
 
-    if [ -n "${transcript}" ] && [ -f "${transcript}" ] && command -v jq >/dev/null 2>&1; then
+    # Desktop app's own title takes priority — it's what the user sees
+    # in their app sidebar, so the iPhone matching it is least surprising.
+    title=$(read_desktop_app_title "${sid}")
+
+    if [ -z "${title}" ] && [ -n "${transcript}" ] && [ -f "${transcript}" ] && command -v jq >/dev/null 2>&1; then
         title=$(jq -r '
             select(.type == "ai-title")
             | .aiTitle // empty
@@ -124,9 +158,9 @@ read_conversation_title() {
                 | tr '\n' ' ')
         fi
 
-        # Desktop app's path: pull the latest user record whose
-        # content is a plain string (CLI user records are arrays of
-        # objects, which we skip — last-prompt covers the CLI case).
+        # Desktop fallback while the app hasn't generated its title yet:
+        # pull the latest user record whose content is a plain string
+        # (CLI user records are arrays — last-prompt covers the CLI case).
         if [ -z "${title}" ]; then
             title=$(jq -r '
                 select(.type == "user" and (.message.content | type == "string"))
@@ -258,7 +292,7 @@ case "${EVENT}" in
         cwd="$(jq_get '.cwd')"
         sid="$(jq_get '.session_id' 'nosid')"
         proj="$(basename "${cwd:-unknown}")"
-        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         if [ -z "${message}" ]; then
             ntype="$(jq_get '.notification_type' 'unknown')"
             message="Claude needs your attention (${ntype})"
@@ -274,7 +308,7 @@ case "${EVENT}" in
         sid="$(jq_get '.session_id' 'nosid')"
         proj="$(basename "${cwd:-unknown}")"
         transcript="$(jq_get '.transcript_path')"
-        convo_title="$(read_conversation_title "${transcript}" "${proj}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         excerpt="$(last_assistant_excerpt)"
         if [ -z "${excerpt}" ]; then
             excerpt="Claude finished a turn."
@@ -295,7 +329,7 @@ case "${EVENT}" in
         # Pass the current prompt as a hint — for desktop sessions the
         # transcript file frequently doesn't exist yet at this point,
         # so falling back to .prompt beats falling back to basename.
-        convo_title="$(read_conversation_title "${transcript}" "${proj}" "${prompt}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "${prompt}" "${sid}")"
         # Truncate prompt to a short excerpt for the body
         if [ "${#prompt}" -gt 80 ]; then
             prompt="${prompt:0:79}…"
