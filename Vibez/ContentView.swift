@@ -9,6 +9,7 @@ struct ContentView: View {
     @State private var manager = ScreenTimeManager()
     @State private var notifyClient = NotifyClient()
     @State private var triggerStore = TriggerStore()
+    @State private var ignoreStore = IgnoreStore()
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
@@ -156,10 +157,24 @@ struct ContentView: View {
             }
 
         case .block:
-            if let sid = message.sessionId {
+            recordTrigger(from: message)
+
+            if let sid = message.sessionId,
+               !sid.isEmpty, sid != "nosid" {
+                if ignoreStore.contains(sid) {
+                    // Ignored conversation — keep the row in Recent
+                    // triggers (dimmed) but skip the shield and the
+                    // overlay. Refresh the cached name so Settings
+                    // shows the latest title.
+                    ignoreStore.refreshName(
+                        sessionId: sid,
+                        name: TriggerEvent.cleanedTitle(from: message.title)
+                    )
+                    return
+                }
                 manager.addTrigger(sessionId: sid)
             }
-            recordTrigger(from: message)
+
             withAnimation(.easeOut(duration: 0.45)) {
                 overlayMessage = message
             }
