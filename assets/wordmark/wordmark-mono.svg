@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 100">
+
+  <text x="0" y="78" font-family="-apple-system, &#39;SF Pro Display&#39;, &#39;Helvetica Neue&#39;, Helvetica, Arial, sans-serif" font-style="italic" font-weight="900" font-size="100" letter-spacing="-5" fill="#1a0e08">vibe</text>
+  <g transform="translate(140 22)">
+
+    <g fill="#1a0e08" shape-rendering="crispEdges">
+      <rect x="0" y="0" width="10" height="10"></rect><rect x="10" y="0" width="10" height="10"></rect><rect x="20" y="0" width="10" height="10"></rect><rect x="30" y="0" width="10" height="10"></rect><rect x="40" y="0" width="10" height="10"></rect><rect x="50" y="0" width="10" height="10"></rect>
+      <rect x="40" y="10" width="10" height="10"></rect><rect x="30" y="20" width="10" height="10"></rect><rect x="20" y="30" width="10" height="10"></rect><rect x="10" y="40" width="10" height="10"></rect>
+      <rect x="0" y="50" width="10" height="10"></rect><rect x="10" y="50" width="10" height="10"></rect><rect x="20" y="50" width="10" height="10"></rect><rect x="30" y="50" width="10" height="10"></rect><rect x="40" y="50" width="10" height="10"></rect><rect x="50" y="50" width="10" height="10"></rect>
+    </g>
+  </g>
+</svg>

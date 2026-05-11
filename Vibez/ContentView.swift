@@ -204,8 +204,8 @@ struct ContentView: View {
     @ViewBuilder
     private var hero: some View {
         VStack(spacing: 0) {
-            
-            
+
+
 
             MascotForAgent(
                 agent: agent,
@@ -222,12 +222,22 @@ struct ContentView: View {
                     set: { manager.setBlocking($0) }
                 ),
                 agent: agent,
-                theme: theme
+                theme: theme,
+                isInteractive: !ntfyURL.isEmpty
             )
             StatusPill(listening: manager.isBlocking, theme: theme)
                 .padding(.top, 10)
 
+            if ntfyURL.isEmpty {
+                NotificationSetupCard(
+                    ntfyURL: $ntfyURL,
+                    theme: theme
+                )
+                .padding(.top, 18)
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
+        .animation(.easeInOut(duration: 0.28), value: ntfyURL.isEmpty)
     }
 }
 

@@ -84,6 +84,7 @@ struct BigToggle: View {
     @Binding var enabled: Bool
     let agent: Agent
     let theme: Theme
+    var isInteractive: Bool = true
 
     private let pillW: CGFloat = 250
     private let pillH: CGFloat = 132
@@ -151,11 +152,113 @@ struct BigToggle: View {
             .frame(width: pillW, height: pillH)
         }
         .buttonStyle(.plain)
+        .disabled(!isInteractive)
+        .opacity(isInteractive ? 1.0 : 0.45)
         .accessibilityLabel(enabled ? "Disable Vibez" : "Enable Vibez")
     }
 
     private var knobX: CGFloat {
         enabled ? (pillW - knobSize - 8) : 8
+    }
+}
+
+// MARK: - Notification setup (home screen prompt when ntfy URL is empty)
+
+struct NotificationSetupCard: View {
+    @Binding var ntfyURL: String
+    let theme: Theme
+
+    @State private var draft: String = ""
+    @FocusState private var focused: Bool
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var saveable: Bool { !trimmedDraft.isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Set up notifications")
+                .font(.system(size: 12, weight: .bold))
+                .tracking(0.5)
+                .foregroundStyle(theme.fg)
+
+            Text("Run /vibez:setup in Claude Code on your Mac, then paste your URL here.")
+                .font(.system(size: 11.5))
+                .foregroundStyle(theme.fgMute)
+                .fixedSize(horizontal: false, vertical: true)
+
+            HStack(spacing: 8) {
+                ZStack(alignment: .leading) {
+                    if draft.isEmpty && !focused {
+                        Text("https://ntfy.sh/…")
+                            .font(.system(size: 13, design: .monospaced))
+                            .foregroundStyle(theme.fgFaint)
+                            .allowsHitTesting(false)
+                    }
+                    TextField("", text: $draft)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundStyle(theme.fg)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .keyboardType(.URL)
+                        .focused($focused)
+                        .submitLabel(.done)
+                        .onSubmit { commit() }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(theme.bgChip)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.hairline, lineWidth: 1)
+                )
+
+                Button(action: commit) {
+                    Text("Save")
+                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                        .tracking(1.6)
+                        .foregroundStyle(saveable ? theme.onAccent : theme.fgFaint)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 11)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(saveable
+                                      ? AnyShapeStyle(theme.pillGradient)
+                                      : AnyShapeStyle(theme.bgChip))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(saveable ? Color.clear : theme.hairline, lineWidth: 1)
+                        )
+                }
+                .buttonStyle(.plain)
+                .disabled(!saveable)
+            }
+            .onChange(of: focused) { _, newFocused in
+                if !newFocused { commit() }
+            }
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(theme.bgPanel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(theme.hairline, lineWidth: 1)
+        )
+    }
+
+    private func commit() {
+        let trimmed = trimmedDraft
+        guard !trimmed.isEmpty else { return }
+        ntfyURL = trimmed
+        focused = false
     }
 }
 

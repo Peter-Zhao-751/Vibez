@@ -198,13 +198,20 @@ struct SettingsView: View {
     @ViewBuilder
     private var notificationsSection: some View {
         Section {
-            TextField("https://ntfy.sh/ur-generated-url", text: $ntfyURL)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .keyboardType(.URL)
-                .focused($ntfyFieldFocused)
-                .submitLabel(.done)
-                .onSubmit { ntfyFieldFocused = false }
+            ZStack(alignment: .leading) {
+                if ntfyURL.isEmpty && !ntfyFieldFocused {
+                    Text("https://ntfy.sh/ur-generated-url")
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $ntfyURL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                    .focused($ntfyFieldFocused)
+                    .submitLabel(.done)
+                    .onSubmit { ntfyFieldFocused = false }
+            }
 
             HStack {
                 Text("Connection")
@@ -223,7 +230,7 @@ struct SettingsView: View {
         } header: {
             Text("Notifications")
         } footer: {
-            Text("Run /ntfy-setup in Claude Code on your Mac to get the URL. The app subscribes via WebSocket while open and posts a local notification on every message.")
+            Text("Run /vibez:setup in Claude Code on your Mac to get the URL. The app subscribes via WebSocket while open and posts a local notification on every message.")
         }
     }
 
