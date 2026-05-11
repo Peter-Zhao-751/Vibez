@@ -248,14 +248,6 @@ struct SettingsView: View {
 
 // MARK: - Ignored conversations
 
-private func relativeAgo(_ date: Date, now: Date = Date()) -> String {
-    let delta = max(0, Int(now.timeIntervalSince(date)))
-    if delta < 60 { return "just now" }
-    if delta < 3600 { return "\(delta / 60)m ago" }
-    if delta < 86_400 { return "\(delta / 3600)h ago" }
-    return "\(delta / 86_400)d ago"
-}
-
 extension SettingsView {
 
     @ViewBuilder
@@ -275,14 +267,9 @@ extension SettingsView {
                         Image(systemName: "bell.slash.fill")
                             .foregroundStyle(.secondary)
                             .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 1) {
-                            Text(conv.name)
-                                .lineLimit(1)
-                                .truncationMode(.tail)
-                            Text("muted \(relativeAgo(conv.ignoredAt))")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
+                        Text(conv.name)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
                         Spacer(minLength: 0)
                     }
                     .swipeActions(edge: .trailing) {
