@@ -369,6 +369,15 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
     /// run npm install").
     var label: String
     var blockSeconds: Int
+    /// Claude Code session id, used to match an unblock against the
+    /// matching block event. Optional for back-compat with older
+    /// persisted events that didn't store it.
+    var sessionId: String?
+    /// True while this trigger is still parked on a user reply.
+    /// Cleared by TriggerStore.clearNeedsReply when the matching
+    /// _vibez:unblock arrives. Defaults to false so old persisted
+    /// events render without a dot.
+    var needsReply: Bool
 
     init(
         id: UUID = UUID(),
@@ -376,7 +385,9 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         source: Source,
         title: String? = nil,
         label: String,
-        blockSeconds: Int
+        blockSeconds: Int,
+        sessionId: String? = nil,
+        needsReply: Bool = false
     ) {
         self.id = id
         self.receivedAt = receivedAt
@@ -384,6 +395,24 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         self.title = title
         self.label = label
         self.blockSeconds = blockSeconds
+        self.sessionId = sessionId
+        self.needsReply = needsReply
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, receivedAt, source, title, label, blockSeconds, sessionId, needsReply
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        receivedAt = try c.decode(Date.self, forKey: .receivedAt)
+        source = try c.decode(Source.self, forKey: .source)
+        title = try c.decodeIfPresent(String.self, forKey: .title)
+        label = try c.decode(String.self, forKey: .label)
+        blockSeconds = try c.decode(Int.self, forKey: .blockSeconds)
+        sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
+        needsReply = try c.decodeIfPresent(Bool.self, forKey: .needsReply) ?? false
     }
 
     /// Strip the " — done" / " — needs you" / " — replied" suffix
