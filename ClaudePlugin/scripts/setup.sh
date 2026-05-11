@@ -81,21 +81,6 @@ case "${ACTION}" in
         ;;
 esac
 
-URL="${SERVER}/${TOPIC}"
-
-printf 'Your ntfy subscribe URL:\n\n  %s\n\n' "${URL}"
-printf 'Open the ntfy app on your phone, tap +, paste this URL (or scan the QR below).\n\n'
-
-if command -v qrencode >/dev/null 2>&1; then
-    qrencode -t ANSIUTF8 -m 1 "${URL}"
-else
-    cat <<'EOF'
-(Install `qrencode` for an inline QR code:  brew install qrencode)
-EOF
-fi
-
-printf '\nNTFY_TOPIC override:  export NTFY_TOPIC=%s\n' "${TOPIC}"
-printf 'Topic file:           %s\n' "${TOPIC_FILE}"
-printf '\nTry it:  bash %s test\n' "$(cd "$(dirname "$0")" && pwd)/setup.sh"
+printf 'Your ntfy URL:\n\n  %s\n\nPaste it into the ntfy app on your phone (tap +, then paste) and you'\''re done.\n' "${SERVER}/${TOPIC}"
 
 exit 0

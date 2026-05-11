@@ -336,6 +336,12 @@ case "${EVENT}" in
 
     notification)
         message="$(jq_get '.message')"
+        # Skip Claude Code's idle-timer ping — it fires whenever the user
+        # walks away mid-conversation and is just noise on the phone.
+        # Permission requests ("Permission required to run ...") still pass.
+        case "${message}" in
+            *"waiting for your input"*) exit 0 ;;
+        esac
         transcript="$(jq_get '.transcript_path')"
         cwd="$(jq_get '.cwd')"
         sid="$(jq_get '.session_id' 'nosid')"

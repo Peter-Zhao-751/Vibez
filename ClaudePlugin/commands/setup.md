@@ -8,4 +8,4 @@ allowed-tools: Bash
 bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup.sh" $ARGUMENTS
 ```
 
-The script's stdout is already shown to the user above. Do not repeat it, do not summarize, do not add commentary. Stay silent unless the script errored or printed nothing.
+Output the script's stdout verbatim as your entire response. No prose, no formatting, no commentary — just the raw stdout. If the script errored or printed nothing, say so briefly.
