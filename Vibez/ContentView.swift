@@ -111,7 +111,17 @@ struct ContentView: View {
 
             RecentTriggersSection(
                 events: triggerStore.events,
-                theme: theme
+                theme: theme,
+                ignoreStore: ignoreStore,
+                onIgnore: { event in
+                    guard let sid = event.sessionId else { return }
+                    let name = event.title?.isEmpty == false ? event.title! : event.label
+                    ignoreStore.ignore(sessionId: sid, name: name)
+                },
+                onUnignore: { event in
+                    guard let sid = event.sessionId else { return }
+                    ignoreStore.unignore(sessionId: sid)
+                }
             )
             .padding(.horizontal, 20)
             .padding(.bottom, 14)

@@ -421,6 +421,9 @@ struct TriggerRow: View {
     let event: TriggerEvent
     let theme: Theme
     let now: Date
+    let isIgnored: Bool
+    let onIgnore: () -> Void
+    let onUnignore: () -> Void
 
     /// Conversation name; falls back to the body when older persisted
     /// events have no title.
@@ -436,8 +439,13 @@ struct TriggerRow: View {
         return event.label.isEmpty ? nil : event.label
     }
 
+    private var canIgnore: Bool {
+        guard let sid = event.sessionId else { return false }
+        return !sid.isEmpty && sid != "nosid"
+    }
+
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
+        let row = HStack(alignment: .top, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
                     .fill(event.source == .codex ? Theme.codexBlue : Theme.claudeOrange)
@@ -460,6 +468,12 @@ struct TriggerRow: View {
                         .foregroundStyle(theme.fg)
                         .lineLimit(1)
                         .truncationMode(.tail)
+                    if isIgnored {
+                        Image(systemName: "bell.slash.fill")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(theme.fgFaint)
+                            .accessibilityLabel("ignored")
+                    }
                 }
                 if let description = descriptionLine {
                     Text(description)
@@ -484,12 +498,32 @@ struct TriggerRow: View {
             RoundedRectangle(cornerRadius: 12)
                 .stroke(theme.hairline, lineWidth: 1)
         )
+        .opacity(isIgnored ? 0.55 : 1.0)
+
+        if canIgnore {
+            row.contextMenu {
+                if isIgnored {
+                    Button(action: onUnignore) {
+                        Label("Stop ignoring", systemImage: "bell")
+                    }
+                } else {
+                    Button(action: onIgnore) {
+                        Label("Ignore this conversation", systemImage: "bell.slash")
+                    }
+                }
+            }
+        } else {
+            row
+        }
     }
 }
 
 struct RecentTriggersSection: View {
     let events: [TriggerEvent]
     let theme: Theme
+    let ignoreStore: IgnoreStore
+    let onIgnore: (TriggerEvent) -> Void
+    let onUnignore: (TriggerEvent) -> Void
 
     private struct ScrollEdges: Equatable {
         var atTop: Bool
@@ -501,6 +535,11 @@ struct RecentTriggersSection: View {
 
     private var showTopFade: Bool { events.count > 5 && !atTop }
     private var showBottomFade: Bool { events.count > 5 && !atEnd }
+
+    private func isIgnored(_ event: TriggerEvent) -> Bool {
+        guard let sid = event.sessionId else { return false }
+        return ignoreStore.contains(sid)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -522,7 +561,14 @@ struct RecentTriggersSection: View {
                     ScrollView {
                         VStack(spacing: 6) {
                             ForEach(events) { event in
-                                TriggerRow(event: event, theme: theme, now: context.date)
+                                TriggerRow(
+                                    event: event,
+                                    theme: theme,
+                                    now: context.date,
+                                    isIgnored: isIgnored(event),
+                                    onIgnore: { onIgnore(event) },
+                                    onUnignore: { onUnignore(event) }
+                                )
                             }
                         }
                     }
