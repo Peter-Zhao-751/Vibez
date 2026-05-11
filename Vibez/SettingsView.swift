@@ -41,7 +41,7 @@ struct SettingsView: View {
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
-    @State private var ignoreQuery: String = ""
+    @State private var showAddIgnoreSheet = false
     @FocusState private var ntfyFieldFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
@@ -81,6 +81,12 @@ struct SettingsView: View {
             }
             .onChange(of: appearanceRaw) { _, newRaw in
                 (AppearancePref(rawValue: newRaw) ?? .system).applyToWindows()
+            }
+            .sheet(isPresented: $showAddIgnoreSheet) {
+                AddIgnoreSheet(
+                    triggerStore: triggerStore,
+                    ignoreStore: ignoreStore
+                )
             }
         }
     }
@@ -242,79 +248,156 @@ struct SettingsView: View {
 
 // MARK: - Ignored conversations
 
-private struct IgnoreRow: Identifiable, Hashable {
-    let sessionId: String
-    let name: String
-    var id: String { sessionId }
+private func relativeAgo(_ date: Date, now: Date = Date()) -> String {
+    let delta = max(0, Int(now.timeIntervalSince(date)))
+    if delta < 60 { return "just now" }
+    if delta < 3600 { return "\(delta / 60)m ago" }
+    if delta < 86_400 { return "\(delta / 3600)h ago" }
+    return "\(delta / 86_400)d ago"
 }
 
 extension SettingsView {
 
-    fileprivate var ignoreRows: [IgnoreRow] {
-        // Currently-ignored rows always come first.
-        let ignored = ignoreStore.conversations.map {
-            IgnoreRow(sessionId: $0.sessionId, name: $0.name)
+    @ViewBuilder
+    fileprivate var ignoredConversationsSection: some View {
+        Section {
+            if ignoreStore.conversations.isEmpty {
+                HStack(spacing: 10) {
+                    Image(systemName: "bell.slash")
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 18)
+                    Text("Nothing muted yet.")
+                        .foregroundStyle(.secondary)
+                }
+            } else {
+                ForEach(ignoreStore.conversations) { conv in
+                    HStack(spacing: 10) {
+                        Image(systemName: "bell.slash.fill")
+                            .foregroundStyle(.secondary)
+                            .frame(width: 18)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(conv.name)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text("muted \(relativeAgo(conv.ignoredAt))")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            withAnimation {
+                                ignoreStore.unignore(sessionId: conv.sessionId)
+                            }
+                        } label: {
+                            Label("Unmute", systemImage: "bell")
+                        }
+                    }
+                }
+            }
+
+            Button {
+                showAddIgnoreSheet = true
+            } label: {
+                HStack {
+                    Label("Add from recent triggers", systemImage: "plus.circle")
+                        .foregroundStyle(Color.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } header: {
+            Text("Conversations to ignore")
+        } footer: {
+            Text("Ignored conversations still appear in Recent triggers but don't block apps. You can also long-press a row there to mute one directly.")
         }
-        var seen = Set(ignored.map(\.sessionId))
-        // Append recent triggers with a usable sid + non-empty name,
-        // de-duped against the ignored set (and against themselves —
-        // the same conversation can ping more than once).
-        var recent: [IgnoreRow] = []
+    }
+}
+
+// MARK: - Add-from-recent sheet
+
+private struct AddIgnoreSheet: View {
+    @Bindable var triggerStore: TriggerStore
+    @Bindable var ignoreStore: IgnoreStore
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var query: String = ""
+
+    /// Recent conversations that aren't already muted, de-duped by sid
+    /// and in trigger-arrival order (newest first).
+    private var candidates: [(sid: String, name: String)] {
+        var seen = Set(ignoreStore.conversations.map(\.sessionId))
+        var out: [(sid: String, name: String)] = []
         for event in triggerStore.events {
             guard let sid = event.sessionId,
                   !sid.isEmpty, sid != "nosid",
                   let name = event.title, !name.isEmpty,
                   seen.insert(sid).inserted
             else { continue }
-            recent.append(IgnoreRow(sessionId: sid, name: name))
+            out.append((sid: sid, name: name))
         }
-        return ignored + recent
+        return out
     }
 
-    fileprivate var filteredIgnoreRows: [IgnoreRow] {
-        let q = ignoreQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !q.isEmpty else { return ignoreRows }
-        return ignoreRows.filter { $0.name.localizedCaseInsensitiveContains(q) }
+    private var filtered: [(sid: String, name: String)] {
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return candidates }
+        return candidates.filter { $0.name.localizedCaseInsensitiveContains(q) }
     }
 
-    fileprivate func ignoreBinding(for row: IgnoreRow) -> Binding<Bool> {
-        Binding(
-            get: { ignoreStore.contains(row.sessionId) },
-            set: { newValue in
-                if newValue {
-                    ignoreStore.ignore(sessionId: row.sessionId, name: row.name)
+    var body: some View {
+        NavigationStack {
+            List {
+                if candidates.isEmpty {
+                    HStack(spacing: 10) {
+                        Image(systemName: "tray")
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 18)
+                        Text("No recent conversations yet — they'll appear here once Claude or Codex pings you.")
+                            .foregroundStyle(.secondary)
+                    }
+                } else if filtered.isEmpty {
+                    Text("No matches.")
+                        .foregroundStyle(.secondary)
                 } else {
-                    ignoreStore.unignore(sessionId: row.sessionId)
+                    ForEach(filtered, id: \.sid) { row in
+                        Button {
+                            withAnimation(.easeInOut(duration: 0.18)) {
+                                ignoreStore.ignore(sessionId: row.sid, name: row.name)
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "bell.slash")
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 18)
+                                Text(row.name)
+                                    .foregroundStyle(Color.primary)
+                                    .lineLimit(1)
+                                    .truncationMode(.tail)
+                                Spacer(minLength: 0)
+                            }
+                        }
+                    }
                 }
             }
-        )
-    }
-
-    @ViewBuilder
-    fileprivate var ignoredConversationsSection: some View {
-        Section {
-            TextField("Search by name…", text: $ignoreQuery)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-
-            let rows = filteredIgnoreRows
-            if rows.isEmpty {
-                Text(ignoreQuery.isEmpty
-                     ? "No conversations yet — pings from Claude or Codex will appear here."
-                     : "No matches.")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(rows) { row in
-                    Toggle(row.name, isOn: ignoreBinding(for: row))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+            .searchable(
+                text: $query,
+                placement: .navigationBarDrawer(displayMode: .always),
+                prompt: "Search by name"
+            )
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            .navigationTitle("Mute a conversation")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") { dismiss() }
+                        .fontWeight(.semibold)
                 }
             }
-        } header: {
-            Text("Conversations to ignore")
-        } footer: {
-            Text("Ignored conversations still appear in Recent triggers but don't block apps.")
         }
     }
 }
