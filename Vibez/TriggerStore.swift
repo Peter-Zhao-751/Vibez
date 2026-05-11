@@ -15,7 +15,7 @@ final class TriggerStore {
 
     private let defaults: UserDefaults
     private let key = "vibez.triggers.v1"
-    private let maxCount = 10
+    private let maxCount = 100
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults

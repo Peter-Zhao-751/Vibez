@@ -163,7 +163,7 @@ final class NotifyClient {
             return
         }
         guard payload.event == "message" else { return } // ignore open/keepalive
-
+            
         var msg = NtfyMessage(
             id: payload.id ?? UUID().uuidString,
             title: payload.title ?? "Vibez",
@@ -192,7 +192,9 @@ final class NotifyClient {
             }
             msg.sessionId = sid
         }
-        deliver(msg)
+        if (msg.kind == .block){
+            deliver(msg)
+        }
     }
 
     // MARK: - Notification delivery

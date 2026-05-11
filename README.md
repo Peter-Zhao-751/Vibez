@@ -1,9 +1,9 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/lockups/vibez-lockup-dark.svg">
-  <img src="assets/lockups/vibez-lockup-light.svg" alt="vibez" width="640">
-</picture>
+<img src="assets/icons/A-pixel-z.svg" alt="" width="180">
+
+<img src="assets/wordmark/vibez-wordmark.svg#gh-light-mode-only" alt="vibez" width="360">
+<img src="assets/wordmark/vibez-wordmark-dark.svg#gh-dark-mode-only" alt="vibez" width="360">
 
 ### the only productivity app for people who let an AI do their job
 
@@ -13,8 +13,8 @@
 
 <br>
 
-<a href="#-install-the-claude-side"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-1a0e08?style=for-the-badge&labelColor=dd7a52"></a>
-<a href="#-install-the-ios-app"><img alt="iOS app" src="https://img.shields.io/badge/iOS_app-coming_soon-fff5e8?style=for-the-badge&labelColor=1a0e08"></a>
+<a href="#install-the-claude-side"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-1a0e08?style=for-the-badge&labelColor=dd7a52"></a>
+<a href="#install-the-ios-app"><img alt="iOS app" src="https://img.shields.io/badge/iOS_app-coming_soon-fff5e8?style=for-the-badge&labelColor=1a0e08"></a>
 
 </div>
 

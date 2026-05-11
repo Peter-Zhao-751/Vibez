@@ -160,48 +160,14 @@ struct BigToggle: View {
 }
 
 // MARK: - Wordmark
-//
-// Italic "vibe" + a chunky pixel-art "Z" tinted with the agent accent.
-// The Z is a 6×6 grid of 10×10 cells in a 60×56 viewBox: top row of
-// six cells, a four-step diagonal, bottom row of six cells.
 
 struct VibezWordmark: View {
-    let theme: Theme
-
     var body: some View {
-        HStack(alignment: .bottom, spacing: 0) {
-            Text("vibe")
-                .font(.system(size: 44, weight: .black))
-                .italic()
-                .tracking(-2.2)
-                .foregroundStyle(theme.fg)
-                .padding(.trailing, -10) // pull the Z slightly into the 'e'
-            PixelZShape()
-                .fill(theme.accent)
-                .frame(width: 32, height: 30)
-                .padding(.bottom, 6) // sit on the same baseline as 'vibe'
-        }
-        .fixedSize() // don't let Spacer in TopBar squash it
-    }
-}
-
-private struct PixelZShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let sx = rect.width / 60
-        let sy = rect.height / 56
-        let cells: [(CGFloat, CGFloat)] = [
-            // top bar
-            (0, 0), (10, 0), (20, 0), (30, 0), (40, 0), (50, 0),
-            // diagonal stroke
-            (40, 10), (30, 20), (20, 30), (10, 40),
-            // bottom bar
-            (0, 46), (10, 46), (20, 46), (30, 46), (40, 46), (50, 46),
-        ]
-        for (x, y) in cells {
-            p.addRect(CGRect(x: x * sx, y: y * sy, width: 10 * sx, height: 10 * sy))
-        }
-        return p
+        Image("Wordmark")
+            .resizable()
+            .aspectRatio(contentMode: .fit)
+            .frame(height: 50)
+            .fixedSize()
     }
 }
 
@@ -214,7 +180,7 @@ struct TopBar: View {
 
     var body: some View {
         HStack(alignment: .center) {
-            VibezWordmark(theme: theme)
+            VibezWordmark()
             Spacer()
             ChipIconButton(
                 systemName: "gearshape",
@@ -537,9 +503,9 @@ struct RecentTriggersSection: View {
                     .tracking(0.5)
                     .foregroundStyle(theme.fg)
                 Spacer()
-                Text(events.isEmpty ? "—" : "last \(events.count)")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundStyle(theme.fgMute)
+//                Text(events.isEmpty ? "—" : "last \(events.count)")
+//                    .font(.system(size: 11, design: .monospaced))
+//                    .foregroundStyle(theme.fgMute)
             }
             if events.isEmpty {
                 emptyState

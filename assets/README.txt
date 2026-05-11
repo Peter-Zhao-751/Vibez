@@ -1,37 +1,32 @@
-Vibez — Logo Assets
-=====================
+vibez — logo assets
+====================
 
-Icons (1024×1024 SVG, app-icon mask included via rounded rect):
-  icons/A-pixel-z.svg            Primary mark on orange
-  icons/A-pixel-z-dark.svg       On ink
-  icons/B-italic-z.svg
-  icons/B-italic-z-dark.svg
-  icons/C-waveform.svg
-  icons/C-waveform-dark.svg
-  icons/D-z-monogram.svg
-  icons/D-z-monogram-dark.svg
+ICONS (vibez-assets/icons/)
+  A · Pixel Z      — primary mark. 6x6 grid of uniform 10x10 cells.
+  B · Italic Z     — single-stroke alternate.
+  C · Waveform     — abstract, from the toggle knob.
+  D · Z monogram   — cursive Z, sleep/silence motif.
+  Each comes in standard + dark variants.
 
-Wordmarks (italic "vibe" + pixel Z):
-  wordmark/vibez-wordmark.svg         Ink on transparent
-  wordmark/vibez-wordmark-dark.svg    Cream on transparent
-  wordmark/vibez-wordmark-orange.svg  Orange on transparent
+GLYPH (vibez-assets/glyph/)
+  pixel-z in orange, ink, cream — for use beside type, in lists, etc.
 
-Lockups (icon + wordmark):
-  lockups/vibez-lockup-light.svg
-  lockups/vibez-lockup-dark.svg
+WORDMARK (vibez-assets/wordmark/)
+  Italic "vibe" + upright orange pixel Z, overlapping.
+  Uses -apple-system / SF Pro / Helvetica fallback chain.
+  Replace with your own italic-900 font if shipping.
 
-Glyph (just the pixel Z):
-  glyph/pixel-z-orange.svg
-  glyph/pixel-z-ink.svg
-  glyph/pixel-z-cream.svg
+LOCKUPS (vibez-assets/lockup/)
+  Icon + wordmark, horizontal. Light + dark.
 
-Palette
+PALETTE
   Orange       #dd7a52
   Orange deep  #b85a36
   Ink          #1a0e08
   Paper        #fbf8f4
   Cream        #fff5e8
 
-Typography
-  Wordmark uses italic 900-weight system sans (-apple-system / SF Pro Display).
-  Substitute any heavy italic geometric/humanist sans if rendering off Apple platforms.
+GRID NOTE
+  Pixel Z uses a strict 6x6 grid with uniform 10x10 cells, 60x60 unit canvas.
+  Inside the icon squircle (100x100 unit), the Z is centered at x=20-80, y=20-80,
+  leaving a 20-unit margin.

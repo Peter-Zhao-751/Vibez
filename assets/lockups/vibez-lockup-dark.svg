@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1500 340" width="1500" height="340">
   
-  <rect width="1500" height="340" fill="#1a0e08"></rect>
-  
   <rect x="40" y="50" width="240" height="240" rx="54" fill="#dd7a52"></rect>
   <g transform="translate(40 50) scale(2.4)" shape-rendering="crispEdges">
     <g fill="#fff5e8">
@@ -12,7 +10,7 @@
     </g>
   </g>
   
-  <text x="320" y="240" class="vibe" fill="#fff5e8">vibe</text>
+  <text x="320" y="248" font-family="-apple-system, 'SF Pro Display', 'Inter', 'Helvetica Neue', system-ui, sans-serif" font-size="250" font-weight="900" font-style="italic" letter-spacing="-10" fill="#fff5e8">vibe</text>
   <g transform="translate(820 100) scale(2.7)" shape-rendering="crispEdges">
     <g fill="#fff5e8">
       <rect x="0" y="0" width="10" height="10"></rect><rect x="10" y="0" width="10" height="10"></rect><rect x="20" y="0" width="10" height="10"></rect><rect x="30" y="0" width="10" height="10"></rect><rect x="40" y="0" width="10" height="10"></rect><rect x="50" y="0" width="10" height="10"></rect>
