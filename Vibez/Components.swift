@@ -638,8 +638,12 @@ struct RecentTriggersSection: View {
     @State private var atTop = true
     @State private var atEnd = false
 
-    private var showTopFade: Bool { events.count > 5 && !atTop }
-    private var showBottomFade: Bool { events.count > 5 && !atEnd }
+    // Fades follow the actual scroll geometry (atTop/atEnd come from
+    // onScrollGeometryChange) rather than a row-count proxy — row heights
+    // are variable since rows render a description line, so "more than 5
+    // events" no longer maps to "content overflows."
+    private var showTopFade: Bool { !atTop }
+    private var showBottomFade: Bool { !atEnd }
 
     private func isIgnored(_ event: TriggerEvent) -> Bool {
         guard let sid = event.sessionId else { return false }
@@ -677,8 +681,8 @@ struct RecentTriggersSection: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 260) // ~5 rows × (46pt row + 6pt spacing); scrolls past 5
-                    .scrollDisabled(events.count <= 5)
+                    .frame(maxHeight: 260)
+                    .scrollBounceBehavior(.basedOnSize)
                     .scrollIndicators(.hidden)
                     .onScrollGeometryChange(for: ScrollEdges.self) { geo in
                         let maxOffset = max(0, geo.contentSize.height - geo.containerSize.height)
@@ -692,7 +696,7 @@ struct RecentTriggersSection: View {
                             atEnd = newValue.atEnd
                         }
                     }
-                    .mask(
+                    .mask {
                         // Fixed-location stops with animated opacity at the
                         // edges — interpolating opacity is smoother than
                         // sliding stop positions, so the fade reads as a
@@ -707,7 +711,7 @@ struct RecentTriggersSection: View {
                             startPoint: .top,
                             endPoint: .bottom
                         )
-                    )
+                    }
                 }
             }
         }
