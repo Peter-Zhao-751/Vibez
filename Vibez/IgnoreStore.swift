@@ -2,74 +2,148 @@
 //  IgnoreStore.swift
 //  Vibez
 //
-//  Persists the set of conversation session_ids the user has chosen to
-//  mute. When a ping arrives for one of these sids, it's still logged
-//  in Recent triggers but the shield is never engaged.
+//  Persists the user's mute rules. Two kinds:
+//
+//   • .session(sid, name)  — silences exactly one conversation by sid.
+//                            Used for one-off "ignore this thread."
+//   • .name(name)          — silences any conversation whose title matches
+//                            (case-insensitive). For recurring agents
+//                            (e.g. a cron-launched `claude` invocation
+//                            that gets a fresh sid every run).
+//
+//  When a ping arrives that matches any rule, it's still appended to
+//  Recent triggers (dimmed) but the shield is never engaged.
 //
 
 import Foundation
 
-struct IgnoredConversation: Codable, Identifiable, Equatable {
-    /// session_id is the natural key — name is just for display/search.
-    var id: String { sessionId }
-    let sessionId: String
-    var name: String
-    let ignoredAt: Date
+enum IgnoreRule: Codable, Identifiable, Equatable {
+    case session(sessionId: String, name: String, ignoredAt: Date)
+    case name(name: String, ignoredAt: Date)
+
+    var id: String {
+        switch self {
+        case .session(let sid, _, _): return "sid:\(sid)"
+        case .name(let n, _): return "name:\(n.lowercased())"
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .session(_, let n, _), .name(let n, _): return n
+        }
+    }
+
+    var ignoredAt: Date {
+        switch self {
+        case .session(_, _, let d), .name(_, let d): return d
+        }
+    }
+
+    var isNameRule: Bool {
+        if case .name = self { return true }
+        return false
+    }
+
+    fileprivate func matches(sessionId: String, name: String) -> Bool {
+        switch self {
+        case .session(let sid, _, _):
+            return sid == sessionId
+        case .name(let muted, _):
+            return muted.compare(name, options: .caseInsensitive) == .orderedSame
+        }
+    }
 }
 
 @MainActor
 @Observable
 final class IgnoreStore {
-    private(set) var conversations: [IgnoredConversation] = []
+    private(set) var rules: [IgnoreRule] = []
 
     private let defaults: UserDefaults
-    private let key = "vibez.ignored.v1"
+    private let key = "vibez.ignored.v2"
+    private let legacyKey = "vibez.ignored.v1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
         load()
     }
 
-    func contains(_ sessionId: String) -> Bool {
+    /// True when any rule (session or name) matches this trigger.
+    func contains(sessionId: String, name: String) -> Bool {
         guard isUsableSid(sessionId) else { return false }
-        return conversations.contains { $0.sessionId == sessionId }
+        return rules.contains { $0.matches(sessionId: sessionId, name: name) }
     }
 
-    /// Upsert: ignore a new sid, or refresh the stored name if it's
-    /// already ignored.
-    func ignore(sessionId: String, name: String) {
+    func sessionRuleMatching(sessionId: String) -> IgnoreRule? {
+        guard isUsableSid(sessionId) else { return nil }
+        return rules.first { rule in
+            if case .session(let sid, _, _) = rule, sid == sessionId { return true }
+            return false
+        }
+    }
+
+    func nameRuleMatching(name: String) -> IgnoreRule? {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return rules.first { rule in
+            if case .name(let muted, _) = rule {
+                return muted.compare(trimmed, options: .caseInsensitive) == .orderedSame
+            }
+            return false
+        }
+    }
+
+    func ignoreSession(sessionId: String, name: String) {
         guard isUsableSid(sessionId) else { return }
-        if let idx = conversations.firstIndex(where: { $0.sessionId == sessionId }) {
-            conversations[idx].name = name
+        let trimmedName = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let idx = rules.firstIndex(where: { rule in
+            if case .session(let sid, _, _) = rule, sid == sessionId { return true }
+            return false
+        }) {
+            // Refresh stored display name in place; keep ignoredAt stable.
+            rules[idx] = .session(
+                sessionId: sessionId,
+                name: trimmedName,
+                ignoredAt: rules[idx].ignoredAt
+            )
         } else {
-            conversations.insert(
-                IgnoredConversation(
-                    sessionId: sessionId,
-                    name: name,
-                    ignoredAt: Date()
-                ),
+            rules.insert(
+                .session(sessionId: sessionId, name: trimmedName, ignoredAt: Date()),
                 at: 0
             )
         }
         save()
     }
 
-    func unignore(sessionId: String) {
-        guard isUsableSid(sessionId) else { return }
-        let before = conversations.count
-        conversations.removeAll { $0.sessionId == sessionId }
-        if conversations.count != before { save() }
+    func ignoreName(_ name: String) {
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if nameRuleMatching(name: trimmed) != nil { return }
+        rules.insert(.name(name: trimmed, ignoredAt: Date()), at: 0)
+        save()
     }
 
-    /// Update the cached name on an already-ignored conversation. No-op
-    /// if the sid isn't ignored.
+    func remove(ruleId: String) {
+        let before = rules.count
+        rules.removeAll { $0.id == ruleId }
+        if rules.count != before { save() }
+    }
+
+    /// Refresh the cached display name on a session rule. No-op if the
+    /// sid isn't covered by a session rule.
     func refreshName(sessionId: String, name: String) {
         guard isUsableSid(sessionId) else { return }
-        guard let idx = conversations.firstIndex(where: { $0.sessionId == sessionId })
-        else { return }
-        guard conversations[idx].name != name else { return }
-        conversations[idx].name = name
-        save()
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard let idx = rules.firstIndex(where: { rule in
+            if case .session(let sid, _, _) = rule, sid == sessionId { return true }
+            return false
+        }) else { return }
+        if case .session(_, let existing, let date) = rules[idx], existing != trimmed {
+            rules[idx] = .session(sessionId: sessionId, name: trimmed, ignoredAt: date)
+            save()
+        }
     }
 
     private func isUsableSid(_ sid: String) -> Bool {
@@ -77,14 +151,29 @@ final class IgnoreStore {
     }
 
     private func load() {
-        guard let data = defaults.data(forKey: key) else { return }
-        if let decoded = try? JSONDecoder().decode([IgnoredConversation].self, from: data) {
-            conversations = decoded
+        if let data = defaults.data(forKey: key),
+           let decoded = try? JSONDecoder().decode([IgnoreRule].self, from: data) {
+            rules = decoded
+            return
+        }
+        // v1 → v2 migration: every legacy entry was a session rule.
+        if let data = defaults.data(forKey: legacyKey),
+           let legacy = try? JSONDecoder().decode([LegacyIgnored].self, from: data) {
+            rules = legacy.map {
+                .session(sessionId: $0.sessionId, name: $0.name, ignoredAt: $0.ignoredAt)
+            }
+            save()
         }
     }
 
     private func save() {
-        guard let data = try? JSONEncoder().encode(conversations) else { return }
+        guard let data = try? JSONEncoder().encode(rules) else { return }
         defaults.set(data, forKey: key)
+    }
+
+    private struct LegacyIgnored: Codable {
+        let sessionId: String
+        var name: String
+        let ignoredAt: Date
     }
 }

@@ -115,14 +115,26 @@ struct ContentView: View {
                 events: triggerStore.events,
                 theme: theme,
                 ignoreStore: ignoreStore,
-                onIgnore: { event in
+                onIgnoreSession: { event in
                     guard let sid = event.sessionId else { return }
-                    let name = event.title?.isEmpty == false ? event.title! : event.label
-                    ignoreStore.ignore(sessionId: sid, name: name)
+                    let name = displayName(for: event)
+                    ignoreStore.ignoreSession(sessionId: sid, name: name)
                 },
-                onUnignore: { event in
-                    guard let sid = event.sessionId else { return }
-                    ignoreStore.unignore(sessionId: sid)
+                onIgnoreName: { event in
+                    let name = displayName(for: event)
+                    ignoreStore.ignoreName(name)
+                },
+                onUnignoreSession: { event in
+                    guard let sid = event.sessionId,
+                          let rule = ignoreStore.sessionRuleMatching(sessionId: sid)
+                    else { return }
+                    ignoreStore.remove(ruleId: rule.id)
+                },
+                onUnignoreName: { event in
+                    let name = displayName(for: event)
+                    guard let rule = ignoreStore.nameRuleMatching(name: name)
+                    else { return }
+                    ignoreStore.remove(ruleId: rule.id)
                 }
             )
             .padding(.horizontal, 20)
@@ -130,6 +142,14 @@ struct ContentView: View {
 
             Spacer(minLength: 0)
         }
+    }
+
+    /// Best display name for an ignore rule sourced from a Recent
+    /// triggers row. Title wins; falls back to the body label so older
+    /// title-less events still produce a usable rule.
+    private func displayName(for event: TriggerEvent) -> String {
+        if let t = event.title, !t.isEmpty { return t }
+        return event.label
     }
 
     private func recordTrigger(from message: NtfyMessage) {
@@ -193,7 +213,7 @@ struct ContentView: View {
 
             if let sid = message.sessionId,
                !sid.isEmpty, sid != "nosid" {
-                if ignoreStore.contains(sid) {
+                if ignoreStore.contains(sessionId: sid, name: message.title) {
                     // Ignored conversation — keep the row in Recent
                     // triggers (dimmed) but skip the shield and the
                     // overlay. Refresh the cached name so Settings

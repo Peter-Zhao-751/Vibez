@@ -260,7 +260,7 @@ extension SettingsView {
     @ViewBuilder
     fileprivate var ignoredConversationsSection: some View {
         Section {
-            if ignoreStore.conversations.isEmpty {
+            if ignoreStore.rules.isEmpty {
                 HStack(spacing: 10) {
                     Image(systemName: "bell.slash")
                         .foregroundStyle(.tertiary)
@@ -269,20 +269,27 @@ extension SettingsView {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                ForEach(ignoreStore.conversations) { conv in
+                ForEach(ignoreStore.rules) { rule in
                     HStack(spacing: 10) {
-                        Image(systemName: "bell.slash.fill")
+                        Image(systemName: rule.isNameRule ? "tag.slash.fill" : "bell.slash.fill")
                             .foregroundStyle(.secondary)
                             .frame(width: 18)
-                        Text(conv.name)
-                            .lineLimit(1)
-                            .truncationMode(.tail)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(rule.displayName)
+                                .lineLimit(1)
+                                .truncationMode(.tail)
+                            Text(rule.isNameRule
+                                 ? "Mutes every conversation with this name"
+                                 : "Mutes only this session")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                        }
                         Spacer(minLength: 0)
                     }
                     .swipeActions(edge: .trailing) {
                         Button(role: .destructive) {
                             withAnimation {
-                                ignoreStore.unignore(sessionId: conv.sessionId)
+                                ignoreStore.remove(ruleId: rule.id)
                             }
                         } label: {
                             Label("Unmute", systemImage: "bell")
@@ -306,7 +313,7 @@ extension SettingsView {
         } header: {
             Text("Conversations to ignore")
         } footer: {
-            Text("Ignored conversations still appear in Recent triggers but don't block apps. You can also long-press a row there to mute one directly.")
+            Text("Mute one session (\(Image(systemName: "bell.slash.fill"))) or every conversation that shares a name (\(Image(systemName: "tag.slash.fill")))  — handy for a recurring agent that gets a new session id every run. Long-press a Recent trigger to pick which kind.")
         }
     }
 }
@@ -319,24 +326,32 @@ private struct AddIgnoreSheet: View {
 
     @Environment(\.dismiss) private var dismiss
     @State private var query: String = ""
+    @State private var picked: Candidate?
 
-    /// Recent conversations that aren't already muted, de-duped by sid
+    fileprivate struct Candidate: Equatable, Identifiable {
+        let sid: String
+        let name: String
+        var id: String { sid }
+    }
+
+    /// Recent conversations not yet covered by any rule, de-duped by sid
     /// and in trigger-arrival order (newest first).
-    private var candidates: [(sid: String, name: String)] {
-        var seen = Set(ignoreStore.conversations.map(\.sessionId))
-        var out: [(sid: String, name: String)] = []
+    private var candidates: [Candidate] {
+        var seenSids = Set<String>()
+        var out: [Candidate] = []
         for event in triggerStore.events {
             guard let sid = event.sessionId,
                   !sid.isEmpty, sid != "nosid",
                   let name = event.title, !name.isEmpty,
-                  seen.insert(sid).inserted
+                  seenSids.insert(sid).inserted,
+                  !ignoreStore.contains(sessionId: sid, name: name)
             else { continue }
-            out.append((sid: sid, name: name))
+            out.append(Candidate(sid: sid, name: name))
         }
         return out
     }
 
-    private var filtered: [(sid: String, name: String)] {
+    private var filtered: [Candidate] {
         let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !q.isEmpty else { return candidates }
         return candidates.filter { $0.name.localizedCaseInsensitiveContains(q) }
@@ -357,11 +372,9 @@ private struct AddIgnoreSheet: View {
                     Text("No matches.")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(filtered, id: \.sid) { row in
+                    ForEach(filtered) { row in
                         Button {
-                            withAnimation(.easeInOut(duration: 0.18)) {
-                                ignoreStore.ignore(sessionId: row.sid, name: row.name)
-                            }
+                            picked = row
                         } label: {
                             HStack(spacing: 10) {
                                 Image(systemName: "bell.slash")
@@ -372,6 +385,9 @@ private struct AddIgnoreSheet: View {
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                 Spacer(minLength: 0)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption.weight(.semibold))
+                                    .foregroundStyle(.tertiary)
                             }
                         }
                     }
@@ -391,6 +407,31 @@ private struct AddIgnoreSheet: View {
                     Button("Done") { dismiss() }
                         .fontWeight(.semibold)
                 }
+            }
+            .confirmationDialog(
+                picked.map { "Mute \"\($0.name)\"" } ?? "",
+                isPresented: Binding(
+                    get: { picked != nil },
+                    set: { if !$0 { picked = nil } }
+                ),
+                titleVisibility: .visible,
+                presenting: picked
+            ) { row in
+                Button("Just this session") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        ignoreStore.ignoreSession(sessionId: row.sid, name: row.name)
+                    }
+                    picked = nil
+                }
+                Button("Every conversation with this name") {
+                    withAnimation(.easeInOut(duration: 0.18)) {
+                        ignoreStore.ignoreName(row.name)
+                    }
+                    picked = nil
+                }
+                Button("Cancel", role: .cancel) { picked = nil }
+            } message: { _ in
+                Text("Session rules end with the conversation. Name rules also catch future runs that share this title — handy for cron-launched agents.")
             }
         }
     }

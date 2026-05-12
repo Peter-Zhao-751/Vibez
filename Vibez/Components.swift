@@ -619,9 +619,14 @@ struct TriggerRow: View {
     let event: TriggerEvent
     let theme: Theme
     let now: Date
-    let isIgnored: Bool
-    let onIgnore: () -> Void
-    let onUnignore: () -> Void
+    let ignoredBySession: Bool
+    let ignoredByName: Bool
+    let onIgnoreSession: () -> Void
+    let onIgnoreName: () -> Void
+    let onUnignoreSession: () -> Void
+    let onUnignoreName: () -> Void
+
+    private var isIgnored: Bool { ignoredBySession || ignoredByName }
 
     /// Conversation name; falls back to the body when older persisted
     /// events have no title.
@@ -700,13 +705,22 @@ struct TriggerRow: View {
 
         if canIgnore {
             row.contextMenu {
-                if isIgnored {
-                    Button(action: onUnignore) {
-                        Label("Stop ignoring", systemImage: "bell")
+                if ignoredBySession {
+                    Button(action: onUnignoreSession) {
+                        Label("Stop ignoring this conversation", systemImage: "bell")
                     }
                 } else {
-                    Button(action: onIgnore) {
+                    Button(action: onIgnoreSession) {
                         Label("Ignore this conversation", systemImage: "bell.slash")
+                    }
+                }
+                if ignoredByName {
+                    Button(action: onUnignoreName) {
+                        Label("Stop ignoring by name", systemImage: "tag")
+                    }
+                } else {
+                    Button(action: onIgnoreName) {
+                        Label("Ignore by name", systemImage: "tag.slash")
                     }
                 }
             }
@@ -720,8 +734,10 @@ struct RecentTriggersSection: View {
     let events: [TriggerEvent]
     let theme: Theme
     let ignoreStore: IgnoreStore
-    let onIgnore: (TriggerEvent) -> Void
-    let onUnignore: (TriggerEvent) -> Void
+    let onIgnoreSession: (TriggerEvent) -> Void
+    let onIgnoreName: (TriggerEvent) -> Void
+    let onUnignoreSession: (TriggerEvent) -> Void
+    let onUnignoreName: (TriggerEvent) -> Void
 
     private struct ScrollEdges: Equatable {
         var atTop: Bool
@@ -738,9 +754,14 @@ struct RecentTriggersSection: View {
     private var showTopFade: Bool { !atTop }
     private var showBottomFade: Bool { !atEnd }
 
-    private func isIgnored(_ event: TriggerEvent) -> Bool {
+    private func ignoredBySession(_ event: TriggerEvent) -> Bool {
         guard let sid = event.sessionId else { return false }
-        return ignoreStore.contains(sid)
+        return ignoreStore.sessionRuleMatching(sessionId: sid) != nil
+    }
+
+    private func ignoredByName(_ event: TriggerEvent) -> Bool {
+        let name = event.title?.isEmpty == false ? event.title! : event.label
+        return ignoreStore.nameRuleMatching(name: name) != nil
     }
 
     var body: some View {
@@ -767,9 +788,12 @@ struct RecentTriggersSection: View {
                                     event: event,
                                     theme: theme,
                                     now: context.date,
-                                    isIgnored: isIgnored(event),
-                                    onIgnore: { onIgnore(event) },
-                                    onUnignore: { onUnignore(event) }
+                                    ignoredBySession: ignoredBySession(event),
+                                    ignoredByName: ignoredByName(event),
+                                    onIgnoreSession: { onIgnoreSession(event) },
+                                    onIgnoreName: { onIgnoreName(event) },
+                                    onUnignoreSession: { onUnignoreSession(event) },
+                                    onUnignoreName: { onUnignoreName(event) }
                                 )
                             }
                         }
