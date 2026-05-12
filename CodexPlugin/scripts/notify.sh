@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+#
+# vibez-codex hook script.
+#
+# Dispatches Codex lifecycle events to ntfy.sh as push notifications.
+# Topic is shared with the Claude Code vibez plugin at ~/.config/vibez/topic
+# so a single ntfy subscription on the phone covers both agents.
+#
+# Hooks must never block Codex — this script always exits 0, network
+# failures are swallowed.
+
+set -uo pipefail
+
+EVENT="${1:-}"
+
+CONFIG_DIR="${HOME}/.config/vibez"
+TOPIC_FILE="${CONFIG_DIR}/topic"
+LOG_FILE="${CONFIG_DIR}/log"
+
+# One-shot migration from the old claude-ntfy-named directory used by the
+# pre-0.9 Claude Code plugin. Same machine, same topic, same subscription.
+OLD_CONFIG_DIR="${HOME}/.config/claude-ntfy"
+if [ -d "${OLD_CONFIG_DIR}" ] && [ ! -d "${CONFIG_DIR}" ]; then
+    mv "${OLD_CONFIG_DIR}" "${CONFIG_DIR}" 2>/dev/null || true
+fi
+
+mkdir -p "${CONFIG_DIR}" 2>/dev/null || true
+chmod 700 "${CONFIG_DIR}" 2>/dev/null || true
+
+log() {
+    printf '[%s] cx %s\n' "$(date -u +%FT%TZ)" "$*" >>"${LOG_FILE}" 2>/dev/null || true
+}
+
+# Read stdin once if present, into INPUT.
+INPUT=""
+if [ ! -t 0 ]; then
+    INPUT="$(cat 2>/dev/null || true)"
+fi
+
+# Resolve topic: env wins, else file.
+TOPIC="${NTFY_TOPIC:-}"
+if [ -z "${TOPIC}" ] && [ -f "${TOPIC_FILE}" ]; then
+    TOPIC="$(cat "${TOPIC_FILE}" 2>/dev/null | tr -d '[:space:]')"
+fi
+
+SERVER="${NTFY_SERVER:-https://ntfy.sh}"
+
+generate_topic() {
+    # 32 alphanumeric chars, ~190 bits of entropy.
+    LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom 2>/dev/null | head -c 32
+}
+
+post_ntfy() {
+    local title="$1"
+    local body="$2"
+    local tags="${3:-}"
+
+    if [ -z "${TOPIC}" ]; then
+        log "skip: no topic configured (event=${EVENT})"
+        return 0
+    fi
+
+    local -a curl_args=(
+        -fsS --max-time 5
+        -H "Title: ${title}"
+    )
+    if [ -n "${tags}" ]; then
+        curl_args+=(-H "Tags: ${tags}")
+    fi
+    if [ -n "${NTFY_AUTH:-}" ]; then
+        curl_args+=(-H "Authorization: Bearer ${NTFY_AUTH}")
+    fi
+    curl_args+=(-d "${body}" "${SERVER}/${TOPIC}")
+
+    curl "${curl_args[@]}" >/dev/null 2>&1 \
+        && log "sent: ${title}" \
+        || log "send failed: ${title}"
+}
+
+# Pull a JSON field with a default, swallowing jq errors.
+jq_get() {
+    local query="$1"
+    local default="${2:-}"
+    if command -v jq >/dev/null 2>&1; then
+        printf '%s' "${INPUT}" | jq -r "${query} // empty" 2>/dev/null || printf '%s' "${default}"
+    else
+        printf '%s' "${default}"
+    fi
+}
+
+# Cap a string at 72 chars with a trailing ellipsis for titles.
+clip_title() {
+    local raw="$1"
+    raw="$(printf '%s' "${raw}" | tr '\n' ' ' | sed -E 's/^[[:space:]]+//;s/[[:space:]]+$//')"
+    if [ "${#raw}" -gt 72 ]; then
+        printf '%s…' "${raw:0:71}"
+    else
+        printf '%s' "${raw}"
+    fi
+}
+
+# Cap a string at 160 chars for the body.
+clip_body() {
+    local raw="$1"
+    raw="$(printf '%s' "${raw}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g;s/^[[:space:]]+//;s/[[:space:]]+$//')"
+    if [ "${#raw}" -gt 160 ]; then
+        printf '%s…' "${raw:0:159}"
+    else
+        printf '%s' "${raw}"
+    fi
+}
+
+# Returns 0 (true) when the assistant text looks like Codex is waiting on the
+# user. Mirrors the Claude Code plugin's heuristic so the iOS app's shield
+# behavior is consistent across both agents.
+last_turn_is_asking() {
+    local text="$1"
+    [ -z "${text}" ] && return 1
+
+    local cleaned
+    cleaned="$(printf '%s' "${text}" \
+        | awk 'BEGIN{infence=0}
+               /^```/ { infence = 1 - infence; next }
+               { if (!infence) print }')"
+
+    case "${cleaned}" in
+        *\?*) return 0 ;;
+    esac
+
+    local last
+    last="$(printf '%s' "${cleaned}" \
+        | tr '\n' ' ' \
+        | sed -E 's/([.!?]+)[[:space:]]+/\1\n/g' \
+        | grep -v '^[[:space:]]*$' \
+        | tail -n 1 \
+        | sed -E 's/^[[:space:]]+//')"
+
+    [ -z "${last}" ] && return 1
+
+    local lower
+    lower="$(printf '%s' "${last}" | tr '[:upper:]' '[:lower:]')"
+    case "${lower}" in
+        "should i "*|"do you want"*|"would you like"*|"would you prefer"*|\
+        "want me to"*|"shall i"*|"ready to"*|"let me know"*|\
+        "which one"*|"which of"*|"how would you"*|"do we"*)
+            return 0 ;;
+    esac
+
+    return 1
+}
+
+case "${EVENT}" in
+
+    session-start)
+        # Codex passes source ∈ {startup, resume, clear}. Only do the
+        # welcome banner on the very first run (no topic file yet);
+        # subsequent startups are silent.
+        if [ -z "${TOPIC}" ]; then
+            TOPIC="$(generate_topic)"
+            if [ -n "${TOPIC}" ]; then
+                printf '%s\n' "${TOPIC}" >"${TOPIC_FILE}"
+                chmod 600 "${TOPIC_FILE}" 2>/dev/null || true
+                log "generated topic ${TOPIC}"
+
+                url="${SERVER}/${TOPIC}"
+                msg="vibez-codex plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  until you subscribe, push notifications won't reach your phone."
+
+                # Codex accepts the same systemMessage / hookSpecificOutput
+                # shape as Claude Code; SessionStartHookSpecificOutputWire
+                # supports additionalContext.
+                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez-codex first-run setup complete. Subscribe URL: %s."}}\n' \
+                    "${msg}" "${url}"
+            else
+                log "topic generation failed"
+            fi
+        else
+            log "session-start (topic exists)"
+        fi
+        ;;
+
+    permission-request)
+        # Skip modes where the user has explicitly opted out of being asked —
+        # no point pinging the phone for a decision that won't be shown.
+        mode="$(jq_get '.permission_mode' 'default')"
+        case "${mode}" in
+            dontAsk|bypassPermissions)
+                log "permission-request: skipping (mode=${mode})"
+                exit 0 ;;
+        esac
+
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        tool_name="$(jq_get '.tool_name' 'tool')"
+        proj="$(basename "${cwd:-unknown}")"
+
+        # Build a short body: tool name + a snippet of the input. tool_input
+        # is `any`, so we re-serialize to JSON via jq when present.
+        tool_input_str=""
+        if command -v jq >/dev/null 2>&1 && [ -n "${INPUT}" ]; then
+            tool_input_str="$(printf '%s' "${INPUT}" | jq -rc '.tool_input // empty | if type == "string" then . else tostring end' 2>/dev/null || true)"
+        fi
+
+        if [ -n "${tool_input_str}" ]; then
+            body="${tool_name}: ${tool_input_str}"
+        else
+            body="Permission required to run ${tool_name}"
+        fi
+
+        post_ntfy "$(clip_title "${proj}")" "$(clip_body "${body}")" \
+            "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        ;;
+
+    stop)
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        # Codex puts the final assistant text directly in the Stop payload —
+        # no transcript polling needed (unlike the Claude Code plugin).
+        excerpt="$(jq_get '.last_assistant_message')"
+        if [ -z "${excerpt}" ]; then
+            log "stop: empty last_assistant_message, skipping"
+            exit 0
+        fi
+        body="$(clip_body "${excerpt}")"
+        title="$(clip_title "${proj}")"
+        if last_turn_is_asking "${excerpt}"; then
+            post_ntfy "${title}" "${body}" \
+                "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        else
+            post_ntfy "${title}" "${body}" \
+                "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        fi
+        ;;
+
+    user-prompt-submit)
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        prompt="$(jq_get '.prompt')"
+        # Title prefers the prompt itself (mirrors the Claude Code plugin's
+        # behavior of showing what the user just said).
+        title="$(clip_title "${prompt:-${proj}}")"
+        if [ -z "${prompt}" ]; then
+            prompt="(replied)"
+        fi
+        post_ntfy "${title}" "$(clip_body "${prompt}")" \
+            "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cx"
+        ;;
+
+    _selftest)
+        pass=0; fail=0
+        check() {
+            local name="$1" input="$2" expected="$3" got
+            if last_turn_is_asking "$input"; then got=1; else got=0; fi
+            if [ "$got" = "$expected" ]; then
+                pass=$((pass+1))
+                printf 'PASS %s\n' "$name"
+            else
+                fail=$((fail+1))
+                printf 'FAIL %s (expected=%s got=%s)\n' "$name" "$expected" "$got"
+            fi
+        }
+        check "trailing-q"       "Should I commit this?"          1
+        check "mid-q"            "I changed X. Did that work?"     1
+        check "no-q"             "I committed the change."         0
+        check "code-fence"       "$(printf 'See:\n```bash\nrm -rf /?\n```\nDone.')" 0
+        check "phrase-letmeknow" "Let me know if you want this."   1
+        check "phrase-done"      "All done."                       0
+        check "phrase-shouldi"   "Should I rebase before merging?" 1
+        check "trailing-period"  "Looks good."                     0
+        check "mid-q-not-trailing" "Want me to retry? Anyway, moving on." 1
+        check "mid-q-multi-sentence" "Implemented X. Curious about that bug? Done for now." 1
+        printf '%d passed, %d failed\n' "$pass" "$fail"
+        if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
+        ;;
+
+    *)
+        log "unknown event: ${EVENT}"
+        ;;
+esac
+
+exit 0

@@ -39,7 +39,7 @@ A Claude Code plugin that pushes session events to your phone via [ntfy.sh](http
 | `NTFY_SERVER` | `https://ntfy.sh` | Self-hosted ntfy server URL. |
 | `NTFY_AUTH` | unset | Bearer token for protected topics. Sent as `Authorization: Bearer <token>`. |
 
-The auto-generated topic lives at `~/.config/claude-ntfy/topic`. The plugin also writes a debug log to `~/.config/claude-ntfy/log`.
+The auto-generated topic lives at `~/.config/vibez/topic`. The plugin also writes a debug log to `~/.config/vibez/log`. (If you installed before 0.9.0, an older directory named `claude-ntfy/` is auto-migrated on first run.)
 
 ## Slash commands
 
@@ -55,7 +55,7 @@ For stricter privacy, [self-host ntfy](https://docs.ntfy.sh/install/) and point 
 
 ## Failure mode
 
-Hooks are designed never to block Claude. If the ntfy server is unreachable or `curl` errors, the script logs to `~/.config/claude-ntfy/log` and exits 0 — Claude proceeds, you just don't get the push.
+Hooks are designed never to block Claude. If the ntfy server is unreachable or `curl` errors, the script logs to `~/.config/vibez/log` and exits 0 — Claude proceeds, you just don't get the push.
 
 ## Layout
 

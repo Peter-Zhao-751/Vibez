@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Show the user's ntfy.sh subscribe URL and a QR code.
-# Invoked from the /vibez:setup slash command.
+# Show the user's ntfy.sh subscribe URL.
+# Invoked from the vibez-setup skill.
 #
 # Args:
 #   regenerate    discard the existing topic and create a new one
@@ -53,7 +53,7 @@ case "${ACTION}" in
         ;;
     test)
         if [ -z "${TOPIC}" ]; then
-            printf 'No topic configured yet. Run /vibez:setup first.\n'
+            printf 'No topic configured yet. Run the vibez-setup skill first.\n'
             exit 0
         fi
         auth_args=()
@@ -63,9 +63,10 @@ case "${ACTION}" in
         # ${arr[@]+"${arr[@]}"} expands to nothing when arr is empty —
         # required under set -u on bash 3.2 (macOS default).
         if curl -fsS --max-time 5 \
-            -H "Title: vibez test" \
+            -H "Title: vibez-codex test" \
+            -H "Tags: _vibez:event:done,_vibez:agent:cx" \
             ${auth_args[@]+"${auth_args[@]}"} \
-            -d "If you can read this on your phone, the plugin is wired up." \
+            -d "If you can read this on your phone, the Codex plugin is wired up." \
             "${SERVER}/${TOPIC}" >/dev/null 2>&1; then
             printf 'Test push sent to %s/%s\n' "${SERVER}" "${TOPIC}"
         else
@@ -87,6 +88,6 @@ case "${ACTION}" in
         ;;
 esac
 
-printf 'Your ntfy URL:\n\n  %s\n\nPaste it into the "Set up notifications" widget in the Vibez app on your phone and you'\''re done.\n' "${SERVER}/${TOPIC}"
+printf 'Your ntfy URL:\n\n  %s\n\nPaste it into the "Set up notifications" widget in the Vibez app on your phone (or subscribe in the ntfy app) and you'\''re done.\n' "${SERVER}/${TOPIC}"
 
 exit 0

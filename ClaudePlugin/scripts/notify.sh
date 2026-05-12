@@ -4,7 +4,7 @@
 #
 # Dispatches Claude Code lifecycle events to ntfy.sh as push notifications.
 # Topic is auto-generated on first SessionStart and persisted at
-# ~/.config/claude-ntfy/topic. NTFY_TOPIC env var overrides if set.
+# ~/.config/vibez/topic. NTFY_TOPIC env var overrides if set.
 #
 # Hooks must never block Claude — this script always exits 0, network
 # failures are swallowed.
@@ -13,9 +13,16 @@ set -uo pipefail
 
 EVENT="${1:-}"
 
-CONFIG_DIR="${HOME}/.config/claude-ntfy"
+CONFIG_DIR="${HOME}/.config/vibez"
 TOPIC_FILE="${CONFIG_DIR}/topic"
 LOG_FILE="${CONFIG_DIR}/log"
+
+# One-shot migration from the old claude-ntfy-named directory. Single user
+# (Peter) — same machine, same topic, no phone re-subscribe needed.
+OLD_CONFIG_DIR="${HOME}/.config/claude-ntfy"
+if [ -d "${OLD_CONFIG_DIR}" ] && [ ! -d "${CONFIG_DIR}" ]; then
+    mv "${OLD_CONFIG_DIR}" "${CONFIG_DIR}" 2>/dev/null || true
+fi
 
 mkdir -p "${CONFIG_DIR}" 2>/dev/null || true
 chmod 700 "${CONFIG_DIR}" 2>/dev/null || true

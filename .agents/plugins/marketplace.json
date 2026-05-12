@@ -1,0 +1,20 @@
+{
+  "name": "vibez",
+  "interface": {
+    "displayName": "Vibez"
+  },
+  "plugins": [
+    {
+      "name": "vibez-codex",
+      "source": {
+        "source": "local",
+        "path": "./CodexPlugin"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "NONE"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
