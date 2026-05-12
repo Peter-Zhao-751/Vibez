@@ -16,16 +16,15 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" misplaced="YES" image="WordmarkPDF" translatesAutoresizingMaskIntoConstraints="NO" id="LSC-iv-001">
-                                <rect key="frame" x="63" y="298" width="359" height="100"/>
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" misplaced="YES" image="WordmarkPDF" translatesAutoresizingMaskIntoConstraints="NO" id="Rq8-UZ-PC5">
+                                <rect key="frame" x="129" y="252" width="212" height="139"/>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="LSC-sa-001"/>
                         <color key="backgroundColor" name="LaunchBackground"/>
                         <constraints>
-                            <constraint firstItem="LSC-iv-001" firstAttribute="centerX" secondItem="LSC-vw-001" secondAttribute="centerX" id="LSC-cx-001"/>
-                            <constraint firstItem="LSC-iv-001" firstAttribute="centerY" secondItem="LSC-vw-001" secondAttribute="centerY" id="LSC-cy-001"/>
-                            <constraint firstItem="LSC-iv-001" firstAttribute="width" relation="lessThanOrEqual" secondItem="LSC-sa-001" secondAttribute="width" multiplier="0.7" id="LSC-wm-001"/>
+                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerX" secondItem="LSC-vw-001" secondAttribute="centerX" constant="26" id="T9C-RJ-kZT"/>
+                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerY" secondItem="LSC-vw-001" secondAttribute="centerY" constant="-100" id="z7A-qh-OKF"/>
                         </constraints>
                     </view>
                 </viewController>

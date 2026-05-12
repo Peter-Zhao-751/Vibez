@@ -7,16 +7,37 @@
 //
 //  Blocking is the OR of two inputs:
 //    • `manualBlocking` — what the user toggled in the big switch.
-//    • `pendingTriggers` — set of Claude Code session_ids that have an
-//      open "Claude needs you" / "Claude finished" ping. Each entry is
-//      added when a push tagged `_vibez:shield:on` arrives and removed
-//      when the matching `_vibez:shield:off` push lands (the user
-//      replied in that conversation).
+//    • `pendingTriggers` — one entry per Claude Code session_id that has
+//      an open "Claude needs you" / "Claude finished" ping. Each entry
+//      carries its own duration (snapshot of the user's blockSeconds at
+//      arrival) and is removed when ANY of these happen:
+//        1. the matching `_vibez:shield:off` push lands (user replied),
+//        2. the user taps Dismiss on the overlay for that session,
+//        3. its individual timer elapses.
+//      The shield only lifts once every pending trigger is gone.
 //
 
 import Foundation
 import FamilyControls
 import ManagedSettings
+
+/// A single open ping awaiting one of {reply, dismiss, timeout}. Keyed
+/// by `sessionId` in the manager.
+struct PendingTrigger: Codable, Equatable, Identifiable {
+    let sessionId: String
+    let addedAt: Date
+    let durationSeconds: Int
+
+    var id: String { sessionId }
+
+    var expiresAt: Date {
+        addedAt.addingTimeInterval(TimeInterval(durationSeconds))
+    }
+
+    func isExpired(now: Date) -> Bool {
+        now >= expiresAt
+    }
+}
 
 @MainActor
 @Observable
@@ -31,26 +52,40 @@ final class ScreenTimeManager {
     private(set) var authState: AuthState = .notDetermined
     private(set) var selection = FamilyActivitySelection()
     private(set) var manualBlocking: Bool = false
-    private(set) var pendingTriggers: Set<String> = []
+    /// Keyed by sessionId. A second ping in the same session overwrites
+    /// the prior entry — that's intentional: the new ping "resets" the
+    /// per-session timer, since it represents the latest unresolved
+    /// state of that conversation.
+    private(set) var pendingTriggers: [String: PendingTrigger] = [:]
     private(set) var isBlocking: Bool = false
     private(set) var lastError: String?
 
     private let store = ManagedSettingsStore(named: .vibez)
     private let defaults = UserDefaults.standard
 
+    @ObservationIgnored private var tickTask: Task<Void, Never>?
+
     private enum Key {
         static let selection = "vibez.selection.v1"
         static let manualBlocking = "vibez.manualBlocking.v1"
-        static let pendingTriggers = "vibez.pendingTriggers.v1"
-        /// Legacy key kept for one-shot migration only.
+        /// v1: `[String]` of sessionIds. Migrated to v2 on first load.
+        static let pendingTriggersV1 = "vibez.pendingTriggers.v1"
+        /// v2: JSON-encoded `[PendingTrigger]`.
+        static let pendingTriggersV2 = "vibez.pendingTriggers.v2"
+        /// Legacy single-Bool key kept for one-shot manualBlocking migration.
         static let legacyBlocking = "vibez.isBlocking.v1"
     }
+
+    /// Used when migrating v1 entries that don't know their original
+    /// duration. Matches the @AppStorage default in ContentView.
+    private static let migrationFallbackDuration = 1800
 
     init() {
         loadSelection()
         loadStateAndMigrate()
         syncAuthState()
-        recomputeBlocking()
+        recomputeBlocking()  // also prunes anything that expired while off
+        startTicking()
     }
 
     // MARK: - Selection helpers
@@ -92,7 +127,7 @@ final class ScreenTimeManager {
 
     /// Manual toggle from the big switch. When the user turns it OFF we
     /// also clear any pending triggers — they've explicitly decided to
-    /// stop, no point keeping the auto-block alive.
+    /// stop, so the per-session timers no longer matter.
     func setBlocking(_ on: Bool) {
         manualBlocking = on
         if !on { pendingTriggers.removeAll() }
@@ -103,16 +138,26 @@ final class ScreenTimeManager {
 
     // MARK: - Per-session pending triggers
 
-    func addTrigger(sessionId: String) {
+    /// Records a new pending trigger for `sessionId`. Snapshotting
+    /// `durationSeconds` here means later edits to the user's slider
+    /// don't retroactively extend (or shrink) an in-flight block.
+    func addTrigger(sessionId: String, durationSeconds: Int) {
         guard !sessionId.isEmpty, sessionId != "nosid" else { return }
-        pendingTriggers.insert(sessionId)
+        let duration = max(1, durationSeconds)
+        pendingTriggers[sessionId] = PendingTrigger(
+            sessionId: sessionId,
+            addedAt: Date(),
+            durationSeconds: duration
+        )
         persistPendingTriggers()
         recomputeBlocking()
     }
 
+    /// Removes a single trigger by sessionId. Same code path is used by:
+    /// reply (shield:off push), Dismiss button, and timer expiry.
     func resolveTrigger(sessionId: String) {
         guard !sessionId.isEmpty, sessionId != "nosid" else { return }
-        pendingTriggers.remove(sessionId)
+        guard pendingTriggers.removeValue(forKey: sessionId) != nil else { return }
         persistPendingTriggers()
         recomputeBlocking()
     }
@@ -127,7 +172,35 @@ final class ScreenTimeManager {
 
     // MARK: - Internal
 
+    /// Runs the timer-driven prune. Cheap: a Dictionary scan plus the
+    /// early-return inside `recomputeBlocking()` if nothing flipped.
+    private func tick() {
+        let pruned = pruneExpired()
+        if pruned {
+            recomputeBlocking()
+        }
+    }
+
+    /// Removes any pending triggers whose per-session timer has run out.
+    /// Returns true if anything was removed (caller decides whether to
+    /// recompute the shield).
+    @discardableResult
+    private func pruneExpired() -> Bool {
+        let now = Date()
+        let expired = pendingTriggers.values.filter { $0.isExpired(now: now) }
+        guard !expired.isEmpty else { return false }
+        for trigger in expired {
+            pendingTriggers.removeValue(forKey: trigger.sessionId)
+        }
+        persistPendingTriggers()
+        return true
+    }
+
     private func recomputeBlocking() {
+        // Prune before deciding — an expired-but-unpruned entry would
+        // otherwise keep the shield up for up to one tick longer.
+        pruneExpired()
+
         let newValue = manualBlocking || !pendingTriggers.isEmpty
         if newValue == isBlocking { return }
         isBlocking = newValue
@@ -135,6 +208,16 @@ final class ScreenTimeManager {
             applyShield()
         } else {
             clearShield()
+        }
+    }
+
+    private func startTicking() {
+        tickTask?.cancel()
+        tickTask = Task { @MainActor [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                self?.tick()
+            }
         }
     }
 
@@ -192,11 +275,20 @@ final class ScreenTimeManager {
     }
 
     private func persistPendingTriggers() {
-        defaults.set(Array(pendingTriggers), forKey: Key.pendingTriggers)
+        if pendingTriggers.isEmpty {
+            defaults.removeObject(forKey: Key.pendingTriggersV2)
+            return
+        }
+        do {
+            let data = try JSONEncoder().encode(Array(pendingTriggers.values))
+            defaults.set(data, forKey: Key.pendingTriggersV2)
+        } catch {
+            lastError = "Failed to save pending triggers: \(error.localizedDescription)"
+        }
     }
 
     private func loadStateAndMigrate() {
-        // Migrate the old single-Bool key the first time we see it.
+        // Manual-toggle migration (unchanged from before).
         if defaults.object(forKey: Key.manualBlocking) == nil,
            defaults.object(forKey: Key.legacyBlocking) != nil {
             manualBlocking = defaults.bool(forKey: Key.legacyBlocking)
@@ -205,8 +297,32 @@ final class ScreenTimeManager {
         } else {
             manualBlocking = defaults.bool(forKey: Key.manualBlocking)
         }
-        if let arr = defaults.array(forKey: Key.pendingTriggers) as? [String] {
-            pendingTriggers = Set(arr)
+
+        // v2 wins if present.
+        if let data = defaults.data(forKey: Key.pendingTriggersV2),
+           let decoded = try? JSONDecoder().decode([PendingTrigger].self, from: data) {
+            pendingTriggers = Dictionary(
+                uniqueKeysWithValues: decoded.map { ($0.sessionId, $0) }
+            )
+            return
+        }
+
+        // One-shot v1 → v2 migration. We didn't record durations under
+        // v1, so assume "added now" with the default duration — the user
+        // can flip the toggle off to wipe if these stale entries bug
+        // them.
+        if let arr = defaults.array(forKey: Key.pendingTriggersV1) as? [String] {
+            let now = Date()
+            pendingTriggers = Dictionary(uniqueKeysWithValues: arr.compactMap { sid in
+                guard !sid.isEmpty, sid != "nosid" else { return nil }
+                return (sid, PendingTrigger(
+                    sessionId: sid,
+                    addedAt: now,
+                    durationSeconds: Self.migrationFallbackDuration
+                ))
+            })
+            defaults.removeObject(forKey: Key.pendingTriggersV1)
+            persistPendingTriggers()
         }
     }
 }

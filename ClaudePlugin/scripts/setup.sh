@@ -79,6 +79,6 @@ case "${ACTION}" in
         ;;
 esac
 
-printf 'Your ntfy URL:\n\n  %s\n\nPaste it into the ntfy app on your phone (tap +, then paste) and you'\''re done.\n' "${SERVER}/${TOPIC}"
+printf 'Your ntfy URL:\n\n  %s\n\nPaste it into the "Set up notifications" widget in the Vibez app on your phone and you'\''re done.\n' "${SERVER}/${TOPIC}"
 
 exit 0

@@ -1,7 +1,7 @@
 {
   "name": "vibez",
   "description": "Push Claude Code notifications and stop events to your phone via ntfy.sh. First session auto-generates a private topic and shows you the subscribe URL.",
-  "version": "0.7.0",
+  "version": "0.7.1",
   "author": {
     "name": "Peter Zhao"
   },

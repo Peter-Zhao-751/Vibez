@@ -21,6 +21,16 @@ enum VibezEvent: String, Equatable {
     case done           // Stop hook, last turn was not a question
     case needsInput     = "needs-input"  // Notification, or Stop where Claude asked
     case replied        // UserPromptSubmit
+
+    /// Short human label used as a prefix on overlay + notification
+    /// titles, e.g. "Done — <conversation title>".
+    var label: String {
+        switch self {
+        case .done:       return "Done"
+        case .needsInput: return "Needs you"
+        case .replied:    return "Replied"
+        }
+    }
 }
 
 /// Whether the iPhone should be shielded right now, parsed from
@@ -48,6 +58,18 @@ struct NtfyMessage: Equatable {
     /// rather than stored separately — `needs-input` is the only state
     /// that means "waiting on the user".
     var needsReply: Bool { event == .needsInput }
+
+    /// Title with the event prefix applied: "Done — Plan plugin distribution".
+    /// Used for local notifications and the blocked overlay so the user can
+    /// see at a glance what Claude is asking for. Falls back to the raw
+    /// title when no event tag is present (third-party / untagged pings).
+    var displayTitle: String {
+        guard let prefix = event?.label else {
+            return title.isEmpty ? "Vibez" : title
+        }
+        if title.isEmpty { return prefix }
+        return "\(prefix) — \(title)"
+    }
 }
 
 @MainActor
@@ -94,6 +116,47 @@ final class NotifyClient {
         if case .connected = state { state = .idle }
     }
 
+    /// One-shot connectivity probe. Opens a parallel WebSocket to
+    /// `urlString`, waits for the first server frame (ntfy sends an
+    /// "open" event on subscribe), and returns true on receipt or false
+    /// on error/timeout. The test task is always cancelled before
+    /// returning, so this leaves no connection sitting around.
+    ///
+    /// Used by the setup card to verify a candidate URL before
+    /// committing it to `ntfyURL` — otherwise a junk URL would unlock
+    /// the main toggle while the real connection silently fails in
+    /// the background.
+    func validate(urlString: String, timeout: TimeInterval = 5.0) async -> Bool {
+        guard let url = makeWebSocketURL(from: urlString) else { return false }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = timeout
+        let probe = session.webSocketTask(with: request)
+        probe.resume()
+        defer {
+            probe.cancel(with: .normalClosure, reason: nil)
+        }
+
+        // A timeout task that force-cancels the probe — which makes
+        // receive() resolve with .failure(.cancelled), so we never wait
+        // forever on a URL that accepted the TCP/TLS handshake but
+        // doesn't speak the ntfy protocol.
+        let timeoutTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            probe.cancel(with: .normalClosure, reason: nil)
+        }
+
+        let success: Bool = await withCheckedContinuation { cont in
+            probe.receive { result in
+                switch result {
+                case .success: cont.resume(returning: true)
+                case .failure: cont.resume(returning: false)
+                }
+            }
+        }
+        timeoutTask.cancel()
+        return success
+    }
+
     /// Fakes an incoming ntfy message. Used for the in-app "Test push"
     /// button so the user can see the overlay + local notification flow
     /// without the network in the loop.
@@ -128,10 +191,12 @@ final class NotifyClient {
         task = newTask
         newTask.resume()
 
-        // ntfy considers a connection established once the upgrade succeeds;
-        // reaching the first receive() is a strong signal.
+        // Stay in .connecting until the first server frame lands — ntfy
+        // sends an "open" event on subscribe, so the success branch in
+        // receiveLoop is what tells us the handshake actually completed.
+        // Setting .connected here would lie about bad URLs and make the
+        // setup card flicker on the connecting/error reconnect loop.
         receiveLoop(generation: myGen)
-        state = .connected
     }
 
     private func receiveLoop(generation myGen: Int) {
@@ -145,6 +210,12 @@ final class NotifyClient {
                     self.state = .error(error.localizedDescription)
                     self.scheduleReconnect()
                 case .success(let message):
+                    // First successful frame promotes us to .connected.
+                    // Later frames just re-enter — case .connected is
+                    // already the steady state.
+                    if case .connecting = self.state {
+                        self.state = .connected
+                    }
                     self.handle(message: message)
                     self.receiveLoop(generation: myGen)
                 }
@@ -199,21 +270,26 @@ final class NotifyClient {
             default:        continue
             }
         }
-        if msg.shield == .on {
-            deliver(msg)
-        }
+        // Hand off to ContentView. shield:on raises the shield, shield:off
+        // lowers it for the matching session, untagged pings just surface
+        // the overlay — the routing lives in handleIncoming(), not here.
+        deliver(msg)
     }
 
     // MARK: - Notification delivery
 
+    /// Just publish the message — the decision to surface a local
+    /// notification lives in ContentView.handleIncoming so it can be
+    /// gated on the user's toggle and skipped for shield:off replies.
     private func deliver(_ msg: NtfyMessage) {
         lastMessage = msg
-        scheduleLocalNotification(msg)
     }
 
-    private func scheduleLocalNotification(_ msg: NtfyMessage) {
+    /// Schedule a local notification for this message. Caller owns the
+    /// gating policy (toggle state, shield kind) — this just renders.
+    func scheduleLocalNotification(_ msg: NtfyMessage) {
         let content = UNMutableNotificationContent()
-        content.title = msg.title
+        content.title = msg.displayTitle
         content.body = msg.body.isEmpty ? "Vibez ping" : msg.body
         content.sound = .default
 

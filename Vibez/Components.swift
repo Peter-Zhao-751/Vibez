@@ -84,7 +84,7 @@ struct BigToggle: View {
     @Binding var enabled: Bool
     let agent: Agent
     let theme: Theme
-    var isInteractive: Bool = true
+    let isInteractive: Bool
 
     private let pillW: CGFloat = 250
     private let pillH: CGFloat = 132
@@ -141,11 +141,15 @@ struct BigToggle: View {
                         Circle().stroke(.black.opacity(0.04), lineWidth: 1)
                     )
                     .overlay(
-                        BlockerKnob(
-                            listening: enabled,
-                            size: 92,
-                            stroke: theme.fg
-                        )
+                        VStack{
+                            if (isInteractive){
+                                BlockerKnob(
+                                    listening: enabled,
+                                    size: 92,
+                                    stroke: theme.fg
+                                )
+                            }
+                        }
                     )
                     .padding(.leading, knobX)
             }
@@ -153,7 +157,7 @@ struct BigToggle: View {
         }
         .buttonStyle(.plain)
         .disabled(!isInteractive)
-        .opacity(isInteractive ? 1.0 : 0.45)
+        .opacity(isInteractive ? 1.0 : 0.7)
         .accessibilityLabel(enabled ? "Disable Vibez" : "Enable Vibez")
     }
 
@@ -170,13 +174,29 @@ struct NotificationSetupCard: View {
     let theme: Theme
 
     @State private var draft: String = ""
+    @State private var verifying: Bool = false
+    @State private var verifyError: String? = nil
+    @State private var verifyTask: Task<Void, Never>? = nil
     @FocusState private var focused: Bool
 
     private var trimmedDraft: String {
         draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var saveable: Bool { !trimmedDraft.isEmpty }
+    private var trimmedSavedURL: String {
+        ntfyURL.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Save is enabled only when there's a new value to test AND we're
+    /// not already verifying. The "trimmed != saved" gate doubles as
+    /// the "you already tried this URL and it didn't work, change it
+    /// before pressing Save again" gate — verifyError stays on screen
+    /// to tell them why.
+    private var saveable: Bool {
+        !trimmedDraft.isEmpty
+            && !verifying
+            && trimmedDraft != trimmedSavedURL
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -220,22 +240,31 @@ struct NotificationSetupCard: View {
                 )
 
                 Button(action: commit) {
-                    Text("Save")
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .tracking(1.6)
-                        .foregroundStyle(saveable ? theme.onAccent : theme.fgFaint)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 11)
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(saveable
-                                      ? AnyShapeStyle(theme.pillGradient)
-                                      : AnyShapeStyle(theme.bgChip))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10)
-                                .stroke(saveable ? Color.clear : theme.hairline, lineWidth: 1)
-                        )
+                    Group {
+                        if verifying {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .tint(theme.onAccent)
+                        } else {
+                            Text("Save")
+                                .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                                .tracking(1.6)
+                                .foregroundStyle(saveable ? theme.onAccent : theme.fgFaint)
+                        }
+                    }
+                    .frame(minWidth: 44)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 11)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill((saveable || verifying)
+                                  ? AnyShapeStyle(theme.pillGradient)
+                                  : AnyShapeStyle(theme.bgChip))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke((saveable || verifying) ? Color.clear : theme.hairline, lineWidth: 1)
+                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(!saveable)
@@ -243,6 +272,14 @@ struct NotificationSetupCard: View {
             .onChange(of: focused) { _, newFocused in
                 if !newFocused { commit() }
             }
+            .onChange(of: draft) { _, _ in
+                // User edited the draft — the previous error no longer
+                // applies. Clear it so the failure indicator doesn't
+                // shout at them while they're typing the fix.
+                if verifyError != nil { verifyError = nil }
+            }
+
+            statusLine
         }
         .padding(14)
         .background(
@@ -253,14 +290,79 @@ struct NotificationSetupCard: View {
             RoundedRectangle(cornerRadius: 16)
                 .stroke(theme.hairline, lineWidth: 1)
         )
+        .onDisappear {
+            verifyTask?.cancel()
+            verifyTask = nil
+        }
     }
 
+    /// Inline state under the input. Verify state wins; otherwise we
+    /// surface the live notifyClient state so the user knows what's
+    /// happening if a previously-saved URL has dropped.
+    @ViewBuilder
+    private var statusLine: some View {
+        if verifying {
+            HStack(spacing: 6) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Verifying connection…")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.fgMute)
+            }
+        } else if let err = verifyError {
+            Text(err)
+                .font(.system(size: 11.5))
+                .foregroundStyle(theme.fgMute)
+        } else if !trimmedSavedURL.isEmpty {
+            switch notifyClient.state {
+            case .connecting:
+                HStack(spacing: 6) {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Connecting…")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(theme.fgMute)
+                }
+            case .error:
+                Text("Connection lost — retrying…")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(theme.fgMute)
+            case .idle, .connected:
+                EmptyView()
+            }
+        }
+    }
+
+    /// Kicks off a verify against the draft URL. Only writes `ntfyURL`
+    /// (which is what unlocks the BigToggle) after the probe actually
+    /// receives a frame from the server — so a junk URL never unlocks
+    /// the toggle, and the card stays put with an error.
     private func commit() {
         let trimmed = trimmedDraft
         guard !trimmed.isEmpty else { return }
-        guard notifyClient.state != .connected else { return }
-        ntfyURL = trimmed
+        guard !verifying else { return }
+        guard trimmed != trimmedSavedURL else { return }
+
+        verifyTask?.cancel()
+        verifying = true
+        verifyError = nil
         focused = false
+
+        verifyTask = Task { @MainActor in
+            let ok = await notifyClient.validate(urlString: trimmed)
+            // The view may have been torn down (parent removed it
+            // because state == .connected against the previous URL, or
+            // user navigated away). Bail rather than mutate stale state.
+            if Task.isCancelled { return }
+            verifying = false
+            if ok {
+                // Only NOW does ntfyURL get the new value — the binding
+                // is what flips the big toggle from locked to usable.
+                ntfyURL = trimmed
+            } else {
+                verifyError = "Couldn't connect. Check the URL and try again."
+            }
+        }
     }
 }
 

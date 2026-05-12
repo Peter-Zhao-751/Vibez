@@ -50,7 +50,7 @@ struct ContentView: View {
                     theme: theme,
                     dark: effectiveDark,
                     message: msg,
-                    onDismiss: { withAnimation { overlayMessage = nil } }
+                    onDismiss: { dismissOverlay(for: msg) }
                 )
                 .zIndex(5)
             }
@@ -151,11 +151,26 @@ struct ContentView: View {
         )
     }
 
+    /// Tapping Dismiss resolves the trigger for THIS message's session
+    /// only — other sessions stay pending and the shield stays up until
+    /// each of them is replied-to, dismissed, or times out.
+    private func dismissOverlay(for message: NtfyMessage) {
+        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+            manager.resolveTrigger(sessionId: sid)
+            triggerStore.clearNeedsReply(forSession: sid)
+        }
+        withAnimation { overlayMessage = nil }
+    }
+
     private func handleIncoming(_ message: NtfyMessage) {
-        switch message.shield {
-        case .off:
-            // User replied in this conversation → lift the shield and
-            // dismiss the overlay if it was for the same session.
+        // shield:off (the user just replied in Claude) is a control
+        // signal — never surface it as a notification, and only act on
+        // it if we actually have something to resolve. Handled first so
+        // it bypasses the toggle gate below: a reply that lands while
+        // the user has just flipped the toggle off is harmless to
+        // process (resolveTrigger is a no-op when the session isn't
+        // pending) and we don't want stale state to linger.
+        if message.shield == .off {
             if let sid = message.sessionId {
                 manager.resolveTrigger(sessionId: sid)
                 triggerStore.clearNeedsReply(forSession: sid)
@@ -164,7 +179,15 @@ struct ContentView: View {
                current.sessionId == message.sessionId {
                 withAnimation { overlayMessage = nil }
             }
+            return
+        }
 
+        // Toggle off → Vibez is dormant. Don't notify, don't show the
+        // overlay, don't add a trigger — the user has explicitly told us
+        // to stay out of the way.
+        guard manager.isBlocking else { return }
+
+        switch message.shield {
         case .on:
             recordTrigger(from: message)
 
@@ -181,9 +204,10 @@ struct ContentView: View {
                     )
                     return
                 }
-                manager.addTrigger(sessionId: sid)
+                manager.addTrigger(sessionId: sid, durationSeconds: blockSeconds)
             }
 
+            notifyClient.scheduleLocalNotification(message)
             withAnimation(.easeOut(duration: 0.45)) {
                 overlayMessage = message
             }
@@ -192,9 +216,14 @@ struct ContentView: View {
             // Plain ntfy ping (test push, third-party producer, etc.)
             // — show the overlay as we always did.
             recordTrigger(from: message)
+            notifyClient.scheduleLocalNotification(message)
             withAnimation(.easeOut(duration: 0.45)) {
                 overlayMessage = message
             }
+
+        case .off:
+            // Unreachable — handled above.
+            break
         }
     }
 

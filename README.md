@@ -22,15 +22,15 @@
 
 ## the situation, 2026
 
-You're a self-respecting senior engineer. You have a Claude subscription. You have taste. You have a sprint deadline.
+It's 2026. Every self-respecting engineer — or so-called engineer — has a Claude subscription, taste, and a sprint deadline.
 
-You also have, statistically speaking, **47 minutes of TikTok logged today** and it's only lunchtime, because every time Claude says
+They also have, statistically speaking, **47 minutes of TikTok logged before lunch**, because every time Claude says
 
 > _"Should I run `npm install` to add the new dependency? (y/n)"_
 
-your thumb is already on the home button before your prefrontal cortex catches up. Forty seconds become forty minutes. Your agent finished six tasks ago. The build is green. You are still watching a labrador eat a strawberry.
+their thumb is on the home button before their prefrontal cortex catches up. Forty seconds become forty minutes. The agent finished six tasks ago. The build is green. They are still watching a labrador eat a strawberry.
 
-This is the year of our Lord 2026 and you are not going to fix this with willpower.
+And willpower's not going to fix it.
 
 ## what vibez does
 
@@ -69,30 +69,24 @@ A native iOS app. Uses Apple's Screen Time / Family Controls APIs to shield the 
 | When Claude does this | Vibez does this |
 |---|---|
 | **Starts a session** (first run) | Shows you the subscribe URL inline so you can pair your phone. |
-| **Asks for input** ("Permission required to run…") | High-priority push. The actual question is in the title. Your reels die. |
-| **Finishes a task** (Stop) | Default-priority push with a ~160-char excerpt of Claude's last message. Apps stay shielded until you come back. |
+| **Asks for input** ("Permission required to run…") | Push with the question in the title. Your reels die. |
+| **Finishes a task** (Stop) | Push with a ~160-char excerpt of Claude's last message. Apps stay shielded until you come back. |
 | **Is happily working** | Nothing. The phone is yours. Touch grass. Or don't. |
 
 ## install: the claude side
 
 Available right now. This part actually works.
 
-**1.** Get the [ntfy app](https://ntfy.sh/app) on your phone (iOS / Android / web).
-
-**2.** Optional, for the inline QR: `brew install qrencode`
-
-**3.** In Claude Code:
+**1.** In Claude Code:
 
 ```sh
 /plugin marketplace add Peter-Zhao-751/Vibez
 /plugin install vibez@plugin
 ```
 
-**4.** Open Claude Code as normal. The first session prints a banner with your private subscribe URL.
+**2.** Open Claude Code as normal. The first session prints a banner with your private subscribe URL.
 
-**5.** Run `/vibez:setup` to show the URL again with an inline QR. Open ntfy on your phone → tap **+** → scan it.
-
-**6.** Verify with `/vibez:setup test`. You should get a push within a second or two.
+**3.** Run `/vibez:setup` to show the URL again with an inline QR. Open ntfy on your phone → tap **+** → scan it.
 
 Full plugin docs (env vars, self-hosted ntfy, slash commands, failure modes) live in [`ClaudePlugin/README.md`](ClaudePlugin/README.md).
 

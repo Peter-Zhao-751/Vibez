@@ -19,9 +19,12 @@ struct BlockedOverlay: View {
     @State private var appeared = false
 
     private var titleText: String {
-        message?.title.isEmpty == false
-            ? message!.title
-            : "\(agent.label) needs you."
+        // displayTitle already prepends the event label ("Done — …",
+        // "Needs you — …") so the user sees what Claude wants at a
+        // glance. Fall back to the agent-themed placeholder only when
+        // there's no message at all.
+        guard let msg = message else { return "\(agent.label) needs you." }
+        return msg.displayTitle
     }
 
     private var bodyText: String {
