@@ -16,7 +16,7 @@
                         <rect key="frame" x="0.0" y="0.0" width="393" height="852"/>
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
-                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" misplaced="YES" image="Wordmark" translatesAutoresizingMaskIntoConstraints="NO" id="LSC-iv-001">
+                            <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" misplaced="YES" image="WordmarkPDF" translatesAutoresizingMaskIntoConstraints="NO" id="LSC-iv-001">
                                 <rect key="frame" x="63" y="298" width="359" height="100"/>
                             </imageView>
                         </subviews>
@@ -35,7 +35,7 @@
         </scene>
     </scenes>
     <resources>
-        <image name="Wordmark" width="280" height="100"/>
+        <image name="WordmarkPDF" width="210" height="75"/>
         <namedColor name="LaunchBackground">
             <color red="0.98431372549019602" green="0.97254901960784312" blue="0.95686274509803926" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </namedColor>
