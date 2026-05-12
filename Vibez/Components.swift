@@ -438,7 +438,9 @@ struct StatusPill: View {
         Text(listening ? "● LISTENING" : "○ STANDBY")
             .font(.system(size: 11, weight: .heavy, design: .monospaced))
             .tracking(2.4)
-            .foregroundStyle(listening ? theme.accent : theme.fgFaint)
+            .foregroundStyle(listening ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.fgFaint))
+            .shadow(color: listening ? theme.accentDeep.opacity(0.55) : .clear,
+                    radius: listening ? 12 : 0, x: 0, y: 4)
     }
 }
 
@@ -605,9 +607,18 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
     }
 
-    /// Sniff "Claude" / "Codex" out of the ntfy message; fall back to the
-    /// user's currently selected agent so a generic ping still picks a side.
-    static func detectSource(title: String, body: String, fallback: Agent) -> Source {
+    /// Determine which agent produced a ntfy message. Prefers the explicit
+    /// "_vibez:agent" tag (set by recent plugin versions); falls back to
+    /// sniffing "Claude" / "Codex" out of the title+body for older plugins
+    /// or untagged third-party producers; finally falls back to the user's
+    /// currently selected agent so a generic ping still picks a side.
+    static func detectSource(title: String, body: String, agent: VibezAgent?, fallback: Agent) -> Source {
+        if let agent {
+            switch agent {
+            case .claude: return .claude
+            case .codex:  return .codex
+            }
+        }
         let blob = (title + " " + body).lowercased()
         if blob.contains("codex") { return .codex }
         if blob.contains("claude") { return .claude }

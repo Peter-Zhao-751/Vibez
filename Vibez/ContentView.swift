@@ -156,6 +156,7 @@ struct ContentView: View {
         let source = TriggerEvent.detectSource(
             title: message.title,
             body: message.body,
+            agent: message.agent,
             fallback: agent
         )
         triggerStore.record(

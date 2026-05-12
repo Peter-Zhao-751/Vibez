@@ -352,8 +352,10 @@ case "${EVENT}" in
         # _vibez:shield:on tells the app to shield. _vibez:session:<sid>
         # lets it match this against an upcoming user reply (which
         # arrives with shield:off) and lift the shield for this exact
-        # conversation.
-        post_ntfy "${convo_title}" "${message}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on"
+        # conversation. _vibez:agent:cc tells the app this came from
+        # Claude Code (vs cx for Codex), so it can route + badge without
+        # sniffing the title/body.
+        post_ntfy "${convo_title}" "${message}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
         ;;
 
     stop)
@@ -369,9 +371,9 @@ case "${EVENT}" in
             exit 0
         fi
         if last_turn_is_asking "${excerpt}"; then
-            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on"
+            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
         else
-            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on"
+            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
         fi
         ;;
 
@@ -393,7 +395,7 @@ case "${EVENT}" in
             prompt="${prompt:0:79}…"
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
-        post_ntfy "${convo_title}" "${prompt}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off"
+        post_ntfy "${convo_title}" "${prompt}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cc"
         ;;
 
     _selftest)

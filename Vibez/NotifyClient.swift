@@ -40,6 +40,13 @@ enum VibezShield: String, Equatable {
     case off
 }
 
+/// Which agent produced this push, parsed from "_vibez:agent:<value>".
+/// Set by the plugin so the app doesn't have to sniff title/body strings.
+enum VibezAgent: String, Equatable {
+    case claude = "cc"
+    case codex  = "cx"
+}
+
 struct NtfyMessage: Equatable {
     let id: String
     let title: String
@@ -53,6 +60,10 @@ struct NtfyMessage: Equatable {
     var shield: VibezShield? = nil
     /// Claude Code session_id from "_vibez:session:<value>".
     var sessionId: String? = nil
+    /// Producing agent from "_vibez:agent:<value>" ("cc" → Claude Code,
+    /// "cx" → Codex). nil for pushes from older plugin versions or
+    /// untagged third-party producers — callers fall back to sniffing.
+    var agent: VibezAgent? = nil
 
     /// True while Claude is parked on a user reply. Derived from `event`
     /// rather than stored separately — `needs-input` is the only state
@@ -267,6 +278,7 @@ final class NotifyClient {
             case "event":   msg.event = VibezEvent(rawValue: value)
             case "shield":  msg.shield = VibezShield(rawValue: value)
             case "session": msg.sessionId = value
+            case "agent":   msg.agent = VibezAgent(rawValue: value)
             default:        continue
             }
         }
