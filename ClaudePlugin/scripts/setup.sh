@@ -56,8 +56,6 @@ case "${ACTION}" in
         fi
         if curl -fsS --max-time 5 \
             -H "Title: vibez test" \
-            -H "Priority: default" \
-            -H "Tags: white_check_mark" \
             "${auth_args[@]}" \
             -d "If you can read this on your phone, the plugin is wired up." \
             "${SERVER}/${TOPIC}" >/dev/null 2>&1; then

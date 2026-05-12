@@ -36,7 +36,7 @@ final class TriggerStore {
     }
 
     /// Marks any TriggerEvent for the given session id as no-longer-
-    /// awaiting-reply. Called when a `_vibez:unblock:<sid>` arrives
+    /// awaiting-reply. Called when a `_vibez:shield:off` push arrives
     /// because the user just replied in that conversation.
     func clearNeedsReply(forSession sid: String) {
         var changed = false

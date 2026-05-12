@@ -8,8 +8,9 @@ A Claude Code plugin that pushes session events to your phone via [ntfy.sh](http
 |---|---|---|
 | **SessionStart** (first run only) | Internal | A banner inside Claude Code with your subscribe URL. |
 | **SessionStart** (subsequent runs) | No | Nothing. |
-| **Notification** | Yes (high priority) | The actual message Claude is asking about — e.g. "Permission required to run npm install" or "Claude is waiting for your input". |
-| **Stop** | Yes (default priority) | Title with the project name + a ~160-char excerpt of Claude's last message. |
+| **Notification** | Yes | The actual message Claude is asking about — e.g. "Permission required to run npm install" or "Claude is waiting for your input". |
+| **Stop** | Yes | Title with the conversation name + a ~160-char excerpt of Claude's last message. |
+| **UserPromptSubmit** | Yes | A short excerpt of your reply — also tells the Vibez app to lift the shield for this session. |
 
 ## Install
 

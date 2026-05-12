@@ -47,8 +47,7 @@ generate_topic() {
 post_ntfy() {
     local title="$1"
     local body="$2"
-    local priority="${3:-default}"
-    local tags="${4:-}"
+    local tags="${3:-}"
 
     if [ -z "${TOPIC}" ]; then
         log "skip: no topic configured (event=${EVENT})"
@@ -58,7 +57,6 @@ post_ntfy() {
     local -a curl_args=(
         -fsS --max-time 5
         -H "Title: ${title}"
-        -H "Priority: ${priority}"
     )
     if [ -n "${tags}" ]; then
         curl_args+=(-H "Tags: ${tags}")
@@ -184,10 +182,10 @@ read_conversation_title() {
         return
     fi
 
-    # Cap at 60 chars (slightly tighter than before to leave room for
-    # the " — done"/" — needs you" suffix in the iOS notification title).
-    if [ "${#title}" -gt 60 ]; then
-        printf '%s…' "${title:0:59}"
+    # Cap at 72 chars — the title is the conversation name on its own;
+    # status (done / needs-input / replied) lives in the _vibez:event tag.
+    if [ "${#title}" -gt 72 ]; then
+        printf '%s…' "${title:0:71}"
     else
         printf '%s' "${title}"
     fi
@@ -351,10 +349,11 @@ case "${EVENT}" in
             ntype="$(jq_get '.notification_type' 'unknown')"
             message="Claude needs your attention (${ntype})"
         fi
-        # Control tag _vibez:block:<sid> lets the iOS app match this
-        # block request against an upcoming UserPromptSubmit and
-        # auto-unblock when the user replies in this exact conversation.
-        post_ntfy "${convo_title} — needs you" "${message}" "high" "bell,_vibez:block:${sid},_vibez:waiting"
+        # _vibez:shield:on tells the app to shield. _vibez:session:<sid>
+        # lets it match this against an upcoming user reply (which
+        # arrives with shield:off) and lift the shield for this exact
+        # conversation.
+        post_ntfy "${convo_title}" "${message}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on"
         ;;
 
     stop)
@@ -370,17 +369,16 @@ case "${EVENT}" in
             exit 0
         fi
         if last_turn_is_asking "${excerpt}"; then
-            post_ntfy "${convo_title} — needs you" "${excerpt}" "high" "bell,_vibez:block:${sid},_vibez:waiting"
+            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on"
         else
-            post_ntfy "${convo_title} — done" "${excerpt}" "default" "white_check_mark,_vibez:block:${sid}"
+            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on"
         fi
         ;;
 
     user-prompt-submit)
-        # User replied in Claude — fire a low-priority push tagged
-        # _vibez:unblock:<sid> so the iOS app can release the matching
-        # block. Body is mostly for the official ntfy app's history;
-        # the Vibez app routes on the control tag.
+        # User replied in Claude — fire a push with _vibez:shield:off so
+        # the iOS app lifts the shield for this session. Body is mostly
+        # informational; the Vibez app routes on the tag axes.
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
@@ -395,7 +393,7 @@ case "${EVENT}" in
             prompt="${prompt:0:79}…"
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
-        post_ntfy "${convo_title} — replied" "${prompt}" "low" "leftwards_arrow_with_hook,_vibez:unblock:${sid}"
+        post_ntfy "${convo_title}" "${prompt}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off"
         ;;
 
     _selftest)

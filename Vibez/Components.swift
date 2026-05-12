@@ -486,15 +486,6 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         needsReply = try c.decodeIfPresent(Bool.self, forKey: .needsReply) ?? false
     }
 
-    /// Strip the " — done" / " — needs you" / " — replied" suffix
-    /// that the plugin appends, so the conversation name renders alone.
-    static func cleanedTitle(from rawTitle: String) -> String {
-        guard let range = rawTitle.range(of: " — ", options: .backwards) else {
-            return rawTitle
-        }
-        return String(rawTitle[..<range.lowerBound])
-    }
-
     func relativeTime(from now: Date) -> String {
         let delta = max(0, Int(now.timeIntervalSince(receivedAt)))
         if delta < 60 { return "just now" }

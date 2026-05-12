@@ -15,10 +15,19 @@
 import Foundation
 import UserNotifications
 
-enum NtfyMessageKind: Equatable {
-    case block        // Notification or Stop hook → block apps for this session
-    case unblock      // UserPromptSubmit → user replied, release this session
-    case unknown      // Plain ntfy ping, no Vibez control tag
+/// What lifecycle moment the push represents, parsed from
+/// "_vibez:event:<value>".
+enum VibezEvent: String, Equatable {
+    case done           // Stop hook, last turn was not a question
+    case needsInput     = "needs-input"  // Notification, or Stop where Claude asked
+    case replied        // UserPromptSubmit
+}
+
+/// Whether the iPhone should be shielded right now, parsed from
+/// "_vibez:shield:<value>".
+enum VibezShield: String, Equatable {
+    case on
+    case off
 }
 
 struct NtfyMessage: Equatable {
@@ -26,14 +35,19 @@ struct NtfyMessage: Equatable {
     let title: String
     let body: String
     let receivedAt: Date
-    /// Kind derived from a "_vibez:<kind>:<sid>" tag, if present.
-    var kind: NtfyMessageKind = .unknown
-    /// Claude Code session_id when the tag is present.
+    /// Lifecycle moment from "_vibez:event:<value>". nil for pushes with
+    /// no Vibez control tags (third-party producer, test pings, etc.).
+    var event: VibezEvent? = nil
+    /// Block intent from "_vibez:shield:<value>". nil for pushes with no
+    /// Vibez control tags.
+    var shield: VibezShield? = nil
+    /// Claude Code session_id from "_vibez:session:<value>".
     var sessionId: String? = nil
-    /// True when a "_vibez:waiting" tag is present — Claude is parked
-    /// on a user reply (either a Notification event or a Stop that
-    /// looked like a question).
-    var needsReply: Bool = false
+
+    /// True while Claude is parked on a user reply. Derived from `event`
+    /// rather than stored separately — `needs-input` is the only state
+    /// that means "waiting on the user".
+    var needsReply: Bool { event == .needsInput }
 }
 
 @MainActor
@@ -83,20 +97,20 @@ final class NotifyClient {
     /// Fakes an incoming ntfy message. Used for the in-app "Test push"
     /// button so the user can see the overlay + local notification flow
     /// without the network in the loop.
-    func injectFakeMessage(title: String = "Claude Code — needs you",
+    func injectFakeMessage(title: String = "Claude Code",
                            body: String = "Permission required to run a tool.",
-                           kind: NtfyMessageKind = .block,
-                           sessionId: String? = "test-session",
-                           needsReply: Bool = true) {
+                           event: VibezEvent = .needsInput,
+                           shield: VibezShield = .on,
+                           sessionId: String? = "test-session") {
         var msg = NtfyMessage(
             id: UUID().uuidString,
             title: title,
             body: body,
             receivedAt: Date()
         )
-        msg.kind = kind
+        msg.event = event
+        msg.shield = shield
         msg.sessionId = sessionId
-        msg.needsReply = needsReply
         deliver(msg)
     }
 
@@ -170,29 +184,22 @@ final class NotifyClient {
             body: payload.message ?? "",
             receivedAt: Date()
         )
-        // Look for our control tags:
-        //   "_vibez:<kind>:<sessionId>"  → block/unblock + session id
-        //   "_vibez:waiting"             → orthogonal "awaiting user" flag
-        // No early-out: both tags may be present on the same message.
+        // Control tags arrive as three orthogonal "_vibez:<key>:<value>"
+        // tuples — event, session, shield. Any combination may be
+        // present; unknown values are ignored.
         for tag in payload.tags ?? [] {
-            guard tag.hasPrefix("_vibez:") else { continue }
-            if tag == "_vibez:waiting" {
-                msg.needsReply = true
-                continue
-            }
             let parts = tag.split(separator: ":", maxSplits: 2, omittingEmptySubsequences: false)
-            // ["_vibez", "<kind>", "<sessionId>"]
-            guard parts.count == 3 else { continue }
-            let kindRaw = String(parts[1])
-            let sid = String(parts[2])
-            switch kindRaw {
-            case "block":   msg.kind = .block
-            case "unblock": msg.kind = .unblock
+            guard parts.count == 3, parts[0] == "_vibez" else { continue }
+            let key = String(parts[1])
+            let value = String(parts[2])
+            switch key {
+            case "event":   msg.event = VibezEvent(rawValue: value)
+            case "shield":  msg.shield = VibezShield(rawValue: value)
+            case "session": msg.sessionId = value
             default:        continue
             }
-            msg.sessionId = sid
         }
-        if (msg.kind == .block){
+        if msg.shield == .on {
             deliver(msg)
         }
     }
@@ -269,6 +276,5 @@ private struct NtfyPayload: Decodable {
     let title: String?
     let message: String?
     let time: Int?
-    let priority: Int?
     let tags: [String]?
 }

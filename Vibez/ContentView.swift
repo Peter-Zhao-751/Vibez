@@ -133,8 +133,6 @@ struct ContentView: View {
     }
 
     private func recordTrigger(from message: NtfyMessage) {
-        let conversationName = TriggerEvent.cleanedTitle(from: message.title)
-        let description = message.body
         let source = TriggerEvent.detectSource(
             title: message.title,
             body: message.body,
@@ -144,8 +142,8 @@ struct ContentView: View {
             TriggerEvent(
                 receivedAt: message.receivedAt,
                 source: source,
-                title: conversationName,
-                label: description,
+                title: message.title,
+                label: message.body,
                 blockSeconds: blockSeconds,
                 sessionId: message.sessionId,
                 needsReply: message.needsReply
@@ -154,21 +152,20 @@ struct ContentView: View {
     }
 
     private func handleIncoming(_ message: NtfyMessage) {
-        switch message.kind {
-        case .unblock:
-            // Match against pendingTriggers — the user just replied in
-            // this conversation, so release the auto-block for it.
+        switch message.shield {
+        case .off:
+            // User replied in this conversation → lift the shield and
+            // dismiss the overlay if it was for the same session.
             if let sid = message.sessionId {
                 manager.resolveTrigger(sessionId: sid)
                 triggerStore.clearNeedsReply(forSession: sid)
             }
-            // Dismiss the overlay if it was for this same session.
             if let current = overlayMessage,
                current.sessionId == message.sessionId {
                 withAnimation { overlayMessage = nil }
             }
 
-        case .block:
+        case .on:
             recordTrigger(from: message)
 
             if let sid = message.sessionId,
@@ -180,7 +177,7 @@ struct ContentView: View {
                     // shows the latest title.
                     ignoreStore.refreshName(
                         sessionId: sid,
-                        name: TriggerEvent.cleanedTitle(from: message.title)
+                        name: message.title
                     )
                     return
                 }
@@ -191,7 +188,7 @@ struct ContentView: View {
                 overlayMessage = message
             }
 
-        case .unknown:
+        case .none:
             // Plain ntfy ping (test push, third-party producer, etc.)
             // — show the overlay as we always did.
             recordTrigger(from: message)

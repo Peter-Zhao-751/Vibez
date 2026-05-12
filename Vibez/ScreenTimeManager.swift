@@ -9,8 +9,8 @@
 //    • `manualBlocking` — what the user toggled in the big switch.
 //    • `pendingTriggers` — set of Claude Code session_ids that have an
 //      open "Claude needs you" / "Claude finished" ping. Each entry is
-//      added when a `_vibez:block:<sid>` ntfy push arrives and removed
-//      when the matching `_vibez:unblock:<sid>` push lands (the user
+//      added when a push tagged `_vibez:shield:on` arrives and removed
+//      when the matching `_vibez:shield:off` push lands (the user
 //      replied in that conversation).
 //
 
