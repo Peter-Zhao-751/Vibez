@@ -153,12 +153,7 @@ struct ContentView: View {
     }
 
     private func recordTrigger(from message: NtfyMessage) {
-        let source = TriggerEvent.detectSource(
-            title: message.title,
-            body: message.body,
-            agent: message.agent,
-            fallback: agent
-        )
+        let source = TriggerEvent.source(for: message.agent, fallback: agent)
         triggerStore.record(
             TriggerEvent(
                 receivedAt: message.receivedAt,

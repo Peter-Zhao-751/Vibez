@@ -61,8 +61,8 @@ struct NtfyMessage: Equatable {
     /// Claude Code session_id from "_vibez:session:<value>".
     var sessionId: String? = nil
     /// Producing agent from "_vibez:agent:<value>" ("cc" → Claude Code,
-    /// "cx" → Codex). nil for pushes from older plugin versions or
-    /// untagged third-party producers — callers fall back to sniffing.
+    /// "cx" → Codex). The Vibez plugin always sets this; nil only for
+    /// untagged third-party producers (e.g. a raw `curl` test ping).
     var agent: VibezAgent? = nil
 
     /// True while Claude is parked on a user reply. Derived from `event`
@@ -175,6 +175,7 @@ final class NotifyClient {
                            body: String = "Permission required to run a tool.",
                            event: VibezEvent = .needsInput,
                            shield: VibezShield = .on,
+                           agent: VibezAgent = .claude,
                            sessionId: String? = "test-session") {
         var msg = NtfyMessage(
             id: UUID().uuidString,
@@ -185,6 +186,7 @@ final class NotifyClient {
         msg.event = event
         msg.shield = shield
         msg.sessionId = sessionId
+        msg.agent = agent
         deliver(msg)
     }
 

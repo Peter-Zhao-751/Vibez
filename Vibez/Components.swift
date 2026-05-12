@@ -607,22 +607,15 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         return rem == 0 ? "\(h)h" : "\(h)h \(rem)m"
     }
 
-    /// Determine which agent produced a ntfy message. Prefers the explicit
-    /// "_vibez:agent" tag (set by recent plugin versions); falls back to
-    /// sniffing "Claude" / "Codex" out of the title+body for older plugins
-    /// or untagged third-party producers; finally falls back to the user's
-    /// currently selected agent so a generic ping still picks a side.
-    static func detectSource(title: String, body: String, agent: VibezAgent?, fallback: Agent) -> Source {
-        if let agent {
-            switch agent {
-            case .claude: return .claude
-            case .codex:  return .codex
-            }
+    /// Map a ntfy message's producing agent to a trigger Source. The Vibez
+    /// plugin always sets "_vibez:agent"; untagged pushes (e.g. a raw
+    /// `curl` test ping) fall back to the user's currently selected agent.
+    static func source(for agent: VibezAgent?, fallback: Agent) -> Source {
+        switch agent {
+        case .claude: return .claude
+        case .codex:  return .codex
+        case nil:     return fallback == .codex ? .codex : .claude
         }
-        let blob = (title + " " + body).lowercased()
-        if blob.contains("codex") { return .codex }
-        if blob.contains("claude") { return .claude }
-        return fallback == .codex ? .codex : .claude
     }
 }
 
