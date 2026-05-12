@@ -166,6 +166,7 @@ struct BigToggle: View {
 
 struct NotificationSetupCard: View {
     @Binding var ntfyURL: String
+    @Bindable var notifyClient: NotifyClient
     let theme: Theme
 
     @State private var draft: String = ""
@@ -257,6 +258,7 @@ struct NotificationSetupCard: View {
     private func commit() {
         let trimmed = trimmedDraft
         guard !trimmed.isEmpty else { return }
+        guard notifyClient.state != .connected else { return }
         ntfyURL = trimmed
         focused = false
     }
