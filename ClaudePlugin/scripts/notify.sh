@@ -250,8 +250,8 @@ last_assistant_excerpt() {
 
     # If after ~2.5s of polling the excerpt is still empty or identical
     # to what we sent last turn, the just-finished response hasn't been
-    # flushed yet. Return empty so the caller falls back to a generic
-    # message — better than misleading the user with stale text.
+    # flushed yet. Return empty so the caller skips the push entirely —
+    # a generic "Claude finished a turn." is just noise.
     if [ -z "${excerpt}" ] || [ "${excerpt}" = "${previous}" ]; then
         log "stop: no fresh excerpt after polling (transcript=${transcript})"
         return 0
@@ -364,8 +364,10 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         excerpt="$(last_assistant_excerpt)"
+        # Skip when polling didn't surface a fresh excerpt — sending a
+        # generic "Claude finished a turn." is just noise on the phone.
         if [ -z "${excerpt}" ]; then
-            excerpt="Claude finished a turn."
+            exit 0
         fi
         if last_turn_is_asking "${excerpt}"; then
             post_ntfy "${convo_title} — needs you" "${excerpt}" "high" "bell,_vibez:block:${sid},_vibez:waiting"
