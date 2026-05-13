@@ -78,6 +78,19 @@ post_ntfy() {
         || log "send failed: ${title}"
 }
 
+# True when the argument is a slash-command invocation — either the bare
+# "/foo" form (.prompt of a UserPromptSubmit) or the
+# "<command-name>...</command-name>" wrapper Claude Code stores in the
+# transcript. Used to suppress phone pushes for scheduled cron-style
+# commands like /trade-cycle, which alone can burn ~200 of the 250
+# msgs/day allowed by ntfy.sh's free tier.
+is_slash_command() {
+    case "$1" in
+        "<command-name>"*|"<command-message>"*|"/"[a-zA-Z]*) return 0 ;;
+    esac
+    return 1
+}
+
 # Pull a JSON field with a default, swallowing jq errors.
 jq_get() {
     local query="$1"
@@ -377,6 +390,7 @@ case "${EVENT}" in
         proj="$(basename "${cwd:-unknown}")"
         transcript="$(jq_get '.transcript_path')"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
+        is_slash_command "${convo_title}" && exit 0
         excerpt="$(last_assistant_excerpt)"
         # Skip when polling didn't surface a fresh excerpt — sending a
         # generic "Claude finished a turn." is just noise on the phone.
@@ -399,6 +413,7 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
+        is_slash_command "${prompt}" && exit 0
         # Pass the current prompt as a hint — for desktop sessions the
         # transcript file frequently doesn't exist yet at this point,
         # so falling back to .prompt beats falling back to basename.

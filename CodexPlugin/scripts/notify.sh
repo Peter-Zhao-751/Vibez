@@ -77,6 +77,18 @@ post_ntfy() {
         || log "send failed: ${title}"
 }
 
+# True when the argument is a slash-command invocation — either the bare
+# "/foo" form or Claude Code's "<command-name>...</command-name>" wrapper
+# (also produced by Codex's transcript when a slash command is the entry
+# point). Used to suppress pushes for scheduled cron-style commands that
+# would otherwise blow past ntfy.sh's 250 msgs/day free-tier cap.
+is_slash_command() {
+    case "$1" in
+        "<command-name>"*|"<command-message>"*|"/"[a-zA-Z]*) return 0 ;;
+    esac
+    return 1
+}
+
 # Pull a JSON field with a default, swallowing jq errors.
 jq_get() {
     local query="$1"
@@ -256,6 +268,7 @@ case "${EVENT}" in
         proj="$(basename "${cwd:-unknown}")"
         title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
+        is_slash_command "${title_raw}" && exit 0
         # Codex puts the final assistant text directly in the Stop payload —
         # no transcript polling needed for the body (unlike the Claude Code
         # plugin), but we still read the transcript for the title.
@@ -281,6 +294,7 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
+        is_slash_command "${prompt}" && exit 0
         # Title prefers the transcript's first user prompt (the conversation
         # name), then the just-submitted prompt, then cwd basename.
         title_raw="$(first_user_prompt_from_transcript "${transcript}")"
