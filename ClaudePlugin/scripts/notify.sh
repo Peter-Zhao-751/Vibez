@@ -274,13 +274,19 @@ last_turn_is_asking() {
     local text="$1"
     [ -z "${text}" ] && return 1
 
-    # Strip triple-fenced code blocks so a "?" inside a code sample
-    # doesn't false-positive.
+    # Strip anything that displays as code or as a literal quoted span,
+    # so a "?" inside a code sample or quoted phrase doesn't false-positive.
+    # Order matters: fenced blocks first (multi-line), then inline spans
+    # (paired single-line). Apostrophes are too noisy to handle safely
+    # (don't / can't / it's), so single quotes are left alone.
     local cleaned
     cleaned="$(printf '%s' "${text}" \
         | awk 'BEGIN{infence=0}
                /^```/ { infence = 1 - infence; next }
-               { if (!infence) print }')"
+               { if (!infence) print }' \
+        | sed -E 's/`[^`]*`//g' \
+        | sed -E 's/"[^"]*"//g' \
+        | sed -E 's/“[^”]*”//g')"
 
     # A "?" anywhere in the cleaned text → asking. Catches mid-paragraph
     # questions that a last-sentence-only check would miss (e.g.
@@ -428,6 +434,10 @@ case "${EVENT}" in
         check "trailing-period"  "Looks good."                     0
         check "mid-q-not-trailing" "Want me to retry? Anyway, moving on." 1
         check "mid-q-multi-sentence" "Implemented X. Curious about that bug? Done for now." 1
+        check "inline-backtick-q"  "Method \`isReady?\` returns bool. Done."         0
+        check "quoted-q-only"      "Set placeholder to \"Should I commit?\" — done." 0
+        check "quoted-plus-real-q" "Renamed \`foo?\`. Anything else?"                1
+        check "smart-quoted-q"     "Updated to “Should I commit?” — done."           0
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
         ;;
