@@ -113,7 +113,7 @@ struct BigToggle: View {
             ZStack(alignment: .leading) {
                 // Track
                 Capsule()
-                    .fill(enabled ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.pillOff))
+                    .fill(enabled ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.bgWidget))
                     .shadow(color: enabled ? theme.accentDeep.opacity(0.55) : .clear,
                             radius: enabled ? 18 : 0, x: 0, y: 12)
                     .frame(width: pillW, height: pillH)

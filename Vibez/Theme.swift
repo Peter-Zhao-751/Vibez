@@ -78,7 +78,6 @@ struct Theme {
     let accentDeep: Color
     let pillGradient: LinearGradient
     let saveActiveBg: AnyShapeStyle
-    let pillOff: Color
     let knobBg: Color
     let onAccent: Color
 
@@ -126,7 +125,6 @@ struct Theme {
                 accentDeep: accentDeep,
                 pillGradient: pillGradient,
                 saveActiveBg: AnyShapeStyle(pillGradient),
-                pillOff: Color(hex: 0x1d1f27),
                 knobBg: Color(hex: 0x0e0f14),
                 onAccent: .white
             )
@@ -151,7 +149,6 @@ struct Theme {
             accentDeep: accentDeep,
             pillGradient: pillGradient,
             saveActiveBg: AnyShapeStyle(softPillGradient),
-            pillOff: Color(hex: 0xe6dfd5),
             knobBg: .white,
             onAccent: .white
         )
