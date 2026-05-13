@@ -17,6 +17,7 @@ struct ContentView: View {
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
+    @AppStorage("vibez.allowDismiss") private var allowDismiss = true
 
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -77,6 +78,7 @@ struct ContentView: View {
                     message: msg,
                     expiresAt: msg.sessionId.flatMap { manager.pendingTriggers[$0]?.expiresAt },
                     stackDepth: overlayQueue.count,
+                    allowDismiss: allowDismiss,
                     onDismiss: dismissTopOverlay,
                     onExpire: expireTopOverlay
                 )

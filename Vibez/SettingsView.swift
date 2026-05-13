@@ -39,6 +39,7 @@ struct SettingsView: View {
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
+    @AppStorage("vibez.allowDismiss") private var allowDismiss = true
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @State private var pickerPresented = false
@@ -215,10 +216,11 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            Toggle("Show dismiss button", isOn: $allowDismiss)
         } header: {
             Text("Block overlay")
         } footer: {
-            Text("When more than one block is pending: \"Newest first\" puts the latest ping on top and reveals older blocks as you dismiss. \"Oldest first\" keeps the earliest unresolved block visible until you dismiss it; new pings line up behind.")
+            Text("Order: \"Newest first\" puts the latest ping on top and reveals older blocks as you dismiss; \"Oldest first\" keeps the earliest unresolved block visible until you dismiss it. Dismiss button: when off, the only ways out are replying in Claude/Codex or letting the countdown expire.")
         }
     }
 

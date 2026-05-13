@@ -24,6 +24,12 @@ struct BlockedOverlay: View {
     /// When > 1 a "+N more" pill appears in the corner so the user
     /// understands that dismissing this one will reveal another.
     let stackDepth: Int
+    /// When false, the Dismiss button is hidden — the only ways out
+    /// of the overlay are replying in Claude/Codex (which sends a
+    /// `shield:off` push) or letting the countdown expire. Defaults
+    /// to true so previews and any other call sites get the standard
+    /// behavior without opting in.
+    var allowDismiss: Bool = true
     let onDismiss: () -> Void
     /// Fired exactly once when the countdown reaches 0. Parent is
     /// expected to pop this overlay off the queue.
@@ -173,22 +179,24 @@ struct BlockedOverlay: View {
 //                }
 //                .buttonStyle(.plain)
 
-                Button(action: onDismiss) {
-                    Text("Dismiss")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(theme.fgMute)
-                        .padding(.vertical, 12)
-                        .padding(.horizontal, 28)
-                        .overlay(
-                            Capsule()
-                                .strokeBorder(
-                                    theme.fgMute.opacity(dark ? 0.35 : 0.30),
-                                    lineWidth: 1.2
-                                )
-                        )
+                if allowDismiss {
+                    Button(action: onDismiss) {
+                        Text("Dismiss")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundStyle(theme.fgMute)
+                            .padding(.vertical, 12)
+                            .padding(.horizontal, 28)
+                            .overlay(
+                                Capsule()
+                                    .strokeBorder(
+                                        theme.fgMute.opacity(dark ? 0.35 : 0.30),
+                                        lineWidth: 1.2
+                                    )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
                 }
-                .buttonStyle(.plain)
-                .padding(.top, 4)
 
                 Spacer()
             }
@@ -280,6 +288,24 @@ private func previewMessage(
         ),
         expiresAt: Date().addingTimeInterval(7 * 60 + 12),
         stackDepth: 2,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("No dismiss · forced wait · dark") {
+    BlockedOverlay(
+        agent: .claude,
+        theme: Theme.make(agent: .claude, dark: true),
+        dark: true,
+        message: previewMessage(
+            title: "Ship the Q4 changelog",
+            body: "Want me to bundle the design-system entries under a single section, or keep them split out?"
+        ),
+        expiresAt: Date().addingTimeInterval(11 * 60 + 47),
+        stackDepth: 1,
+        allowDismiss: false,
         onDismiss: {},
         onExpire: {}
     )
