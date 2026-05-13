@@ -1,5 +1,5 @@
 {
-  "name": "vibez-codex",
+  "name": "vibez",
   "description": "Push Codex session events to your phone via ntfy.sh. Shares its topic with the Claude Code vibez plugin so a single subscription receives notifications from both agents.",
   "version": "0.2.0",
   "author": {

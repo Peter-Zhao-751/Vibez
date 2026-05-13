@@ -1,11 +1,11 @@
 ---
 name: vibez-setup
-description: Show, regenerate, or test the user's ntfy subscribe URL for the vibez-codex plugin. Use when the user asks for their vibez URL, wants to verify push notifications work, or wants to rotate to a new topic.
+description: Show, regenerate, or test the user's ntfy subscribe URL for the vibez plugin. Use when the user asks for their vibez URL, wants to verify push notifications work, or wants to rotate to a new topic.
 ---
 
 # vibez-setup
 
-The vibez-codex plugin auto-generates the ntfy subscribe URL on first SessionStart and shows it in a system message. Use this skill to surface the URL again, send a test push, or rotate the topic.
+The vibez plugin auto-generates the ntfy subscribe URL on first SessionStart and shows it in a system message. Use this skill to surface the URL again, send a test push, or rotate the topic.
 
 The plugin root is two directories up from this `SKILL.md` (i.e., `skills/vibez-setup/../../`). The setup script lives at `<plugin-root>/scripts/setup.sh`.
 

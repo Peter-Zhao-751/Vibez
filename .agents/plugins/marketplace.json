@@ -5,7 +5,7 @@
   },
   "plugins": [
     {
-      "name": "vibez-codex",
+      "name": "vibez",
       "source": {
         "source": "local",
         "path": "./CodexPlugin"

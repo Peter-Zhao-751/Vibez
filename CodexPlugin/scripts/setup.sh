@@ -63,7 +63,7 @@ case "${ACTION}" in
         # ${arr[@]+"${arr[@]}"} expands to nothing when arr is empty —
         # required under set -u on bash 3.2 (macOS default).
         if curl -fsS --max-time 5 \
-            -H "Title: vibez-codex test" \
+            -H "Title: vibez test" \
             -H "Tags: _vibez:event:done,_vibez:agent:cx" \
             ${auth_args[@]+"${auth_args[@]}"} \
             -d "If you can read this on your phone, the Codex plugin is wired up." \

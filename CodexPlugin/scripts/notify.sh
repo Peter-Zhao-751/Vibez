@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# vibez-codex hook script.
+# vibez hook script (Codex side).
 #
 # Dispatches Codex lifecycle events to ntfy.sh as push notifications.
 # Topic is shared with the Claude Code vibez plugin at ~/.config/vibez/topic
@@ -199,12 +199,12 @@ case "${EVENT}" in
                 log "generated topic ${TOPIC}"
 
                 url="${SERVER}/${TOPIC}"
-                msg="vibez-codex plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  until you subscribe, push notifications won't reach your phone."
+                msg="vibez plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  until you subscribe, push notifications won't reach your phone."
 
                 # Codex accepts the same systemMessage / hookSpecificOutput
                 # shape as Claude Code; SessionStartHookSpecificOutputWire
                 # supports additionalContext.
-                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez-codex first-run setup complete. Subscribe URL: %s."}}\n' \
+                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez first-run setup complete. Subscribe URL: %s."}}\n' \
                     "${msg}" "${url}"
             else
                 log "topic generation failed"

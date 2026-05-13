@@ -1,4 +1,4 @@
-# vibez-codex
+# vibez (Codex)
 
 A Codex plugin that pushes session events to your phone via [ntfy.sh](https://ntfy.sh/) — so you can step away while Codex works and get pinged the moment it needs you or finishes a task.
 
@@ -23,7 +23,7 @@ PermissionRequest pings are suppressed in `dontAsk` and `bypassPermissions` mode
 
    ```
    codex plugin marketplace add Peter-Zhao-751/Vibez
-   codex plugin install vibez-codex@vibez
+   codex plugin install vibez@vibez
    ```
 
    `codex plugin marketplace add` also accepts full Git HTTPS/SSH URLs or a local directory if you're hacking on the plugin (`codex plugin marketplace add /path/to/Vibez`).
