@@ -101,17 +101,19 @@ struct ContentView: View {
             )
 
             hero
-                .padding(.horizontal, 20)
+                .padding(.horizontal, 10)
                 .padding(.top, 8)
-                .padding(.bottom, 20)
+                .padding(.bottom, 10)
 
             BlockingPanel(
                 apps: BlockedApp.demoSet,
                 enabled: manager.isBlocking,
                 theme: theme
             )
-            .padding(.horizontal, 20)
+            .padding(.horizontal, 10)
             .padding(.bottom, 12)
+
+            Spacer(minLength: 0)
 
             RecentTriggersSection(
                 events: triggerStore.events,
@@ -139,10 +141,8 @@ struct ContentView: View {
                     ignoreStore.remove(ruleId: rule.id)
                 }
             )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 14)
-
-            Spacer(minLength: 0)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 10)
         }
     }
 
@@ -281,6 +281,7 @@ struct ContentView: View {
                 isInteractive: !ntfyURL.isEmpty,
                 onLockedTap: bounceToShowSetup
             )
+            .padding(.bottom, 20)
             .shake(trigger: toggleShake)
 
             if ntfyURL.isEmpty || notifyClient.state != .connected {
@@ -289,8 +290,8 @@ struct ContentView: View {
                     notifyClient: notifyClient,
                     theme: theme
                 )
+                .padding(.bottom, 10)
                 .shake(trigger: setupShake, amount: 5, duration: 0.84)
-                .padding(.top, 18)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }

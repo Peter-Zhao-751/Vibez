@@ -1,17 +1,39 @@
 {
   "images" : [
     {
-      "filename" : "wordmark-light.png",
+      "filename" : "wordmark-light 1.svg",
       "idiom" : "universal",
       "scale" : "1x"
     },
     {
-      "filename" : "wordmark-light@2x.png",
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "wordmark-dark.svg",
+      "idiom" : "universal",
+      "scale" : "1x"
+    },
+    {
+      "filename" : "wordmark-light 2.svg",
       "idiom" : "universal",
       "scale" : "2x"
     },
     {
-      "filename" : "wordmark-light@3x.png",
+      "appearances" : [
+        {
+          "appearance" : "luminosity",
+          "value" : "dark"
+        }
+      ],
+      "filename" : "wordmark-dark 1.svg",
+      "idiom" : "universal",
+      "scale" : "2x"
+    },
+    {
+      "filename" : "wordmark-light.svg",
       "idiom" : "universal",
       "scale" : "3x"
     },
@@ -22,29 +44,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "wordmark-dark.png",
-      "idiom" : "universal",
-      "scale" : "1x"
-    },
-    {
-      "appearances" : [
-        {
-          "appearance" : "luminosity",
-          "value" : "dark"
-        }
-      ],
-      "filename" : "wordmark-dark@2x.png",
-      "idiom" : "universal",
-      "scale" : "2x"
-    },
-    {
-      "appearances" : [
-        {
-          "appearance" : "luminosity",
-          "value" : "dark"
-        }
-      ],
-      "filename" : "wordmark-dark@3x.png",
+      "filename" : "wordmark-dark 2.svg",
       "idiom" : "universal",
       "scale" : "3x"
     }
