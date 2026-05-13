@@ -88,6 +88,34 @@ jq_get() {
     fi
 }
 
+# Pull the first real user prompt from a Codex rollout transcript so we
+# have a meaningful title instead of always using basename(cwd). Codex
+# writes records like {"type":"response_item","payload":{"type":"message",
+# "role":"user","content":[{"text":"<the prompt>"}]}} — but the first user
+# record is always an "<environment_context>…</environment_context>" block
+# injected by Codex itself, which we skip.
+#
+# Returns nothing if no usable prompt is found (caller falls back to
+# basename(cwd) which is fine in that edge case).
+first_user_prompt_from_transcript() {
+    local transcript="$1"
+    [ -z "${transcript}" ] && return 0
+    [ ! -f "${transcript}" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    jq -r '
+        select(.type == "response_item" and .payload.type == "message" and .payload.role == "user")
+        | (.payload.content // [])
+        | map(.text // .input_text // "")
+        | join(" ")
+        | select(length > 0)
+        | select(startswith("<environment_context>") | not)
+        | select(startswith("<user_instructions>") | not)
+    ' "${transcript}" 2>/dev/null \
+        | head -n 1 \
+        | tr '\n' ' '
+}
+
 # Cap a string at 72 chars with a trailing ellipsis for titles.
 clip_title() {
     local raw="$1"
@@ -190,8 +218,11 @@ case "${EVENT}" in
 
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
         tool_name="$(jq_get '.tool_name' 'tool')"
         proj="$(basename "${cwd:-unknown}")"
+        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="${proj}"
 
         # Build a short body: tool name + a snippet of the input. tool_input
         # is `any`, so we re-serialize to JSON via jq when present.
@@ -206,23 +237,27 @@ case "${EVENT}" in
             body="Permission required to run ${tool_name}"
         fi
 
-        post_ntfy "$(clip_title "${proj}")" "$(clip_body "${body}")" \
+        post_ntfy "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
             "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
         ;;
 
     stop)
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
+        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="${proj}"
         # Codex puts the final assistant text directly in the Stop payload —
-        # no transcript polling needed (unlike the Claude Code plugin).
+        # no transcript polling needed for the body (unlike the Claude Code
+        # plugin), but we still read the transcript for the title.
         excerpt="$(jq_get '.last_assistant_message')"
         if [ -z "${excerpt}" ]; then
             log "stop: empty last_assistant_message, skipping"
             exit 0
         fi
         body="$(clip_body "${excerpt}")"
-        title="$(clip_title "${proj}")"
+        title="$(clip_title "${title_raw}")"
         if last_turn_is_asking "${excerpt}"; then
             post_ntfy "${title}" "${body}" \
                 "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
@@ -235,11 +270,14 @@ case "${EVENT}" in
     user-prompt-submit)
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
-        # Title prefers the prompt itself (mirrors the Claude Code plugin's
-        # behavior of showing what the user just said).
-        title="$(clip_title "${prompt:-${proj}}")"
+        # Title prefers the transcript's first user prompt (the conversation
+        # name), then the just-submitted prompt, then cwd basename.
+        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="${prompt:-${proj}}"
+        title="$(clip_title "${title_raw}")"
         if [ -z "${prompt}" ]; then
             prompt="(replied)"
         fi
