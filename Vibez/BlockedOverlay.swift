@@ -32,12 +32,20 @@ struct BlockedOverlay: View {
         return "Permission requested · 0:42 ago"
     }
 
+    private var isCodexMessage: Bool {
+        message?.agent == .codex
+    }
+
+    private var gradientColor: Color {
+        isCodexMessage ? Theme.codexBlue : theme.accent
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             (dark ? Color(hex: 0x0c0d12) : Color(hex: 0xfbf8f4))
                 .overlay(
                     RadialGradient(
-                        colors: [theme.accent.opacity(dark ? 0.28 : 0.20), .clear],
+                        colors: [gradientColor.opacity(dark ? 0.28 : 0.20), .clear],
                         center: UnitPoint(x: 0.5, y: 0.30),
                         startRadius: 0,
                         endRadius: 520
@@ -48,12 +56,20 @@ struct BlockedOverlay: View {
             VStack(spacing: 0) {
                 Spacer().frame(height: 100)
 
-                MascotForAgent(
-                    agent: agent,
-                    listening: true,
-                    size: agent == .both ? 110 : 130
-                )
-                .padding(.bottom, 18)
+                if isCodexMessage {
+                    Image("Codex")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 130, height: 130)
+                        .padding(.bottom, 18)
+                } else {
+                    MascotForAgent(
+                        agent: agent,
+                        listening: true,
+                        size: agent == .both ? 110 : 130
+                    )
+                    .padding(.bottom, 18)
+                }
 
                 Text("BLOCKING IN PROGRESS")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
