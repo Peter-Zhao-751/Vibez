@@ -68,6 +68,7 @@ enum AppearancePref: String, CaseIterable, Identifiable {
 struct Theme {
     let bg: Color
     let bgPanel: Color
+    let bgWidget: Color
     let bgChip: Color
     let fg: Color
     let fgMute: Color
@@ -115,6 +116,7 @@ struct Theme {
             return Theme(
                 bg: Color(hex: 0x0c0d12),
                 bgPanel: Color(hex: 0x15161c),
+                bgWidget: Color(hex: 0x1f2027),
                 bgChip: Color(hex: 0x1d1f27),
                 fg: Color(hex: 0xf5f1ec),
                 fgMute: Color(hex: 0x8d8a96),
@@ -131,6 +133,7 @@ struct Theme {
         return Theme(
             bg: Color(hex: 0xfbf8f4),
             bgPanel: .white,
+            bgWidget: Color(hex: 0xe4dfd6),
             bgChip: Color(hex: 0xf1ede5),
             fg: Color(hex: 0x1a0e08),
             fgMute: Color(hex: 0x6e655c),

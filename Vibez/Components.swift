@@ -105,12 +105,6 @@ struct BigToggle: View {
                 // Track
                 Capsule()
                     .fill(enabled ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.pillOff))
-                    .overlay(
-                        // Inner shadow when off, soft top highlight when on.
-                        Capsule()
-                            .stroke(.white.opacity(enabled ? 0.18 : 0), lineWidth: 1)
-                            .blendMode(.overlay)
-                    )
                     .shadow(color: enabled ? theme.accentDeep.opacity(0.55) : .clear,
                             radius: enabled ? 18 : 0, x: 0, y: 12)
                     .frame(width: pillW, height: pillH)
@@ -137,9 +131,6 @@ struct BigToggle: View {
                     .fill(theme.knobBg)
                     .frame(width: knobSize, height: knobSize)
                     .shadow(color: .black.opacity(0.22), radius: 9, x: 0, y: 6)
-                    .overlay(
-                        Circle().stroke(.black.opacity(0.04), lineWidth: 1)
-                    )
                     .overlay(
                         VStack{
                             if (isInteractive){
@@ -234,10 +225,6 @@ struct NotificationSetupCard: View {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(theme.bgChip)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(theme.hairline, lineWidth: 1)
-                )
 
                 Button(action: commit) {
                     Group {
@@ -261,10 +248,6 @@ struct NotificationSetupCard: View {
                                   ? AnyShapeStyle(theme.pillGradient)
                                   : AnyShapeStyle(theme.bgChip))
                     )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke((saveable || verifying) ? Color.clear : theme.hairline, lineWidth: 1)
-                    )
                 }
                 .buttonStyle(.plain)
                 .disabled(!saveable)
@@ -284,11 +267,7 @@ struct NotificationSetupCard: View {
         .padding(14)
         .background(
             RoundedRectangle(cornerRadius: 16)
-                .fill(theme.bgPanel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 16)
-                .stroke(theme.hairline, lineWidth: 1)
+                .fill(theme.bgWidget)
         )
         .onDisappear {
             verifyTask?.cancel()
@@ -418,10 +397,6 @@ struct ChipIconButton: View {
                     RoundedRectangle(cornerRadius: 10)
                         .fill(theme.bgChip)
                 )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(theme.hairline, lineWidth: 1)
-                )
         }
         .buttonStyle(.plain)
         .accessibilityLabel(accessibilityLabel)
@@ -470,11 +445,7 @@ struct BlockedAppCard: View {
         .padding(.horizontal, 4)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(enabled ? theme.accent.opacity(0.08) : theme.bgChip)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(enabled ? theme.accent.opacity(0.2) : theme.hairline, lineWidth: 1)
+                .fill(enabled ? theme.accent.opacity(0.12) : theme.bgChip)
         )
         .animation(.easeInOut(duration: 0.3), value: enabled)
     }
@@ -520,11 +491,7 @@ struct BlockingPanel: View {
         .padding(.vertical, 12)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(theme.bgPanel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 18)
-                .stroke(theme.hairline, lineWidth: 1)
+                .fill(theme.bgWidget)
         )
     }
 }
@@ -699,11 +666,7 @@ struct TriggerRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(theme.bgPanel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(theme.hairline, lineWidth: 1)
+                .fill(theme.bgWidget)
         )
         .opacity(isIgnored ? 0.55 : 1.0)
 
@@ -851,11 +814,7 @@ struct RecentTriggersSection: View {
         .padding(.vertical, 14)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(theme.bgPanel)
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(theme.hairline, lineWidth: 1)
+                .fill(theme.bgWidget)
         )
     }
 }
