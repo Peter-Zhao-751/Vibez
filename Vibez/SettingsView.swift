@@ -38,6 +38,7 @@ struct SettingsView: View {
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
+    @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @State private var pickerPresented = false
@@ -59,6 +60,7 @@ struct SettingsView: View {
                 appearanceSection
                 appsSection
                 durationSection
+                overlaySection
                 notificationsSection
                 ignoredConversationsSection
             }
@@ -202,6 +204,22 @@ struct SettingsView: View {
             if d < bestDelta { bestDelta = d; best = i }
         }
         return best
+    }
+
+    @ViewBuilder
+    private var overlaySection: some View {
+        Section {
+            Picker("Show", selection: $overlayOrderRaw) {
+                ForEach(OverlayOrder.allCases) { order in
+                    Text(order.label).tag(order.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+        } header: {
+            Text("Block overlay")
+        } footer: {
+            Text("When more than one block is pending: \"Newest first\" puts the latest ping on top and reveals older blocks as you dismiss. \"Oldest first\" keeps the earliest unresolved block visible until you dismiss it; new pings line up behind.")
+        }
     }
 
     @ViewBuilder

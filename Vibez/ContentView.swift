@@ -16,6 +16,7 @@ struct ContentView: View {
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
+    @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
 
     @Environment(\.colorScheme) private var systemColorScheme
 
@@ -42,6 +43,10 @@ struct ContentView: View {
 
     private var topOverlayMessage: NtfyMessage? { overlayQueue.first }
 
+    private var overlayOrder: OverlayOrder {
+        OverlayOrder(rawValue: overlayOrderRaw) ?? .stack
+    }
+
     /// Pick the block duration based on what kind of ping landed:
     /// `done` → short timer (default 30s) just nudges you to glance at
     /// the result. Anything else (needs-input, replied, untagged) →
@@ -62,6 +67,7 @@ struct ContentView: View {
                 .ignoresSafeArea()
 
             mainScreen
+                .ignoresSafeArea(edges: .bottom)
 
             if let msg = topOverlayMessage {
                 BlockedOverlay(
@@ -75,7 +81,7 @@ struct ContentView: View {
                     onExpire: expireTopOverlay
                 )
                 .id(msg.id)
-                .transition(.opacity.combined(with: .scale(scale: 0.97)))
+                .transition(.opacity)
                 .zIndex(5)
             }
         }
@@ -241,15 +247,21 @@ struct ContentView: View {
         }
     }
 
-    /// Push a fresh ping onto the stack. If a queue entry exists with
-    /// the same sessionId, remove it first — the new ping carries the
-    /// latest state of that conversation, so it should replace the old
-    /// entry and jump to the top.
+    /// Push a fresh ping onto the queue. If an entry exists with the
+    /// same sessionId, remove it first — the new ping carries the
+    /// latest state of that conversation, so the old entry is stale.
+    /// Where the new entry lands depends on the user's overlayOrder:
+    ///   - `.stack` (LIFO): insert at the front so it surfaces on top.
+    ///   - `.queue` (FIFO): append at the back so the oldest pending
+    ///     block stays visible until dismissed.
     private func enqueueOverlay(_ message: NtfyMessage) {
         if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
             overlayQueue.removeAll { $0.sessionId == sid }
         }
-        overlayQueue.insert(message, at: 0)
+        switch overlayOrder {
+        case .stack: overlayQueue.insert(message, at: 0)
+        case .queue: overlayQueue.append(message)
+        }
     }
 
     private func handleIncoming(_ message: NtfyMessage) {

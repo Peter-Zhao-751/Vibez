@@ -29,7 +29,6 @@ struct BlockedOverlay: View {
     /// expected to pop this overlay off the queue.
     let onExpire: () -> Void
 
-    @State private var appeared = false
     @State private var fired = false
 
     private func formatRemaining(_ seconds: Int) -> String {
@@ -194,11 +193,6 @@ struct BlockedOverlay: View {
                 Spacer()
             }
             .frame(maxWidth: .infinity)
-        }
-        .scaleEffect(appeared ? 1 : 0.97)
-        .opacity(appeared ? 1 : 0)
-        .onAppear {
-            withAnimation(.easeOut(duration: 0.5)) { appeared = true }
         }
     }
 }

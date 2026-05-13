@@ -25,6 +25,29 @@ enum Agent: String, CaseIterable, Identifiable {
     }
 }
 
+/// Order in which stacked overlays surface to the user when more than
+/// one block is pending at once.
+///
+/// - `stack` (LIFO): newest ping is shown on top; dismissing reveals the
+///   next-most-recent unresolved block. Good when the latest interruption
+///   is usually the one you care about.
+/// - `queue` (FIFO): the oldest unresolved block stays visible until
+///   dismissed; new pings line up behind it. Good when you want to clear
+///   work in arrival order without skipping ahead.
+enum OverlayOrder: String, CaseIterable, Identifiable {
+    case stack
+    case queue
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .stack: "Newest first"
+        case .queue: "Oldest first"
+        }
+    }
+}
+
 enum AppearancePref: String, CaseIterable, Identifiable {
     case system, light, dark
 
