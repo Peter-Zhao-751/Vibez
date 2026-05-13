@@ -261,7 +261,7 @@ struct NotificationSetupCard: View {
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.inputBg)
+                        .fill(theme.bgChip)
                 )
 
                 Button(action: commit) {

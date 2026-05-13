@@ -70,7 +70,6 @@ struct Theme {
     let bgPanel: Color
     let bgWidget: Color
     let bgChip: Color
-    let inputBg: Color
     let fg: Color
     let fgMute: Color
     let fgFaint: Color
@@ -114,15 +113,11 @@ struct Theme {
         )
 
         if dark {
-            let bgChipDark = Color(hex: 0x16171d)
-            let pillMid = Color.lerp(pillStops[0], pillStops[1], t: 0.5)
-            let inputBg = Color.lerp(bgChipDark, pillMid, t: 0.5)
             return Theme(
                 bg: Color(hex: 0x0c0d12),
                 bgPanel: Color(hex: 0x15161c),
                 bgWidget: Color(hex: 0x1f2027),
-                bgChip: bgChipDark,
-                inputBg: inputBg,
+                bgChip: Color(hex: 0x16171d),
                 fg: Color(hex: 0xf5f1ec),
                 fgMute: Color(hex: 0x6f6c7a),
                 fgFaint: Color(hex: 0x56545e),
@@ -148,7 +143,6 @@ struct Theme {
             bgPanel: .white,
             bgWidget: Color(hex: 0xe4dfd6),
             bgChip: bgChipLight,
-            inputBg: bgChipLight,
             fg: Color(hex: 0x1a0e08),
             fgMute: Color(hex: 0x6e655c),
             fgFaint: Color(hex: 0xa8a097),
