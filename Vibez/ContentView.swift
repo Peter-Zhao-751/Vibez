@@ -14,11 +14,12 @@ struct ContentView: View {
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
-    @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
+    @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
+    @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
 
     @Environment(\.colorScheme) private var systemColorScheme
 
-    @State private var overlayMessage: NtfyMessage?
+    @State private var overlayQueue: [NtfyMessage] = []   // newest first
     @State private var showSettings = false
     @State private var toggleShake = 0
     @State private var setupShake = 0
@@ -39,6 +40,22 @@ struct ContentView: View {
         Theme.make(agent: agent, dark: effectiveDark)
     }
 
+    private var topOverlayMessage: NtfyMessage? { overlayQueue.first }
+
+    /// Pick the block duration based on what kind of ping landed:
+    /// `done` → short timer (default 30s) just nudges you to glance at
+    /// the result. Anything else (needs-input, replied, untagged) →
+    /// long timer (default 15m) keeps the shield up while Claude waits.
+    /// `replied` is unreachable on the trigger path (it carries
+    /// `shield: .off`), but listing it explicitly avoids a `default` arm.
+    private func durationFor(_ msg: NtfyMessage) -> Int {
+        switch msg.event {
+        case .done:                 return blockSecondsDone
+        case .needsInput, .replied: return blockSecondsNeedsInput
+        case .none:                 return blockSecondsNeedsInput
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             theme.bg
@@ -46,14 +63,19 @@ struct ContentView: View {
 
             mainScreen
 
-            if let msg = overlayMessage {
+            if let msg = topOverlayMessage {
                 BlockedOverlay(
                     agent: agent,
                     theme: theme,
                     dark: effectiveDark,
                     message: msg,
-                    onDismiss: { dismissOverlay(for: msg) }
+                    expiresAt: msg.sessionId.flatMap { manager.pendingTriggers[$0]?.expiresAt },
+                    stackDepth: overlayQueue.count,
+                    onDismiss: dismissTopOverlay,
+                    onExpire: expireTopOverlay
                 )
+                .id(msg.id)
+                .transition(.opacity.combined(with: .scale(scale: 0.97)))
                 .zIndex(5)
             }
         }
@@ -79,6 +101,19 @@ struct ContentView: View {
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             guard let newValue else { return }
             handleIncoming(newValue)
+        }
+        .onChange(of: manager.pendingTriggers) { _, newPending in
+            // A non-top entry's per-session timer expired in the
+            // background. Drop those queue entries so popping the top
+            // doesn't reveal a stale entry that would immediately fire
+            // onExpire. Untagged pings (nil sessionId) aren't reconciled
+            // — they have no backing trigger and are removed only by
+            // the Dismiss button.
+            overlayQueue.removeAll { msg in
+                guard let sid = msg.sessionId, !sid.isEmpty, sid != "nosid"
+                else { return false }
+                return newPending[sid] == nil
+            }
         }
         .sheet(isPresented: $showSettings) {
             SettingsView(
@@ -162,7 +197,7 @@ struct ContentView: View {
                 source: source,
                 title: message.title,
                 label: message.body,
-                blockSeconds: blockSeconds,
+                blockSeconds: durationFor(message),
                 sessionId: message.sessionId,
                 needsReply: message.needsReply
             )
@@ -180,15 +215,41 @@ struct ContentView: View {
         }
     }
 
-    /// Tapping Dismiss resolves the trigger for THIS message's session
-    /// only — other sessions stay pending and the shield stays up until
-    /// each of them is replied-to, dismissed, or times out.
-    private func dismissOverlay(for message: NtfyMessage) {
-        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+    /// Tap Dismiss on the top overlay: resolve its trigger and pop.
+    /// The next-most-recent unresolved block (if any) takes its place.
+    private func dismissTopOverlay() {
+        guard let msg = overlayQueue.first else { return }
+        if let sid = msg.sessionId, !sid.isEmpty, sid != "nosid" {
             manager.resolveTrigger(sessionId: sid)
             triggerStore.clearNeedsReply(forSession: sid)
         }
-        withAnimation { overlayMessage = nil }
+        withAnimation(.easeInOut(duration: 0.32)) {
+            _ = overlayQueue.removeFirst()
+        }
+    }
+
+    /// Countdown on the top overlay reached 0. The trigger has already
+    /// auto-pruned in ScreenTimeManager; just clear the recent-trigger
+    /// dot and pop.
+    private func expireTopOverlay() {
+        guard let msg = overlayQueue.first else { return }
+        if let sid = msg.sessionId, !sid.isEmpty, sid != "nosid" {
+            triggerStore.clearNeedsReply(forSession: sid)
+        }
+        withAnimation(.easeInOut(duration: 0.32)) {
+            _ = overlayQueue.removeFirst()
+        }
+    }
+
+    /// Push a fresh ping onto the stack. If a queue entry exists with
+    /// the same sessionId, remove it first — the new ping carries the
+    /// latest state of that conversation, so it should replace the old
+    /// entry and jump to the top.
+    private func enqueueOverlay(_ message: NtfyMessage) {
+        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+            overlayQueue.removeAll { $0.sessionId == sid }
+        }
+        overlayQueue.insert(message, at: 0)
     }
 
     private func handleIncoming(_ message: NtfyMessage) {
@@ -203,10 +264,9 @@ struct ContentView: View {
             if let sid = message.sessionId {
                 manager.resolveTrigger(sessionId: sid)
                 triggerStore.clearNeedsReply(forSession: sid)
-            }
-            if let current = overlayMessage,
-               current.sessionId == message.sessionId {
-                withAnimation { overlayMessage = nil }
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    overlayQueue.removeAll { $0.sessionId == sid }
+                }
             }
             return
         }
@@ -233,12 +293,12 @@ struct ContentView: View {
                     )
                     return
                 }
-                manager.addTrigger(sessionId: sid, durationSeconds: blockSeconds)
+                manager.addTrigger(sessionId: sid, durationSeconds: durationFor(message))
             }
 
             notifyClient.scheduleLocalNotification(message)
-            withAnimation(.easeOut(duration: 0.45)) {
-                overlayMessage = message
+            withAnimation(.easeInOut(duration: 0.32)) {
+                enqueueOverlay(message)
             }
 
         case .none:
@@ -246,8 +306,8 @@ struct ContentView: View {
             // — show the overlay as we always did.
             recordTrigger(from: message)
             notifyClient.scheduleLocalNotification(message)
-            withAnimation(.easeOut(duration: 0.45)) {
-                overlayMessage = message
+            withAnimation(.easeInOut(duration: 0.32)) {
+                enqueueOverlay(message)
             }
 
         case .off:

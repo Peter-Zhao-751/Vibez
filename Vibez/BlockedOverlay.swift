@@ -14,9 +14,35 @@ struct BlockedOverlay: View {
     let theme: Theme
     let dark: Bool
     var message: NtfyMessage?
+    /// Source of truth for the visible countdown. Reads from
+    /// `ScreenTimeManager.pendingTriggers[sid].expiresAt` so the timer
+    /// shown to the user is the same clock as the actual shield
+    /// lifetime. nil for untagged pings (no backing trigger) — those
+    /// render without a countdown and only dismiss via the button.
+    var expiresAt: Date?
+    /// Total number of overlays in the queue (including this one).
+    /// When > 1 a "+N more" pill appears in the corner so the user
+    /// understands that dismissing this one will reveal another.
+    let stackDepth: Int
     let onDismiss: () -> Void
+    /// Fired exactly once when the countdown reaches 0. Parent is
+    /// expected to pop this overlay off the queue.
+    let onExpire: () -> Void
 
     @State private var appeared = false
+    @State private var fired = false
+
+    private func formatRemaining(_ seconds: Int) -> String {
+        if seconds < 60 { return "\(seconds)s" }
+        let m = seconds / 60
+        let s = seconds % 60
+        return String(format: "%d:%02d", m, s)
+    }
+
+    private func remainingSeconds(now: Date) -> Int {
+        guard let expiresAt else { return 0 }
+        return max(0, Int(expiresAt.timeIntervalSince(now)))
+    }
 
     private var titleText: String {
         // displayTitle already prepends the event label ("Done — …",
@@ -52,6 +78,24 @@ struct BlockedOverlay: View {
                     )
                 )
                 .ignoresSafeArea()
+
+            if stackDepth > 1 {
+                HStack {
+                    Spacer()
+                    Text("+\(stackDepth - 1) more")
+                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        .tracking(0.6)
+                        .foregroundStyle(theme.fgMute)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(
+                            Capsule()
+                                .fill(theme.fgMute.opacity(0.10))
+                        )
+                        .padding(.trailing, 18)
+                        .padding(.top, 14)
+                }
+            }
 
             VStack(spacing: 0) {
                 Spacer().frame(height: 100)
@@ -94,7 +138,23 @@ struct BlockedOverlay: View {
                     .lineLimit(4)
                     .truncationMode(.tail)
                     .padding(.horizontal, 40)
-                    .padding(.bottom, 24)
+                    .padding(.bottom, 18)
+
+                if expiresAt != nil {
+                    TimelineView(.periodic(from: .now, by: 1)) { context in
+                        let remaining = remainingSeconds(now: context.date)
+                        Text(formatRemaining(remaining))
+                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                            .foregroundStyle(theme.fgMute)
+                            .padding(.bottom, 6)
+                            .onChange(of: remaining) { _, new in
+                                if new == 0 && !fired {
+                                    fired = true
+                                    onExpire()
+                                }
+                            }
+                    }
+                }
 
 //                Button {
 //                    onDismiss()

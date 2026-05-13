@@ -36,7 +36,8 @@ struct SettingsView: View {
     @Bindable var ignoreStore: IgnoreStore
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
-    @AppStorage("vibez.blockSeconds") private var blockSeconds = 1800
+    @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
+    @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @State private var pickerPresented = false
@@ -142,20 +143,32 @@ struct SettingsView: View {
     @ViewBuilder
     private var durationSection: some View {
         Section {
+            durationRow(label: "Needs input", value: $blockSecondsNeedsInput)
+            durationRow(label: "Done",        value: $blockSecondsDone)
+        } header: {
+            Text("Block duration")
+        } footer: {
+            Text("Needs input: how long apps stay blocked while Claude is waiting on you. Done: how long after Claude wraps a turn that doesn't need you.")
+        }
+    }
+
+    @ViewBuilder
+    private func durationRow(label: String, value: Binding<Int>) -> some View {
+        VStack(spacing: 8) {
             HStack {
-                Text("Duration")
+                Text(label)
                 Spacer()
-                Text(formatDuration(blockSeconds))
+                Text(formatDuration(value.wrappedValue))
                     .monospaced()
                     .fontWeight(.semibold)
                     .foregroundStyle(.secondary)
             }
             Slider(
-                value: durationIndexBinding,
+                value: durationIndexBinding(for: value),
                 in: 0...Double(durationStops.count - 1),
                 step: 1
             ) {
-                Text("Duration")
+                Text(label)
             } minimumValueLabel: {
                 Text("5s")
                     .font(.caption2.monospaced())
@@ -165,22 +178,18 @@ struct SettingsView: View {
                     .font(.caption2.monospaced())
                     .foregroundStyle(.tertiary)
             }
-        } header: {
-            Text("Block duration")
-        } footer: {
-            Text("How long apps stay shielded after Claude or Codex pings you.")
         }
     }
 
-    private var durationIndexBinding: Binding<Double> {
+    private func durationIndexBinding(for value: Binding<Int>) -> Binding<Double> {
         Binding(
             get: {
-                let idx = durationStops.firstIndex(of: blockSeconds)
-                    ?? closestStopIndex(to: blockSeconds)
+                let idx = durationStops.firstIndex(of: value.wrappedValue)
+                    ?? closestStopIndex(to: value.wrappedValue)
                 return Double(idx)
             },
             set: { newValue in
-                blockSeconds = durationStops[Int(newValue.rounded())]
+                value.wrappedValue = durationStops[Int(newValue.rounded())]
             }
         )
     }
