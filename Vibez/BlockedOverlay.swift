@@ -74,7 +74,7 @@ struct BlockedOverlay: View {
                 Text("BLOCKING IN PROGRESS")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .tracking(2.4)
-                    .foregroundStyle(theme.accent)
+                    .foregroundStyle(gradientColor)
                     .padding(.bottom, 10)
 
                 Text(titleText)
