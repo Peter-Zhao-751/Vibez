@@ -119,7 +119,7 @@ struct Theme {
                 bgWidget: Color(hex: 0x1f2027),
                 bgChip: Color(hex: 0x1d1f27),
                 fg: Color(hex: 0xf5f1ec),
-                fgMute: Color(hex: 0x8d8a96),
+                fgMute: Color(hex: 0x6f6c7a),
                 fgFaint: Color(hex: 0x56545e),
                 hairline: Color(hex: 0x272832),
                 accent: accent,

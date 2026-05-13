@@ -85,6 +85,7 @@ struct BigToggle: View {
     let agent: Agent
     let theme: Theme
     let isInteractive: Bool
+    var onLockedTap: () -> Void = {}
 
     private let pillW: CGFloat = 250
     private let pillH: CGFloat = 132
@@ -92,6 +93,14 @@ struct BigToggle: View {
 
     var body: some View {
         Button {
+            guard isInteractive else {
+                // Notifications aren't set up yet — bounce instead of
+                // toggling so the user gets a clear "no, look down there"
+                // cue rather than a silent dead button.
+                UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+                onLockedTap()
+                return
+            }
             withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
                 enabled.toggle()
             }
@@ -147,13 +156,42 @@ struct BigToggle: View {
             .frame(width: pillW, height: pillH)
         }
         .buttonStyle(.plain)
-        .disabled(!isInteractive)
         .opacity(isInteractive ? 1.0 : 0.9)
         .accessibilityLabel(enabled ? "Disable Vibez" : "Enable Vibez")
     }
 
     private var knobX: CGFloat {
         enabled ? (pillW - knobSize - 8) : 8
+    }
+}
+
+// MARK: - Shake effect
+//
+// A gentle damped sine in the x-axis. Driven by an Int trigger: bump
+// the trigger and the view shakes once. Damping tapers the amplitude
+// to zero by the end so the view settles cleanly instead of stopping
+// mid-swing.
+
+struct ShakeEffect: GeometryEffect {
+    var amount: CGFloat = 6
+    var shakesPerUnit: Int = 3
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        // animatableData interpolates from N to N+1 over the shake.
+        // Use the fractional part so both the oscillation phase and the
+        // amplitude taper restart cleanly with each new trigger.
+        let fraction = animatableData - floor(animatableData)
+        let damping = max(0, 1.0 - fraction)
+        let dx = amount * damping * sin(fraction * .pi * CGFloat(shakesPerUnit * 2))
+        return ProjectionTransform(CGAffineTransform(translationX: dx, y: 0))
+    }
+}
+
+extension View {
+    func shake(trigger: Int, amount: CGFloat = 6, shakesPerUnit: Int = 3, duration: Double = 0.42) -> some View {
+        modifier(ShakeEffect(amount: amount, shakesPerUnit: shakesPerUnit, animatableData: CGFloat(trigger)))
+            .animation(.easeOut(duration: duration), value: trigger)
     }
 }
 

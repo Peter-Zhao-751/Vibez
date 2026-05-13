@@ -20,6 +20,8 @@ struct ContentView: View {
 
     @State private var overlayMessage: NtfyMessage?
     @State private var showSettings = false
+    @State private var toggleShake = 0
+    @State private var setupShake = 0
 
     private var agent: Agent {
         Agent(rawValue: agentRaw) ?? .claude
@@ -167,6 +169,17 @@ struct ContentView: View {
         )
     }
 
+    /// Tapping the locked toggle: shake the toggle first, then the
+    /// setup card a beat later, so the eye is led from "this didn't
+    /// work" to "fix it here." Delay is a hair shorter than the toggle
+    /// shake so the two feel like one continuous gesture.
+    private func bounceToShowSetup() {
+        toggleShake &+= 1
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            setupShake &+= 1
+        }
+    }
+
     /// Tapping Dismiss resolves the trigger for THIS message's session
     /// only — other sessions stay pending and the shield stays up until
     /// each of them is replied-to, dismissed, or times out.
@@ -265,8 +278,10 @@ struct ContentView: View {
                 ),
                 agent: agent,
                 theme: theme,
-                isInteractive: !ntfyURL.isEmpty
+                isInteractive: !ntfyURL.isEmpty,
+                onLockedTap: bounceToShowSetup
             )
+            .shake(trigger: toggleShake)
 
             if ntfyURL.isEmpty || notifyClient.state != .connected {
                 NotificationSetupCard(
@@ -274,6 +289,7 @@ struct ContentView: View {
                     notifyClient: notifyClient,
                     theme: theme
                 )
+                .shake(trigger: setupShake, amount: 5)
                 .padding(.top, 18)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
