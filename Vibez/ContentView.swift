@@ -289,7 +289,7 @@ struct ContentView: View {
                     notifyClient: notifyClient,
                     theme: theme
                 )
-                .shake(trigger: setupShake, amount: 5)
+                .shake(trigger: setupShake, amount: 5, duration: 0.84)
                 .padding(.top, 18)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
