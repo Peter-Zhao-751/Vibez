@@ -299,12 +299,33 @@ final class NotifyClient {
         lastMessage = msg
     }
 
+    /// Strip the inline Markdown markers Claude/Codex emit (`**bold**`,
+    /// `*italic*`, `` `code` ``, `~~strike~~`, `[text](url)`) so they
+    /// don't render literally in iOS notifications. iOS push UI is plain
+    /// text — SwiftUI handles rich rendering in-app via `Text(.init(...))`.
+    static func stripMarkdown(_ s: String) -> String {
+        var out = s
+        let subs: [(String, String)] = [
+            (#"\[([^\]]+)\]\([^)]+\)"#, "$1"),      // [text](url) → text
+            (#"\*\*(.+?)\*\*"#,         "$1"),      // **bold** → bold
+            (#"__(.+?)__"#,             "$1"),      // __bold__ → bold
+            (#"~~(.+?)~~"#,             "$1"),      // ~~strike~~ → strike
+            (#"(?<!\*)\*([^*\n]+?)\*(?!\*)"#, "$1"),// *italic* → italic
+        ]
+        for (pat, repl) in subs {
+            out = out.replacingOccurrences(of: pat, with: repl, options: .regularExpression)
+        }
+        out = out.replacingOccurrences(of: "`", with: "")
+        return out
+    }
+
     /// Schedule a local notification for this message. Caller owns the
     /// gating policy (toggle state, shield kind) — this just renders.
     func scheduleLocalNotification(_ msg: NtfyMessage) {
         let content = UNMutableNotificationContent()
-        content.title = msg.displayTitle
-        content.body = msg.body.isEmpty ? "Vibez ping" : msg.body
+        content.title = Self.stripMarkdown(msg.displayTitle)
+        let rawBody = msg.body.isEmpty ? "Vibez ping" : msg.body
+        content.body = Self.stripMarkdown(rawBody)
         content.sound = .default
 
         let request = UNNotificationRequest(

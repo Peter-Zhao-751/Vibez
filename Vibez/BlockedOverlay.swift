@@ -77,7 +77,7 @@ struct BlockedOverlay: View {
                     .foregroundStyle(gradientColor)
                     .padding(.bottom, 10)
 
-                Text(titleText)
+                Text(.init(titleText))
                     .font(.system(size: 26, weight: .bold))
                     .tracking(-0.4)
                     .foregroundStyle(theme.fg)
@@ -87,7 +87,7 @@ struct BlockedOverlay: View {
                     .padding(.horizontal, 32)
                     .padding(.bottom, 8)
 
-                Text(bodyText)
+                Text(.init(bodyText))
                     .font(.system(size: 14))
                     .foregroundStyle(theme.fgMute)
                     .multilineTextAlignment(.center)

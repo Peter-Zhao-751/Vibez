@@ -622,7 +622,7 @@ struct TriggerRow: View {
                             .frame(width: 6, height: 6)
                             .accessibilityLabel("Waiting for reply")
                     }
-                    Text(topLine)
+                    Text(.init(topLine))
                         .font(.system(size: 12.5, weight: .semibold))
                         .foregroundStyle(theme.fg)
                         .lineLimit(1)
@@ -635,7 +635,7 @@ struct TriggerRow: View {
                     }
                 }
                 if let description = descriptionLine {
-                    Text(description)
+                    Text(.init(description))
                         .font(.system(size: 11))
                         .foregroundStyle(theme.fgMute)
                         .lineLimit(2)
