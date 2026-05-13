@@ -22,9 +22,11 @@ PermissionRequest pings are suppressed in `dontAsk` and `bypassPermissions` mode
 2. Add the marketplace and install:
 
    ```
-   codex plugin marketplace add /path/to/Vibez
+   codex plugin marketplace add Peter-Zhao-751/Vibez
    codex plugin install vibez-codex@vibez
    ```
+
+   `codex plugin marketplace add` also accepts full Git HTTPS/SSH URLs or a local directory if you're hacking on the plugin (`codex plugin marketplace add /path/to/Vibez`).
 
 3. **Open Codex as normal.** The first session after install auto-generates your private topic and shows you a system message with the subscribe URL.
 
