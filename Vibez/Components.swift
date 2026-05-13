@@ -808,15 +808,23 @@ struct RecentTriggersSection: View {
                         // edges — interpolating opacity is smoother than
                         // sliding stop positions, so the fade reads as a
                         // fade rather than a wipe.
-                        LinearGradient(
-                            stops: [
-                                .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
-                                .init(color: .black, location: 0.14),
-                                .init(color: .black, location: 0.86),
-                                .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
-                            ],
-                            startPoint: .top,
-                            endPoint: .bottom
+                        UnevenRoundedRectangle(
+                            topLeadingRadius: 0,
+                            bottomLeadingRadius: 47,
+                            bottomTrailingRadius: 47,
+                            topTrailingRadius: 0
+                        )
+                        .fill(
+                            LinearGradient(
+                                stops: [
+                                    .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
+                                    .init(color: .black, location: 0.14),
+                                    .init(color: .black, location: 0.86),
+                                    .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
+                                ],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
                         )
                     }
                 }
