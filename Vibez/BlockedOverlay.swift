@@ -144,9 +144,11 @@ struct BlockedOverlay: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         let remaining = remainingSeconds(now: context.date)
                         Text(formatRemaining(remaining))
-                            .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(theme.fgMute)
-                            .padding(.bottom, 6)
+                            .font(.system(size: 38, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.fg)
+                            .contentTransition(.numericText(countsDown: true))
+                            .animation(.easeInOut(duration: 0.18), value: remaining)
+                            .padding(.bottom, 16)
                             .onChange(of: remaining) { _, new in
                                 if new == 0 && !fired {
                                     fired = true
@@ -174,13 +176,20 @@ struct BlockedOverlay: View {
 
                 Button(action: onDismiss) {
                     Text("Dismiss")
-                        .font(.system(size: 13))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundStyle(theme.fgMute)
                         .padding(.vertical, 12)
-                        .padding(.horizontal, 20)
+                        .padding(.horizontal, 28)
+                        .overlay(
+                            Capsule()
+                                .strokeBorder(
+                                    theme.fgMute.opacity(dark ? 0.35 : 0.30),
+                                    lineWidth: 1.2
+                                )
+                        )
                 }
                 .buttonStyle(.plain)
-                .padding(.top, 6)
+                .padding(.top, 4)
 
                 Spacer()
             }
@@ -192,4 +201,113 @@ struct BlockedOverlay: View {
             withAnimation(.easeOut(duration: 0.5)) { appeared = true }
         }
     }
+}
+
+// MARK: - Previews
+
+private func previewMessage(
+    title: String = "Plan plugin distribution",
+    body: String = "Should I bump the minor version before publishing, or roll the patch and ship a follow-up?",
+    event: VibezEvent? = .needsInput,
+    agent: VibezAgent? = .claude,
+    sessionId: String? = "preview-session"
+) -> NtfyMessage {
+    var msg = NtfyMessage(
+        id: UUID().uuidString,
+        title: title,
+        body: body,
+        receivedAt: Date()
+    )
+    msg.event = event
+    msg.agent = agent
+    msg.sessionId = sessionId
+    msg.shield = .on
+    return msg
+}
+
+#Preview("Needs input · 14:32 · dark") {
+    BlockedOverlay(
+        agent: .claude,
+        theme: Theme.make(agent: .claude, dark: true),
+        dark: true,
+        message: previewMessage(),
+        expiresAt: Date().addingTimeInterval(14 * 60 + 32),
+        stackDepth: 1,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Done · 28s · light") {
+    BlockedOverlay(
+        agent: .claude,
+        theme: Theme.make(agent: .claude, dark: false),
+        dark: false,
+        message: previewMessage(
+            title: "Refactor blocking panel",
+            body: "Wrapped the panel in a lazy stack and trimmed the unused gradient. Tests pass.",
+            event: .done
+        ),
+        expiresAt: Date().addingTimeInterval(28),
+        stackDepth: 1,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.light)
+}
+
+#Preview("Stack of 3 · dark") {
+    BlockedOverlay(
+        agent: .claude,
+        theme: Theme.make(agent: .claude, dark: true),
+        dark: true,
+        message: previewMessage(
+            title: "Investigate WebSocket disconnects",
+            body: "Reconnect logic is dropping the second frame on iOS 17 — want me to add a retry guard?"
+        ),
+        expiresAt: Date().addingTimeInterval(9 * 60 + 4),
+        stackDepth: 3,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Codex · needs input · dark") {
+    BlockedOverlay(
+        agent: .codex,
+        theme: Theme.make(agent: .codex, dark: true),
+        dark: true,
+        message: previewMessage(
+            title: "Wire up SSE handler",
+            body: "Need confirmation before I rip out the polling fallback.",
+            agent: .codex
+        ),
+        expiresAt: Date().addingTimeInterval(7 * 60 + 12),
+        stackDepth: 2,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.dark)
+}
+
+#Preview("Untagged ping · no countdown · light") {
+    BlockedOverlay(
+        agent: .claude,
+        theme: Theme.make(agent: .claude, dark: false),
+        dark: false,
+        message: previewMessage(
+            title: "Vibez",
+            body: "Test push from a curl ping — no Vibez control tags.",
+            event: nil,
+            agent: nil,
+            sessionId: nil
+        ),
+        expiresAt: nil,
+        stackDepth: 1,
+        onDismiss: {},
+        onExpire: {}
+    )
+    .preferredColorScheme(.light)
 }
