@@ -17,14 +17,14 @@
                         <autoresizingMask key="autoresizingMask" widthSizable="YES" heightSizable="YES"/>
                         <subviews>
                             <imageView clipsSubviews="YES" userInteractionEnabled="NO" contentMode="scaleAspectFit" misplaced="YES" image="WordmarkPDF" translatesAutoresizingMaskIntoConstraints="NO" id="Rq8-UZ-PC5">
-                                <rect key="frame" x="129" y="252" width="212" height="139"/>
+                                <rect key="frame" x="107" y="233" width="212" height="139"/>
                             </imageView>
                         </subviews>
                         <viewLayoutGuide key="safeArea" id="LSC-sa-001"/>
                         <color key="backgroundColor" name="LaunchBackground"/>
                         <constraints>
-                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerX" secondItem="LSC-vw-001" secondAttribute="centerX" constant="26" id="T9C-RJ-kZT"/>
-                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerY" secondItem="LSC-vw-001" secondAttribute="centerY" constant="-100" id="z7A-qh-OKF"/>
+                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerX" secondItem="LSC-vw-001" secondAttribute="centerX" id="T9C-RJ-kZT"/>
+                            <constraint firstItem="Rq8-UZ-PC5" firstAttribute="centerY" secondItem="LSC-vw-001" secondAttribute="centerY" constant="-150" id="z7A-qh-OKF"/>
                         </constraints>
                     </view>
                 </viewController>
@@ -34,7 +34,7 @@
         </scene>
     </scenes>
     <resources>
-        <image name="WordmarkPDF" width="210" height="75"/>
+        <image name="WordmarkPDF" width="270" height="60"/>
         <namedColor name="LaunchBackground">
             <color red="0.98431372549019602" green="0.97254901960784312" blue="0.95686274509803926" alpha="1" colorSpace="custom" customColorSpace="sRGB"/>
         </namedColor>

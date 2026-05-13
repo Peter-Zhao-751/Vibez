@@ -1,172 +1,139 @@
 <div align="center">
 
-<img src="assets/icons/A-pixel-z.svg" alt="" width="180">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/wordmark/wordmark-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/wordmark/wordmark-light.svg">
+  <img src="assets/wordmark/wordmark-light.svg" alt="Vibez" width="360">
+</picture>
 
-<img src="assets/wordmark/vibez-wordmark.svg#gh-light-mode-only" alt="vibez" width="360">
-<img src="assets/wordmark/vibez-wordmark-dark.svg#gh-dark-mode-only" alt="vibez" width="360">
+**Block distracting apps when your coding agent needs you back.**
 
-### the only productivity app for people who let an AI do their job
+Vibez connects Claude Code and Codex lifecycle events to an iOS Screen Time shield. When your agent stops, asks for permission, or needs a reply, your selected apps lock until you return.
 
-**Vibez blocks Instagram, TikTok, Reels, and the rest of the slot machine on your phone — but only while Claude is waiting for you.** The second your agent stops or asks a question, the apps lock. The second you reply, they unlock. Doomscroll on agent time, focus on human time.
+<sub>iOS Screen Time API · Claude Code plugin · Codex plugin · ntfy bridge</sub>
 
-<sub>iOS · Screen Time API · Claude Code plugin · ntfy push</sub>
+<br><br>
 
-<br>
-
-<a href="#install-the-claude-side"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-1a0e08?style=for-the-badge&labelColor=dd7a52"></a>
-<a href="#install-the-ios-app"><img alt="iOS app" src="https://img.shields.io/badge/iOS_app-coming_soon-fff5e8?style=for-the-badge&labelColor=1a0e08"></a>
-
-</div>
-
----
-
-## the situation, 2026
-
-It's 2026. Every self-respecting engineer — or so-called engineer — has a Claude subscription, taste, and a sprint deadline.
-
-They also have, statistically speaking, **47 minutes of TikTok logged before lunch**, because every time Claude says
-
-> _"Should I run `npm install` to add the new dependency? (y/n)"_
-
-their thumb is on the home button before their prefrontal cortex catches up. Forty seconds become forty minutes. The agent finished six tasks ago. The build is green. They are still watching a labrador eat a strawberry.
-
-And willpower's not going to fix it.
-
-## what vibez does
-
-<table>
-<tr>
-<td width="50%" valign="top">
-
-**On your Mac**
-Claude Code plugin. Hooks into `SessionStart`, `Notification`, and `Stop`. When Claude asks a question or finishes a task, the plugin fires a push notification at your phone via [ntfy.sh](https://ntfy.sh).
-
-</td>
-<td width="50%" valign="top">
-
-**On your phone**
-A native iOS app. Uses Apple's Screen Time / Family Controls APIs to shield the apps **you** picked (Instagram, TikTok, Reels, Twitter, whatever your poison is). Toggle on → shielded. Toggle off → unshielded.
-
-</td>
-</tr>
-<tr>
-<td colspan="2" align="center">
-
-**The bridge:** the push from your Mac flips the toggle. Agent goes idle → toggle on → your apps are dead. You answer Claude → toggle off → scroll like a free citizen until the next `npm install` prompt.
-
-</td>
-</tr>
-</table>
-
-<div align="center">
-
-<img src="assets/glyph/pixel-z-orange.svg" width="64" alt="">
+<a href="ClaudePlugin/README.md"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
+<a href="CodexPlugin/README.md"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
+<a href="#ios-app"><img alt="iOS app" src="https://img.shields.io/badge/iOS_app-local_build-fff5e8?style=flat-square&labelColor=1a0e08"></a>
 
 </div>
 
-## the events
+## What It Does
 
-| When Claude does this | Vibez does this |
-|---|---|
-| **Starts a session** (first run) | Shows you the subscribe URL inline so you can pair your phone. |
-| **Asks for input** ("Permission required to run…") | Push with the question in the title. Your reels die. |
-| **Finishes a task** (Stop) | Push with a ~160-char excerpt of Claude's last message. Apps stay shielded until you come back. |
-| **Is happily working** | Nothing. The phone is yours. Touch grass. Or don't. |
+Coding agents create a weird failure mode: the work is automated, but your attention is still the bottleneck. Vibez turns agent idle states into a phone-side block signal.
 
-## install: the claude side
+| Agent event | Vibez plugin | iOS app |
+|---|---|---|
+| First session after install | Generates a private ntfy topic and shows the subscribe URL. | Subscribes to the same topic. |
+| Permission request or explicit notification | Sends a `needs-input` push with `shield:on`. | Records the trigger, shows the message, and applies the Screen Time shield. |
+| Agent stops after a response | Sends a `done` push with a short assistant excerpt and `shield:on`. | Keeps selected apps blocked for the configured window. |
+| You submit the next prompt | Sends a `replied` push with `shield:off`. | Clears that session's trigger and lifts the shield when no triggers remain. |
 
-Available right now. This part actually works.
+The Claude Code and Codex plugins share one topic at `~/.config/vibez/topic`, so one phone subscription can cover both agents.
 
-**1.** In Claude Code:
+## Components
+
+| Path | Status | Purpose |
+|---|---|---|
+| [`ClaudePlugin/`](ClaudePlugin/) | Working | Claude Code plugin for `SessionStart`, `Notification`, `Stop`, and `UserPromptSubmit` hooks. |
+| [`CodexPlugin/`](CodexPlugin/) | Working | Codex plugin for `SessionStart`, `PermissionRequest`, `Stop`, and `UserPromptSubmit` hooks. |
+| [`Vibez/`](Vibez/) | Local build | SwiftUI iOS app that listens to ntfy, records recent triggers, and applies Family Controls / Managed Settings shields. |
+| [`assets/`](assets/) | Working assets | Logo, glyph, icon, and README artwork. |
+
+## Install Agent Plugins
+
+Install either plugin, or install both. They share the same ntfy topic automatically.
+
+### Claude Code
 
 ```sh
 /plugin marketplace add Peter-Zhao-751/Vibez
 /plugin install vibez@plugin
 ```
 
-**2.** Open Claude Code as normal. The first session prints a banner with your private subscribe URL.
+Then open Claude Code. The first session prints your private subscribe URL. Run `/vibez:setup` to show it again with a QR code, or `/vibez:setup test` to send a test push.
 
-**3.** Run `/vibez:setup` to show the URL again with an inline QR. Open ntfy on your phone → tap **+** → scan it.
+Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md)
 
-Full plugin docs (env vars, self-hosted ntfy, slash commands, failure modes) live in [`ClaudePlugin/README.md`](ClaudePlugin/README.md).
+### Codex
 
-## install: the iOS app
-
-> **Coming soon to the App Store.** ™
->
-> Status: backend compiles clean against iOS 26.4, `FamilyControls` + `ManagedSettings` shields work end-to-end, state survives app kill. Currently blocked on a paid Apple Developer Program enrollment ($99/yr) — Apple gates the `family-controls` entitlement so personal teams literally cannot ship this. Once enrolled, App Store distribution additionally needs the Family Controls Distribution Request form (~3-week review).
->
-> Translation: the code is done. The bureaucracy is not. If you want to build it locally on a paid team, clone the repo, open `Vibez.xcodeproj`, set your team in Signing & Capabilities, and run on a real device. (Shields are no-ops in the simulator — Apple's rule, not ours.)
-
-When it ships, the flow will be:
-
-1. Install Vibez from the App Store.
-2. Grant Screen Time / Family Controls permission.
-3. Tap the picker → pick the apps that own you.
-4. Done. The Claude plugin handles the rest.
-
-## why not just… use willpower
-
-Look at yourself.
-
-## why not Apple's Focus modes / Screen Time limits
-
-Focus modes are static schedules — they don't know your agent just stopped. Screen Time limits are daily budgets, not "block this for the next 90 seconds while I read what Claude wrote." Vibez is **event-driven**, scoped to the exact window where you're least likely to resist a 30-second video.
-
-## brand kit
-
-<table>
-<tr>
-<td align="center"><img src="assets/icons/A-pixel-z.svg" width="96"><br><sub>primary mark</sub></td>
-<td align="center"><img src="assets/icons/B-italic-z.svg" width="96"><br><sub>italic z</sub></td>
-<td align="center"><img src="assets/icons/C-waveform.svg" width="96"><br><sub>waveform</sub></td>
-<td align="center"><img src="assets/icons/D-z-monogram.svg" width="96"><br><sub>monogram</sub></td>
-</tr>
-</table>
-
-**Palette**
-
-<table>
-<tr>
-<td><img src="https://placehold.co/40x40/dd7a52/dd7a52.png" width="32"></td><td><code>#dd7a52</code></td><td>orange</td>
-<td><img src="https://placehold.co/40x40/b85a36/b85a36.png" width="32"></td><td><code>#b85a36</code></td><td>orange deep</td>
-</tr>
-<tr>
-<td><img src="https://placehold.co/40x40/1a0e08/1a0e08.png" width="32"></td><td><code>#1a0e08</code></td><td>ink</td>
-<td><img src="https://placehold.co/40x40/fff5e8/fff5e8.png" width="32"></td><td><code>#fff5e8</code></td><td>cream</td>
-</tr>
-</table>
-
-Full asset inventory in [`assets/README.txt`](assets/README.txt).
-
-## repo layout
-
+```sh
+codex plugin marketplace add Peter-Zhao-751/Vibez
+codex plugin install vibez-codex@vibez
 ```
+
+Then open Codex. The first session prints your private subscribe URL. You can later ask Codex to show your Vibez URL or send a test push.
+
+Full details: [`CodexPlugin/README.md`](CodexPlugin/README.md)
+
+## iOS App
+
+The iOS app is built around Apple's `FamilyControls` and `ManagedSettings` frameworks:
+
+1. Paste or scan your ntfy subscribe URL.
+2. Grant notification permission.
+3. Grant Screen Time / Family Controls permission.
+4. Pick the apps, categories, or websites to shield.
+5. Leave Vibez enabled while your agent works.
+
+Distribution is still gated by Apple. Local device builds need a paid Apple Developer Program team because Apple does not grant the `family-controls` entitlement to personal teams. App Store distribution also requires Apple's Family Controls Distribution Request review. The simulator is useful for compile checks, but Screen Time shields are no-ops there.
+
+## Configuration
+
+Both plugins read the same environment variables:
+
+| Variable | Default | Purpose |
+|---|---|---|
+| `NTFY_TOPIC` | Auto-generated | Override the shared topic. Useful when you want multiple machines on one subscription. |
+| `NTFY_SERVER` | `https://ntfy.sh` | Use a self-hosted ntfy server. |
+| `NTFY_AUTH` | unset | Bearer token for protected ntfy topics. |
+
+The generated topic and plugin log live in `~/.config/vibez/`.
+
+## Privacy
+
+Public ntfy topics are secret-by-name. Anyone with the topic URL can publish to it and read messages from it. Vibez generates a 32-character random topic by default, but you should rotate it if it appears in a screenshot, stream, log, or shared terminal.
+
+For stricter privacy, self-host ntfy and set `NTFY_SERVER` and `NTFY_AUTH`.
+
+## Repo Layout
+
+```text
 Vibez/
 ├── Vibez/                  iOS app (SwiftUI, Screen Time API)
-├── ClaudePlugin/           Claude Code plugin (hooks + ntfy)
+├── ClaudePlugin/           Claude Code plugin
+├── CodexPlugin/            Codex plugin
 ├── assets/                 Logos, icons, lockups, glyphs
+├── docs/                   Design notes and implementation plans
 ├── Vibez.xcodeproj/
-└── CLAUDE.md               Project context for the agents
+└── CLAUDE.md               Project context for agent sessions
 ```
 
-## status
+## Current Status
 
-- **Claude Code plugin** — shipping
-- **iOS backend** — compiles, shields apply/remove correctly
-- **Mac ↔ phone bridge** — currently push-driven via ntfy; deciding whether to add a deeper integration (URL scheme handoff, Shortcuts, etc.)
-- **App Store release** — gated on Apple Developer Program enrollment + Family Controls distribution review
+- Claude Code plugin: working.
+- Codex plugin: working.
+- iOS app: Screen Time shield flow implemented for local builds.
+- App Store release: pending paid developer enrollment and Family Controls distribution approval.
 
-## license
+## License
 
-TBD. For now: it's mine, be cool about it.
+TBD.
 
 <div align="center">
 
 <br>
 
-<img src="assets/glyph/pixel-z-ink.svg" width="48" alt="">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/glyph/pixel-z-cream.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/glyph/pixel-z-ink.svg">
+  <img src="assets/glyph/pixel-z-ink.svg" width="42" alt="">
+</picture>
 
-<sub>built by <a href="https://github.com/Peter-Zhao-751">@Peter-Zhao-751</a> · pair-programmed with the very tool that demanded this app exist</sub>
+<br>
+
+<sub>Built by <a href="https://github.com/Peter-Zhao-751">@Peter-Zhao-751</a>.</sub>
 
 </div>

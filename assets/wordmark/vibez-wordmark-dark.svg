@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 340" width="1100" height="340">
   
-  <text x="40" y="278" font-family="-apple-system, 'SF Pro Display', 'Inter', 'Helvetica Neue', system-ui, sans-serif" font-size="300" font-weight="900" font-style="italic" letter-spacing="-14" fill="#fff5e8">vibe</text>
+  <text x="40" y="270" class="vibe" fill="#fff5e8">vibe</text>
   
   <g transform="translate(620 90) scale(3.2)" shape-rendering="crispEdges">
     <g fill="#dd7a52">

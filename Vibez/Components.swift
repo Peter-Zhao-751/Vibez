@@ -274,7 +274,7 @@ struct NotificationSetupCard: View {
                             Text("Save")
                                 .font(.system(size: 11, weight: .heavy, design: .monospaced))
                                 .tracking(1.6)
-                                .foregroundStyle(saveable ? theme.onAccent : theme.fgFaint)
+                                .foregroundStyle(saveable ? theme.onAccent : theme.fgMute)
                         }
                     }
                     .frame(minWidth: 44)
@@ -390,7 +390,7 @@ struct VibezWordmark: View {
         Image("Wordmark")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(height: 50)
+            .frame(height: 25)
             .fixedSize()
     }
 }
@@ -679,7 +679,7 @@ struct TriggerRow: View {
                         .lineLimit(2)
                         .truncationMode(.tail)
                 }
-                Text("\(event.relativeTime(from: now)) · blocked \(event.formattedDuration)")
+                Text("\(event.relativeTime(from: now))")
                     .font(.system(size: 10.5, design: .monospaced))
                     .foregroundStyle(theme.fgFaint)
             }
@@ -788,7 +788,7 @@ struct RecentTriggersSection: View {
                             }
                         }
                     }
-                    .frame(maxHeight: 260)
+                    .frame(maxHeight: 400)
                     .scrollBounceBehavior(.basedOnSize)
                     .scrollIndicators(.hidden)
                     .onScrollGeometryChange(for: ScrollEdges.self) { geo in
