@@ -788,8 +788,8 @@ struct RecentTriggersSection: View {
                         LinearGradient(
                             stops: [
                                 .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
-                                .init(color: .black, location: 0.28),
-                                .init(color: .black, location: 0.72),
+                                .init(color: .black, location: 0.14),
+                                .init(color: .black, location: 0.86),
                                 .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
                             ],
                             startPoint: .top,
