@@ -70,6 +70,7 @@ struct Theme {
     let bgPanel: Color
     let bgWidget: Color
     let bgChip: Color
+    let inputBg: Color
     let fg: Color
     let fgMute: Color
     let fgFaint: Color
@@ -77,6 +78,7 @@ struct Theme {
     let accent: Color
     let accentDeep: Color
     let pillGradient: LinearGradient
+    let saveActiveBg: AnyShapeStyle
     let pillOff: Color
     let knobBg: Color
     let onAccent: Color
@@ -101,23 +103,26 @@ struct Theme {
             accentDeep = .lerp(claudeDeep, codexDeep, t: 0.5)
         }
 
-        let pillGradient: LinearGradient = {
-            let stops: [Color] = (agent == .both)
-                ? [claudeOrange, codexBlue]
-                : [accent, accentDeep]
-            return LinearGradient(
-                colors: stops,
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }()
+        let pillStops: [Color] = (agent == .both)
+            ? [claudeOrange, codexBlue]
+            : [accent, accentDeep]
+
+        let pillGradient = LinearGradient(
+            colors: pillStops,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
 
         if dark {
+            let bgChipDark = Color(hex: 0x16171d)
+            let pillMid = Color.lerp(pillStops[0], pillStops[1], t: 0.5)
+            let inputBg = Color.lerp(bgChipDark, pillMid, t: 0.5)
             return Theme(
                 bg: Color(hex: 0x0c0d12),
                 bgPanel: Color(hex: 0x15161c),
                 bgWidget: Color(hex: 0x1f2027),
-                bgChip: Color(hex: 0x16171d),
+                bgChip: bgChipDark,
+                inputBg: inputBg,
                 fg: Color(hex: 0xf5f1ec),
                 fgMute: Color(hex: 0x6f6c7a),
                 fgFaint: Color(hex: 0x56545e),
@@ -125,23 +130,33 @@ struct Theme {
                 accent: accent,
                 accentDeep: accentDeep,
                 pillGradient: pillGradient,
+                saveActiveBg: AnyShapeStyle(pillGradient),
                 pillOff: Color(hex: 0x1d1f27),
                 knobBg: Color(hex: 0x0e0f14),
                 onAccent: .white
             )
         }
+        let bgChipLight = Color(hex: 0xf1ede5)
+        let softStops = pillStops.map { Color.lerp($0, bgChipLight, t: 0.5) }
+        let softPillGradient = LinearGradient(
+            colors: softStops,
+            startPoint: .topLeading,
+            endPoint: .bottomTrailing
+        )
         return Theme(
             bg: Color(hex: 0xfbf8f4),
             bgPanel: .white,
             bgWidget: Color(hex: 0xe4dfd6),
-            bgChip: Color(hex: 0xf1ede5),
+            bgChip: bgChipLight,
+            inputBg: bgChipLight,
             fg: Color(hex: 0x1a0e08),
-            fgMute: Color(hex: 0x918a82),
-            fgFaint: Color(hex: 0xbdb6ae),
+            fgMute: Color(hex: 0x6e655c),
+            fgFaint: Color(hex: 0xa8a097),
             hairline: Color(hex: 0xece4d8),
             accent: accent,
             accentDeep: accentDeep,
             pillGradient: pillGradient,
+            saveActiveBg: AnyShapeStyle(softPillGradient),
             pillOff: Color(hex: 0xe6dfd5),
             knobBg: .white,
             onAccent: .white

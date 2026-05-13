@@ -261,7 +261,7 @@ struct NotificationSetupCard: View {
                 .padding(.vertical, 9)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.bgChip)
+                        .fill(theme.inputBg)
                 )
 
                 Button(action: commit) {
@@ -283,7 +283,7 @@ struct NotificationSetupCard: View {
                     .background(
                         RoundedRectangle(cornerRadius: 10)
                             .fill((saveable || verifying)
-                                  ? AnyShapeStyle(theme.pillGradient)
+                                  ? theme.saveActiveBg
                                   : AnyShapeStyle(theme.bgChip))
                     )
                 }
