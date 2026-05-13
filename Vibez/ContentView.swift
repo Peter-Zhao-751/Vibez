@@ -267,8 +267,6 @@ struct ContentView: View {
                 theme: theme,
                 isInteractive: !ntfyURL.isEmpty
             )
-            StatusPill(listening: manager.isBlocking, theme: theme)
-                .padding(.top, 10)
 
             if ntfyURL.isEmpty || notifyClient.state != .connected {
                 NotificationSetupCard(

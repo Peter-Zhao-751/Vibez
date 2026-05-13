@@ -148,7 +148,7 @@ struct BigToggle: View {
         }
         .buttonStyle(.plain)
         .disabled(!isInteractive)
-        .opacity(isInteractive ? 1.0 : 0.7)
+        .opacity(isInteractive ? 1.0 : 0.9)
         .accessibilityLabel(enabled ? "Disable Vibez" : "Enable Vibez")
     }
 
@@ -403,21 +403,6 @@ struct ChipIconButton: View {
     }
 }
 
-// MARK: - Status pill
-
-struct StatusPill: View {
-    let listening: Bool
-    let theme: Theme
-
-    var body: some View {
-        Text(listening ? "● LISTENING" : "○ STANDBY")
-            .font(.system(size: 11, weight: .heavy, design: .monospaced))
-            .tracking(2.4)
-            .foregroundStyle(listening ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.fgFaint))
-            .shadow(color: listening ? theme.accentDeep.opacity(0.55) : .clear,
-                    radius: listening ? 12 : 0, x: 0, y: 4)
-    }
-}
 
 // MARK: - Blocking apps panel
 
