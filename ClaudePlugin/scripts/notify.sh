@@ -404,6 +404,29 @@ case "${EVENT}" in
         fi
         ;;
 
+    pre-tool-use)
+        # AskUserQuestion blocks Claude mid-turn waiting for the user's
+        # pick. Stop doesn't fire (stop_reason is tool_use, not end_turn)
+        # and Notification doesn't fire either, so this PreToolUse hook
+        # is the only place to ping the phone while the picker is pending.
+        tool_name="$(jq_get '.tool_name')"
+        [ "${tool_name}" = "AskUserQuestion" ] || exit 0
+
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
+        is_slash_command "${convo_title}" && exit 0
+
+        question="$(jq_get '.tool_input.questions[0].question')"
+        [ -z "${question}" ] && question="Claude is asking a question."
+        if [ "${#question}" -gt 160 ]; then
+            question="${question:0:159}…"
+        fi
+        post_ntfy "${convo_title}" "${question}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
+        ;;
+
     user-prompt-submit)
         # User replied in Claude — fire a push with _vibez:shield:off so
         # the iOS app lifts the shield for this session. Body is mostly

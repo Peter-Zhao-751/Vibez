@@ -345,7 +345,7 @@ struct ContentView: View {
 
             BigToggle(
                 enabled: Binding(
-                    get: { manager.isBlocking },
+                    get: { manager.isBlocking && !setupVisible},
                     set: { manager.setBlocking($0) }
                 ),
                 agent: agent,
