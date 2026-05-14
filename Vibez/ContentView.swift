@@ -332,10 +332,8 @@ struct ContentView: View {
 
     @ViewBuilder
     private var hero: some View {
+        let setupVisible = ntfyURL.isEmpty || notifyClient.state != .connected
         VStack(spacing: 0) {
-
-
-
             MascotForAgent(
                 agent: agent,
                 listening: manager.isBlocking,
@@ -343,7 +341,7 @@ struct ContentView: View {
                 gap: 4
             )
             .frame(height: 110, alignment: .bottom)
-            .padding(.bottom, 50)
+            .padding(.bottom, 18)
 
             BigToggle(
                 enabled: Binding(
@@ -355,21 +353,24 @@ struct ContentView: View {
                 isInteractive: !ntfyURL.isEmpty,
                 onLockedTap: bounceToShowSetup
             )
-            .padding(.bottom, 20)
+            // Tight gap to the setup card so the locked toggle visually
+            // leads into "fix it here"; more breathing room when the
+            // toggle stands alone above the blocking panel below.
+            .padding(.bottom, setupVisible ? 14 : 22)
             .shake(trigger: toggleShake)
 
-            if ntfyURL.isEmpty || notifyClient.state != .connected {
+            if setupVisible {
                 NotificationSetupCard(
                     ntfyURL: $ntfyURL,
                     notifyClient: notifyClient,
                     theme: theme
                 )
-                .padding(.bottom, 10)
+                .padding(.bottom, 6)
                 .shake(trigger: setupShake, amount: 5, duration: 0.84)
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .animation(.easeInOut(duration: 0.28), value: ntfyURL.isEmpty || notifyClient.state != .connected)
+        .animation(.easeInOut(duration: 0.28), value: setupVisible)
     }
 }
 
