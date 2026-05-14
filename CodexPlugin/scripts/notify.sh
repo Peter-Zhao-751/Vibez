@@ -337,6 +337,38 @@ case "${EVENT}" in
         fi
         ;;
 
+    pre-tool-use)
+        # ask_user_question is Codex's interactive picker — turn is paused
+        # mid-flight until the user submits, so neither Stop nor
+        # PermissionRequest fires while it's pending. This is the only
+        # hook that can ping the phone in time.
+        tool_name="$(jq_get '.tool_name')"
+        case "${tool_name}" in
+            ask_user_question|AskUserQuestion) ;;
+            *) exit 0 ;;
+        esac
+
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        is_ephemeral_session && { log "pre-tool-use: skipping ephemeral session"; exit 0; }
+        proj="$(basename "${cwd:-unknown}")"
+        title_raw="$(read_thread_name_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="${proj}"
+        is_slash_command "${title_raw}" && exit 0
+
+        # Try Claude-style (.questions[0].question) and singular (.question)
+        # shapes — the exact ask_user_question input schema isn't public,
+        # so be permissive and fall back to a generic body.
+        question="$(jq_get '.tool_input.questions[0].question')"
+        [ -z "${question}" ] && question="$(jq_get '.tool_input.question')"
+        [ -z "${question}" ] && question="Codex is asking a question."
+
+        post_ntfy "$(clip_title "${title_raw}")" "$(clip_body "${question}")" \
+            "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        ;;
+
     user-prompt-submit)
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"

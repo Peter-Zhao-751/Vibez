@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT}}}/scripts/notify.sh\" session-start"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" session-start"
           }
         ]
       }
@@ -15,7 +15,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT}}}/scripts/notify.sh\" permission-request"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" permission-request"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "^(ask_user_question|AskUserQuestion)$",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" pre-tool-use"
           }
         ]
       }
@@ -25,7 +36,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT}}}/scripts/notify.sh\" stop"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" stop"
           }
         ]
       }
@@ -35,7 +46,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT:-${PLUGIN_ROOT:-${CODEX_PLUGIN_ROOT}}}/scripts/notify.sh\" user-prompt-submit"
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" user-prompt-submit"
           }
         ]
       }
