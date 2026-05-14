@@ -121,6 +121,30 @@ jq_get() {
     fi
 }
 
+# Pull the most recent thread name Codex Desktop has generated for this
+# session. Codex Desktop spawns an ephemeral sub-LLM call per turn to
+# produce a short title (see Wt() in the Codex Desktop bundle) and writes
+# the result back to the parent rollout as an event_msg payload of shape
+# {type:"thread_name_updated", thread_name:"<title>"}. This is what the
+# user sees in the app's sidebar, so it's the least-surprising thing to
+# put on their phone. Returns empty for codex-tui CLI sessions (the CLI
+# doesn't generate titles), in which case the caller should fall back to
+# first_user_prompt_from_transcript.
+read_thread_name_from_transcript() {
+    local transcript="$1"
+    [ -z "${transcript}" ] && return 0
+    [ ! -f "${transcript}" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    jq -r '
+        select(.payload.type == "thread_name_updated")
+        | .payload.thread_name // empty
+    ' "${transcript}" 2>/dev/null \
+        | grep -v '^[[:space:]]*$' \
+        | tail -n 1 \
+        | tr '\n' ' '
+}
+
 # Pull the first real user prompt from a Codex rollout transcript so we
 # have a meaningful title instead of always using basename(cwd). Codex
 # writes records like {"type":"response_item","payload":{"type":"message",
@@ -263,7 +287,8 @@ case "${EVENT}" in
         is_ephemeral_session && { log "permission-request: skipping ephemeral session"; exit 0; }
         tool_name="$(jq_get '.tool_name' 'tool')"
         proj="$(basename "${cwd:-unknown}")"
-        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        title_raw="$(read_thread_name_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
 
         # Build a short body: tool name + a snippet of the input. tool_input
@@ -289,7 +314,8 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         is_ephemeral_session && { log "stop: skipping ephemeral session"; exit 0; }
         proj="$(basename "${cwd:-unknown}")"
-        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        title_raw="$(read_thread_name_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
         is_slash_command "${title_raw}" && exit 0
         # Codex puts the final assistant text directly in the Stop payload —
@@ -319,9 +345,12 @@ case "${EVENT}" in
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
         is_slash_command "${prompt}" && exit 0
-        # Title prefers the transcript's first user prompt (the conversation
-        # name), then the just-submitted prompt, then cwd basename.
-        title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        # Title preference order: Codex Desktop's agent-generated thread name
+        # (what the user sees in the app sidebar), then the transcript's first
+        # user prompt (CLI fallback — CLI doesn't generate titles), then the
+        # just-submitted prompt, then cwd basename.
+        title_raw="$(read_thread_name_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${prompt:-${proj}}"
         title="$(clip_title "${title_raw}")"
         if [ -z "${prompt}" ]; then
