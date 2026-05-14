@@ -89,6 +89,27 @@ is_slash_command() {
     return 1
 }
 
+# True when this hook is firing for an ephemeral / internal sub-LLM thread
+# spawned by Codex Desktop, not a real user-facing conversation. Codex Desktop
+# fires the full SessionStart / UserPromptSubmit / Stop hook lifecycle on
+# ephemeral threads it starts internally for thread-title generation, message
+# summarization, ambient-suggestion safety classification, and similar
+# bookkeeping. Those threads use prompts like
+# "You are a helpful assistant. You will be presented with a user prompt…"
+# and return structured JSON like {"title":"…"} — neither of which is useful
+# noise to wake the user's phone for. They also use `ephemeral: true` /
+# `persistExtendedHistory: false`, so Codex never writes a rollout file for
+# them; transcript_path is either null or points at a path that was never
+# created. A real Codex session always writes its session_meta record (and
+# therefore creates the rollout file) before any UserPromptSubmit or Stop
+# fires, so a missing transcript file at hook-firing time is a reliable
+# ephemeral-session signal.
+is_ephemeral_session() {
+    [ -z "${transcript}" ] && return 0
+    [ ! -f "${transcript}" ] && return 0
+    return 1
+}
+
 # Pull a JSON field with a default, swallowing jq errors.
 jq_get() {
     local query="$1"
@@ -239,6 +260,7 @@ case "${EVENT}" in
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
+        is_ephemeral_session && { log "permission-request: skipping ephemeral session"; exit 0; }
         tool_name="$(jq_get '.tool_name' 'tool')"
         proj="$(basename "${cwd:-unknown}")"
         title_raw="$(first_user_prompt_from_transcript "${transcript}")"
@@ -265,6 +287,7 @@ case "${EVENT}" in
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
+        is_ephemeral_session && { log "stop: skipping ephemeral session"; exit 0; }
         proj="$(basename "${cwd:-unknown}")"
         title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
@@ -292,6 +315,7 @@ case "${EVENT}" in
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
+        is_ephemeral_session && { log "user-prompt-submit: skipping ephemeral session"; exit 0; }
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
         is_slash_command "${prompt}" && exit 0
