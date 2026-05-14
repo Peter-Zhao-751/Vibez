@@ -343,7 +343,7 @@ struct ContentView: View {
                 gap: 4
             )
             .frame(height: 110, alignment: .bottom)
-            .padding(.bottom, 20)
+            .padding(.bottom, 50)
 
             BigToggle(
                 enabled: Binding(
