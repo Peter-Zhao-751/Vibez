@@ -10,16 +10,6 @@
         ]
       }
     ],
-    "Notification": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" notification"
-          }
-        ]
-      }
-    ],
     "PreToolUse": [
       {
         "matcher": "AskUserQuestion",
@@ -27,6 +17,17 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" pre-tool-use"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" post-tool-use"
           }
         ]
       }

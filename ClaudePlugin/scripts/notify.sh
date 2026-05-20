@@ -358,32 +358,6 @@ case "${EVENT}" in
         fi
         ;;
 
-    notification)
-        message="$(jq_get '.message')"
-        # Skip Claude Code's idle-timer ping — it fires whenever the user
-        # walks away mid-conversation and is just noise on the phone.
-        # Permission requests ("Permission required to run ...") still pass.
-        case "${message}" in
-            *"waiting for your input"*) exit 0 ;;
-        esac
-        transcript="$(jq_get '.transcript_path')"
-        cwd="$(jq_get '.cwd')"
-        sid="$(jq_get '.session_id' 'nosid')"
-        proj="$(basename "${cwd:-unknown}")"
-        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        if [ -z "${message}" ]; then
-            ntype="$(jq_get '.notification_type' 'unknown')"
-            message="Claude needs your attention (${ntype})"
-        fi
-        # _vibez:shield:on tells the app to shield. _vibez:session:<sid>
-        # lets it match this against an upcoming user reply (which
-        # arrives with shield:off) and lift the shield for this exact
-        # conversation. _vibez:agent:cc tells the app this came from
-        # Claude Code (vs cx for Codex), so it can route + badge without
-        # sniffing the title/body.
-        post_ntfy "${convo_title}" "${message}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
-        ;;
-
     stop)
         cwd="$(jq_get '.cwd')"
         sid="$(jq_get '.session_id' 'nosid')"
@@ -406,9 +380,11 @@ case "${EVENT}" in
 
     pre-tool-use)
         # AskUserQuestion blocks Claude mid-turn waiting for the user's
-        # pick. Stop doesn't fire (stop_reason is tool_use, not end_turn)
-        # and Notification doesn't fire either, so this PreToolUse hook
-        # is the only place to ping the phone while the picker is pending.
+        # pick. Stop doesn't fire here (stop_reason is tool_use, not
+        # end_turn), so this PreToolUse hook is what pings the phone
+        # while the picker is pending. The Notification hook is
+        # intentionally not registered — it would fire a second
+        # needs-input push ~5-7s later and look like a duplicate.
         tool_name="$(jq_get '.tool_name')"
         [ "${tool_name}" = "AskUserQuestion" ] || exit 0
 
@@ -425,6 +401,34 @@ case "${EVENT}" in
             question="${question:0:159}…"
         fi
         post_ntfy "${convo_title}" "${question}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
+        ;;
+
+    post-tool-use)
+        # AskUserQuestion just returned — the user picked an option (or
+        # clicked Clarify). Picker answers arrive as tool_result on the
+        # next user record, NOT as a typed prompt, so UserPromptSubmit
+        # doesn't fire. This is the only hook that can lift the shield
+        # the PreToolUse push raised.
+        tool_name="$(jq_get '.tool_name')"
+        [ "${tool_name}" = "AskUserQuestion" ] || exit 0
+
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
+        is_slash_command "${convo_title}" && exit 0
+
+        # Tool response shape is "Your questions have been answered:
+        # \"<q>\"=\"<a>\"" on a normal pick, or "The user doesn't want
+        # to proceed…" on Clarify. Both mean the user interacted, so
+        # both should lift the shield.
+        answer="$(jq_get '.tool_response.content')"
+        [ -z "${answer}" ] && answer="(answered)"
+        if [ "${#answer}" -gt 160 ]; then
+            answer="${answer:0:159}…"
+        fi
+        post_ntfy "${convo_title}" "${answer}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cc"
         ;;
 
     user-prompt-submit)
