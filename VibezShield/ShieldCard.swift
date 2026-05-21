@@ -149,3 +149,111 @@ struct ClaudePixelMascot: View {
         .frame(width: size, height: size)
     }
 }
+
+private enum ShieldTheme {
+    static let bgDark    = Color(red: 0.047, green: 0.051, blue: 0.071)  // #0C0D12
+    static let bgLight   = Color(red: 0.984, green: 0.973, blue: 0.957)  // #FBF8F4
+    static let fgOnDark  = Color.white
+    static let fgOnLight = Color.black
+    static let fgMuteOnDark  = Color.white.opacity(0.65)
+    static let fgMuteOnLight = Color.black.opacity(0.55)
+
+    static func accent(_ agent: Agent) -> Color {
+        switch agent {
+        case .codex: return Color(red: 0.29, green: 0.48, blue: 1.00)
+        default:     return Color(red: 0.95, green: 0.45, blue: 0.20)
+        }
+    }
+}
+
+struct ShieldCard: View {
+    let state: ShieldState
+
+    private var bg: Color    { state.dark ? ShieldTheme.bgDark : ShieldTheme.bgLight }
+    private var fg: Color    { state.dark ? ShieldTheme.fgOnDark : ShieldTheme.fgOnLight }
+    private var fgMute: Color {
+        state.dark ? ShieldTheme.fgMuteOnDark : ShieldTheme.fgMuteOnLight
+    }
+    private var accent: Color { ShieldTheme.accent(state.agent) }
+
+    private var titleText: String {
+        state.title ?? "Stay focused"
+    }
+
+    private var bodyText: String {
+        state.body ?? "Tap Close to return to your phone. Your agent is waiting."
+    }
+
+    var body: some View {
+        ZStack(alignment: .top) {
+            bg
+                .overlay(
+                    RadialGradient(
+                        colors: [accent.opacity(state.dark ? 0.28 : 0.20), .clear],
+                        center: UnitPoint(x: 0.5, y: 0.30),
+                        startRadius: 0,
+                        endRadius: 320
+                    )
+                )
+
+            VStack(spacing: 0) {
+                Spacer().frame(height: 56)
+
+                StaticMascot(agent: state.agent, size: 110)
+                    .padding(.bottom, 18)
+
+                Text("BLOCKING IN PROGRESS")
+                    .font(.system(size: 11, weight: .heavy, design: .monospaced))
+                    .tracking(2.4)
+                    .foregroundStyle(accent)
+                    .padding(.bottom, 10)
+
+                Text(titleText)
+                    .font(.system(size: 22, weight: .bold))
+                    .tracking(-0.4)
+                    .foregroundStyle(fg)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(2)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 28)
+                    .padding(.bottom, 8)
+
+                Text(bodyText)
+                    .font(.system(size: 13))
+                    .foregroundStyle(fgMute)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(4)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 32)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity)
+        }
+        .frame(width: 360, height: 540)
+    }
+}
+
+#Preview("Claude · needs input") {
+    ShieldCard(state: ShieldState(
+        agent: .claude,
+        title: "Needs you — Plan plugin distribution",
+        body: "Should I bump the minor version before publishing, or roll the patch and ship a follow-up?",
+        expiresAt: nil,
+        dark: true
+    ))
+}
+
+#Preview("Codex · light") {
+    ShieldCard(state: ShieldState(
+        agent: .codex,
+        title: "Wire up SSE handler",
+        body: "Need confirmation before I rip out the polling fallback.",
+        expiresAt: nil,
+        dark: false
+    ))
+}
+
+#Preview("Fallback") {
+    ShieldCard(state: .fallback)
+}
