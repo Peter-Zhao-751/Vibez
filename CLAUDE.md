@@ -47,7 +47,7 @@ Vibez.xcodeproj/            Uses PBXFileSystemSynchronizedRootGroup — drop a .
   expiry, dark/light) from host to VibezShield. Key: `"shieldState"`, value is a property-list
   dict — see `Vibez/ScreenTimeManager.swift` (`ShieldState.asDict`) and
   `VibezShield/ShieldCard.swift` (`ShieldState.read`).
-- Selection persists in standard `UserDefaults` via `PropertyListEncoder`. If we add a Shield Action / Device Activity Monitor extension later, we'll need an App Group for shared defaults.
+- Selection persists in standard `UserDefaults` via `PropertyListEncoder`. A Shield Action / Device Activity Monitor extension would reuse the existing `group.vibezlol.Vibez` App Group.
 - Shield store name: `vibez.shield` (so other Family-Controls apps on the device don't clobber our restrictions).
 
 ## Worktree workflow
