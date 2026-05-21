@@ -53,9 +53,7 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
 
             return ShieldConfiguration(
                 backgroundBlurStyle: .systemThickMaterial,
-                backgroundColor: state.dark
-                    ? UIColor(red: 0.047, green: 0.051, blue: 0.071, alpha: 1)
-                    : UIColor(red: 0.984, green: 0.973, blue: 0.957, alpha: 1),
+                backgroundColor: state.backgroundUIColor,
                 icon: renderer.uiImage,
                 title: nil,
                 subtitle: nil,

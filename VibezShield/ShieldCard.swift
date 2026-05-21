@@ -70,6 +70,10 @@ struct ShieldState {
     nonisolated var accentUIColor: UIColor {
         ShieldTheme.accentUIColor(agent)
     }
+
+    nonisolated var backgroundUIColor: UIColor {
+        dark ? ShieldTheme.bgDarkUIColor : ShieldTheme.bgLightUIColor
+    }
 }
 
 import UIKit
@@ -148,6 +152,8 @@ struct ClaudePixelMascot: View {
 private enum ShieldTheme {
     static let bgDark    = Color(red: 0.047, green: 0.051, blue: 0.071)  // #0C0D12
     static let bgLight   = Color(red: 0.984, green: 0.973, blue: 0.957)  // #FBF8F4
+    static let bgDarkUIColor  = UIColor(red: 0.047, green: 0.051, blue: 0.071, alpha: 1)
+    static let bgLightUIColor = UIColor(red: 0.984, green: 0.973, blue: 0.957, alpha: 1)
     static let fgOnDark  = Color.white
     static let fgOnLight = Color.black
     static let fgMuteOnDark  = Color.white.opacity(0.65)
