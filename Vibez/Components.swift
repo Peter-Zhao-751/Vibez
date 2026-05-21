@@ -8,6 +8,8 @@
 
 import SwiftUI
 import UIKit
+import FamilyControls
+import ManagedSettings
 
 // MARK: - BlockerKnob (waveform inside the pill toggle)
 //
@@ -444,78 +446,257 @@ struct ChipIconButton: View {
 
 // MARK: - Blocking apps panel
 
-struct BlockedAppCard: View {
-    let app: BlockedApp
+/// Side length of every tile. Square, so token icons and the AddTile
+/// occupy identical visual footprints. Also the AddTile's minimum
+/// width — when it shrinks to this, any additional tokens kick the
+/// row into horizontal scroll mode.
+private let tileSize: CGFloat = 56
+
+/// Fallback transform-scale, used only if the dynamic-type hint
+/// doesn't drive `Label(token)` icon size. `scaleEffect` stretches
+/// the rasterized icon and softens it; we'd rather not use it.
+private let tileIconScaleFallback: CGFloat = 2.3
+
+/// Inter-tile gap bounds. Spacing flexes within [min, max] as more
+/// tokens fill the row, with AddTile absorbing the rest.
+private let panelMinSpacing: CGFloat = 3
+private let panelMaxSpacing: CGFloat = 12
+
+struct BlockingPanel: View {
+    let selection: FamilyActivitySelection
     let enabled: Bool
     let theme: Theme
+    /// Tapping the trailing "+" tile fires this — wire it to presenting
+    /// `FamilyActivityPicker` from the parent.
+    let onPickMore: () -> Void
+
+    private var apps: [ApplicationToken] { Array(selection.applicationTokens) }
+    private var cats: [ActivityCategoryToken] { Array(selection.categoryTokens) }
+    private var webs: [WebDomainToken] { Array(selection.webDomainTokens) }
+
+    private var totalCount: Int {
+        apps.count + cats.count + webs.count
+    }
+
+    private var countLabel: String {
+        switch totalCount {
+        case 0: return "nothing yet"
+        case 1: return "1 item"
+        default: return "\(totalCount) items"
+        }
+    }
 
     var body: some View {
         VStack(spacing: 4) {
-            Text(app.glyph)
-                .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                .foregroundStyle(theme.fgMute.opacity(enabled ? 0.55 : 1))
-                .frame(width: 26, height: 26)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.bgChip)
-                )
-            Text(app.name)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundStyle(enabled ? theme.accent : theme.fgMute)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(enabled ? theme.accent.opacity(0.12) : theme.bgChip)
-        )
-        .animation(.easeInOut(duration: 0.3), value: enabled)
-    }
-}
-
-struct BlockedApp: Identifiable, Equatable {
-    let id = UUID()
-    let name: String
-    let glyph: String
-
-    static let demoSet: [BlockedApp] = [
-        .init(name: "Instagram", glyph: "IG"),
-        .init(name: "TikTok", glyph: "TT"),
-        .init(name: "X", glyph: "X"),
-        .init(name: "YouTube", glyph: "YT"),
-    ]
-}
-
-struct BlockingPanel: View {
-    let apps: [BlockedApp]
-    let enabled: Bool
-    let theme: Theme
-
-    var body: some View {
-        VStack(spacing: 10) {
             HStack {
                 Text("Blocking")
                     .font(.system(size: 12, weight: .bold))
                     .tracking(0.5)
                     .foregroundStyle(theme.fg)
                 Spacer()
-                Text("\(apps.count) apps")
-                    .font(.system(size: 11, design: .monospaced))
+                Text(countLabel)
+                    .font(.system(size: 11, weight: .medium))
                     .foregroundStyle(theme.fgMute)
             }
-            HStack(spacing: 8) {
-                ForEach(apps) { app in
-                    BlockedAppCard(app: app, enabled: enabled, theme: theme)
-                }
-            }
+            tilesRow
         }
+        // Single source of "is this active" styling — desaturate +
+        // dim the entire panel content when the toggle is off, so the
+        // panel reads as inert without per-tile accent colors.
+        .grayscale(enabled ? 0 : 1.0)
+        .opacity(enabled ? 1.0 : 0.45)
+        .animation(.easeInOut(duration: 0.3), value: enabled)
         .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(theme.bgWidget)
         )
+    }
+
+    private var tilesRow: some View {
+        GeometryReader { geo in
+            let plan = layoutPlan(width: geo.size.width)
+            if plan.scrollable {
+                scrollableRow
+            } else {
+                fixedRow(spacing: plan.spacing, addWidth: plan.addWidth)
+            }
+        }
+        .frame(height: tileSize)
+    }
+
+    /// Order: apps → categories → web domains so the most-recognizable
+    /// tiles surface first.
+    @ViewBuilder
+    private var tokenTiles: some View {
+        ForEach(apps, id: \.self) { token in
+            TokenTile { Label(token).labelStyle(.iconOnly) }
+        }
+        ForEach(cats, id: \.self) { token in
+            TokenTile { Label(token).labelStyle(.iconOnly) }
+        }
+        ForEach(webs, id: \.self) { token in
+            TokenTile { Label(token).labelStyle(.iconOnly) }
+        }
+    }
+
+    @ViewBuilder
+    private func fixedRow(spacing: CGFloat, addWidth: CGFloat) -> some View {
+        HStack(spacing: spacing) {
+            tokenTiles
+            AddTile(width: addWidth, theme: theme, onTap: onPickMore)
+        }
+    }
+
+    @ViewBuilder
+    private var scrollableRow: some View {
+        HorizontalFadeScroll {
+            HStack(spacing: panelMinSpacing) {
+                tokenTiles
+                AddTile(width: tileSize, theme: theme, onTap: onPickMore)
+            }
+        }
+    }
+
+    private struct LayoutPlan {
+        var spacing: CGFloat
+        var addWidth: CGFloat
+        var scrollable: Bool
+    }
+
+    /// Solves for spacing and AddTile width given N tokens and the row's
+    /// available width. Wants max spacing when sparse, shrinking toward
+    /// min as the row fills; AddTile picks up the slack. Falls back to
+    /// horizontal scroll once min spacing still can't hold the row.
+    private func layoutPlan(width A: CGFloat) -> LayoutPlan {
+        let N = totalCount
+        guard N > 0 else {
+            return LayoutPlan(spacing: 0, addWidth: A, scrollable: false)
+        }
+        // Row layout: N tokens + 1 AddTile = N+1 tiles, N gaps.
+        //   A = N * tileSize + N * spacing + addWidth
+        // Pin AddTile at its minimum (tileSize) and solve for spacing.
+        let pivotSpacing = (A - tileSize) / CGFloat(N) - tileSize
+
+        if pivotSpacing >= panelMaxSpacing {
+            // Plenty of room: spacing at max, AddTile soaks up the rest.
+            let s = panelMaxSpacing
+            return LayoutPlan(
+                spacing: s,
+                addWidth: A - CGFloat(N) * (tileSize + s),
+                scrollable: false
+            )
+        } else if pivotSpacing >= panelMinSpacing {
+            // Tighter: spacing flexes in [min, max], AddTile at its min.
+            return LayoutPlan(
+                spacing: pivotSpacing,
+                addWidth: tileSize,
+                scrollable: false
+            )
+        } else {
+            // Can't fit at min spacing — horizontal scroll takes over.
+            return LayoutPlan(
+                spacing: panelMinSpacing,
+                addWidth: tileSize,
+                scrollable: true
+            )
+        }
+    }
+}
+
+private struct TokenTile<Icon: View>: View {
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        icon()
+            // Confirmed ignored by Apple for token labels but cheap
+            // to leave in — if a future iOS starts respecting them,
+            // we'd get a sharper render for free.
+            .imageScale(.large)
+            .dynamicTypeSize(.accessibility5)
+            // Last-resort transform scale. Trade-off: bigger icon but
+            // softer (bitmap stretch from Apple's small native render).
+            .scaleEffect(tileIconScaleFallback, anchor: .center)
+            .frame(width: tileSize, height: tileSize)
+    }
+}
+
+private struct AddTile: View {
+    let width: CGFloat
+    let theme: Theme
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            Image(systemName: "plus")
+                .font(.system(size: 28, weight: .semibold))
+                .foregroundStyle(theme.fg)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(
+                            theme.fgMute.opacity(0.4),
+                            style: StrokeStyle(lineWidth: 1.5, dash: [4, 4])
+                        )
+                )
+                // Default hit shape follows the "+" Image's opaque
+                // pixels — pin it to the full tile rect so the whole
+                // dashed area is tappable.
+                .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(.plain)
+        .frame(width: width, height: tileSize)
+    }
+}
+
+/// Horizontal scroll wrapper with edge-fade masks that match the
+/// vertical pattern used in RecentTriggersSection — fades animate in
+/// only when the user can actually scroll further in that direction.
+private struct HorizontalFadeScroll<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    private struct ScrollEdges: Equatable {
+        var atStart: Bool
+        var atEnd: Bool
+    }
+
+    @State private var atStart = true
+    @State private var atEnd = false
+
+    private var showStartFade: Bool { !atStart }
+    private var showEndFade: Bool { !atEnd }
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            content()
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollIndicators(.hidden)
+        .onScrollGeometryChange(for: ScrollEdges.self) { geo in
+            let maxOffset = max(0, geo.contentSize.width - geo.containerSize.width)
+            return ScrollEdges(
+                atStart: geo.contentOffset.x <= 1,
+                atEnd: geo.contentOffset.x >= maxOffset - 1
+            )
+        } action: { _, newValue in
+            withAnimation(.easeInOut(duration: 0.35)) {
+                atStart = newValue.atStart
+                atEnd = newValue.atEnd
+            }
+        }
+        .mask {
+            LinearGradient(
+                stops: [
+                    .init(color: .black.opacity(showStartFade ? 0 : 1), location: 0.0),
+                    .init(color: .black, location: 0.14),
+                    .init(color: .black, location: 0.86),
+                    .init(color: .black.opacity(showEndFade ? 0 : 1), location: 1.0),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+        }
     }
 }
 

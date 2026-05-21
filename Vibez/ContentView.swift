@@ -4,12 +4,18 @@
 //
 
 import SwiftUI
+import FamilyControls
 
 struct ContentView: View {
     @State private var manager = ScreenTimeManager()
     @State private var notifyClient = NotifyClient()
     @State private var triggerStore = TriggerStore()
     @State private var ignoreStore = IgnoreStore()
+    /// Picker presented from the blocking panel's "+" tile. Kept
+    /// separate from the one inside SettingsView so each surface owns
+    /// its own draft state.
+    @State private var pickerPresented = false
+    @State private var pickerDraft = FamilyActivitySelection()
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
@@ -132,6 +138,15 @@ struct ContentView: View {
                 ignoreStore: ignoreStore
             )
         }
+        .familyActivityPicker(
+            isPresented: $pickerPresented,
+            selection: $pickerDraft
+        )
+        .onChange(of: pickerPresented) { _, presented in
+            if !presented {
+                manager.updateSelection(pickerDraft)
+            }
+        }
     }
 
     @ViewBuilder
@@ -149,14 +164,20 @@ struct ContentView: View {
                 .padding(.bottom, 10)
 
             BlockingPanel(
-                apps: BlockedApp.demoSet,
-                enabled: manager.isBlocking,
-                theme: theme
+                selection: manager.selection,
+                enabled: manager.armed,
+                theme: theme,
+                onPickMore: {
+                    pickerDraft = manager.selection
+                    pickerPresented = true
+                }
             )
             .padding(.horizontal, 10)
             .padding(.bottom, 12)
 
-            Spacer(minLength: 0)
+            if !triggerStore.events.isEmpty {
+                Spacer(minLength: 0)
+            }
 
             RecentTriggersSection(
                 events: triggerStore.events,
@@ -288,7 +309,7 @@ struct ContentView: View {
         // Toggle off → Vibez is dormant. Don't notify, don't show the
         // overlay, don't add a trigger — the user has explicitly told us
         // to stay out of the way.
-        guard manager.isBlocking else { return }
+        guard manager.armed else { return }
 
         switch message.shield {
         case .on:
@@ -337,7 +358,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             MascotForAgent(
                 agent: agent,
-                listening: manager.isBlocking,
+                listening: manager.armed,
                 size: agent == .both ? 92 : 100,
                 gap: 4
             )
@@ -346,8 +367,8 @@ struct ContentView: View {
 
             BigToggle(
                 enabled: Binding(
-                    get: { manager.isBlocking && !setupVisible},
-                    set: { manager.setBlocking($0) }
+                    get: { manager.armed && !setupVisible},
+                    set: { manager.setArmed($0) }
                 ),
                 agent: agent,
                 theme: theme,

@@ -159,8 +159,8 @@ struct ClaudeMascot: View {
             // Bottom shadow band
             Rectangle()
                 .fill(bodyShade.opacity(0.35))
-                .frame(width: size * 0.72, height: size * 0.06)
-                .offset(x: size * 0.14, y: size * 0.58)
+                .frame(width: size * 0.84, height: size * 0.06)
+                .offset(x: size * 0.08, y: size * 0.58)
             // Eyes
             ClaudeEyes(expression: listening ? expression : .blink, color: dark)
                 .frame(width: size, height: h)
@@ -182,13 +182,13 @@ private struct ClaudeBodyShape: Shape {
         let s = rect.width / 100
         var p = Path()
         // main body
-        p.addRect(CGRect(x: 14 * s, y: 6 * s, width: 72 * s, height: 58 * s))
+        p.addRect(CGRect(x: 8 * s, y: 8 * s, width: 84 * s, height: 56 * s))
         // side wings
-        p.addRect(CGRect(x: 6 * s,  y: 22 * s, width: 8 * s,  height: 22 * s))
-        p.addRect(CGRect(x: 86 * s, y: 22 * s, width: 8 * s,  height: 22 * s))
+        p.addRect(CGRect(x: -4 * s, y: 36 * s, width: 12 * s, height: 15 * s))
+        p.addRect(CGRect(x: 92 * s, y: 36 * s, width: 12 * s, height: 15 * s))
         // 4 legs
-        for x in [14.0, 30.0, 58.0, 74.0] {
-            p.addRect(CGRect(x: x * s, y: 64 * s, width: 12 * s, height: 22 * s))
+        for x in [18.0, 32.0, 60.0, 74.0] {
+            p.addRect(CGRect(x: x * s, y: 64 * s, width: 10 * s, height: 18 * s))
         }
         return p
     }

@@ -5,16 +5,23 @@
 //  Owns Family Controls authorization, persisted app selection, and the
 //  ManagedSettings shield.
 //
-//  Blocking is the OR of two inputs:
-//    • `manualBlocking` — what the user toggled in the big switch.
-//    • `pendingTriggers` — one entry per Claude Code session_id that has
-//      an open "Claude needs you" / "Claude finished" ping. Each entry
-//      carries its own duration (snapshot of the user's blockSeconds at
-//      arrival) and is removed when ANY of these happen:
+//  Two-state model:
+//    • `armed` — the big toggle. Master switch. When OFF, every pending
+//      trigger is cleared and the shield comes down. When ON, Vibez
+//      listens for pings but does NOT shield by itself — the shield only
+//      goes up while there's an active trigger (i.e., an in-app overlay
+//      is showing). This mirrors what the user sees: overlay up ↔ apps
+//      shielded. The OR-with-manual model used to keep the shield up
+//      between pings; that was confusing and is gone.
+//    • `pendingTriggers` — one entry per Claude Code session_id with an
+//      open "needs you" / "finished" ping. Each carries its own duration
+//      (snapshot of the user's blockSeconds at arrival) and is removed
+//      when ANY of these happen:
 //        1. the matching `_vibez:shield:off` push lands (user replied),
 //        2. the user taps Dismiss on the overlay for that session,
-//        3. its individual timer elapses.
-//      The shield only lifts once every pending trigger is gone.
+//        3. its individual timer elapses,
+//        4. the toggle flips OFF.
+//      `isBlocking` = `!pendingTriggers.isEmpty`. Shield follows it 1:1.
 //
 
 import Foundation
@@ -22,7 +29,7 @@ import FamilyControls
 import ManagedSettings
 import OSLog
 
-private let shieldLog = Logger(subsystem: "vibezlol.Vibez", category: "ShieldState")
+private let shieldLog = Logger(subsystem: "vibezlol.Vibez", category: "Shield")
 
 struct ShieldState {
     enum Agent: String {
@@ -78,14 +85,20 @@ final class ScreenTimeManager {
 
     private(set) var authState: AuthState = .notDetermined
     private(set) var selection = FamilyActivitySelection()
-    private(set) var manualBlocking: Bool = false
+    /// Master switch (the big toggle). Doesn't shield by itself — gates
+    /// whether incoming pings are accepted as triggers.
+    private(set) var armed: Bool = false
     /// Keyed by sessionId. A second ping in the same session overwrites
     /// the prior entry — that's intentional: the new ping "resets" the
     /// per-session timer, since it represents the latest unresolved
     /// state of that conversation.
     private(set) var pendingTriggers: [String: PendingTrigger] = [:]
-    private(set) var isBlocking: Bool = false
+    /// Shield is up iff at least one trigger is active. Pure derived
+    /// state, no separate stored flag.
+    var isBlocking: Bool { !pendingTriggers.isEmpty }
     private(set) var lastError: String?
+    /// Tracks the OS-store side so we only call apply/clear on transitions.
+    private var shieldApplied: Bool = false
 
     private let store = ManagedSettingsStore(named: .vibez)
     private let defaults = UserDefaults.standard
@@ -95,12 +108,14 @@ final class ScreenTimeManager {
 
     private enum Key {
         static let selection = "vibez.selection.v1"
-        static let manualBlocking = "vibez.manualBlocking.v1"
+        /// Persists `armed`. Name preserved from the manualBlocking era
+        /// to keep existing installs' toggle state across this rename.
+        static let armed = "vibez.manualBlocking.v1"
         /// v1: `[String]` of sessionIds. Migrated to v2 on first load.
         static let pendingTriggersV1 = "vibez.pendingTriggers.v1"
         /// v2: JSON-encoded `[PendingTrigger]`.
         static let pendingTriggersV2 = "vibez.pendingTriggers.v2"
-        /// Legacy single-Bool key kept for one-shot manualBlocking migration.
+        /// Legacy single-Bool key kept for one-shot armed migration.
         static let legacyBlocking = "vibez.isBlocking.v1"
     }
 
@@ -112,7 +127,19 @@ final class ScreenTimeManager {
         loadSelection()
         loadStateAndMigrate()
         syncAuthState()
-        recomputeBlocking()  // also prunes anything that expired while off
+        // Force-sync the OS store on launch. If the previous process
+        // exited mid-block (crash, force-quit between persisting state
+        // and clearShield()), the OS ManagedSettings store can still
+        // hold a stale shield even though our in-memory truth says we
+        // should be unblocked. Always reconcile.
+        pruneExpired()
+        let shouldBlock = isBlocking
+        shieldLog.info("init: armed=\(self.armed, privacy: .public) pending=\(self.pendingTriggers.count, privacy: .public) → blocking=\(shouldBlock, privacy: .public)")
+        if shouldBlock {
+            applyShield()
+        } else {
+            clearShield(reason: "init-sync")
+        }
         startTicking()
     }
 
@@ -153,13 +180,13 @@ final class ScreenTimeManager {
 
     // MARK: - User-facing toggle
 
-    /// Manual toggle from the big switch. When the user turns it OFF we
-    /// also clear any pending triggers — they've explicitly decided to
-    /// stop, so the per-session timers no longer matter.
-    func setBlocking(_ on: Bool) {
-        manualBlocking = on
+    /// The big switch. ON arms Vibez (listens for pings, doesn't shield
+    /// yet). OFF clears any active triggers — the user has explicitly
+    /// decided to stop, so any in-flight per-session timer is moot.
+    func setArmed(_ on: Bool) {
+        armed = on
         if !on { pendingTriggers.removeAll() }
-        persistManualBlocking()
+        persistArmed()
         persistPendingTriggers()
         recomputeBlocking()
     }
@@ -169,7 +196,10 @@ final class ScreenTimeManager {
     /// Records a new pending trigger for `sessionId`. Snapshotting
     /// `durationSeconds` here means later edits to the user's slider
     /// don't retroactively extend (or shrink) an in-flight block.
+    /// No-ops when not armed — pings shouldn't shield apps if the user
+    /// has turned Vibez off.
     func addTrigger(sessionId: String, durationSeconds: Int) {
+        guard armed else { return }
         guard !sessionId.isEmpty, sessionId != "nosid" else { return }
         let duration = max(1, durationSeconds)
         pendingTriggers[sessionId] = PendingTrigger(
@@ -229,13 +259,12 @@ final class ScreenTimeManager {
         // otherwise keep the shield up for up to one tick longer.
         pruneExpired()
 
-        let newValue = manualBlocking || !pendingTriggers.isEmpty
-        if newValue == isBlocking { return }
-        isBlocking = newValue
-        if newValue {
+        let shouldBlock = isBlocking  // computed: !pendingTriggers.isEmpty
+        if shouldBlock == shieldApplied { return }
+        if shouldBlock {
             applyShield()
         } else {
-            clearShield()
+            clearShield(reason: "recompute → no pending triggers")
         }
     }
 
@@ -267,6 +296,10 @@ final class ScreenTimeManager {
         let cats = selection.categoryTokens
         let webs = selection.webDomainTokens
 
+        // Wipe before applying so a previous selection that included
+        // categories or web-domains can't bleed through when the new
+        // selection only has apps (or vice-versa).
+        store.clearAllSettings()
         store.shield.applications = apps.isEmpty ? nil : apps
         store.shield.applicationCategories = cats.isEmpty ? nil : .specific(cats)
         store.shield.webDomains = webs.isEmpty ? nil : webs
@@ -283,13 +316,18 @@ final class ScreenTimeManager {
             expiresAt: nil,
             dark: true
         ))
+        shieldApplied = true
+        shieldLog.info("applyShield: apps=\(apps.count, privacy: .public) cats=\(cats.count, privacy: .public) webs=\(webs.count, privacy: .public)")
     }
 
-    private func clearShield() {
-        store.shield.applications = nil
-        store.shield.applicationCategories = nil
-        store.shield.webDomains = nil
+    private func clearShield(reason: String) {
+        // clearAllSettings() is the documented "remove everything this
+        // store has set" call. Setting properties to nil one-by-one was
+        // observed to leave the OS shield visible on some unblock paths.
+        store.clearAllSettings()
         writeShieldState(nil)
+        shieldApplied = false
+        shieldLog.info("clearShield: \(reason, privacy: .public)")
     }
 
     // MARK: - Persistence
@@ -312,8 +350,8 @@ final class ScreenTimeManager {
         }
     }
 
-    private func persistManualBlocking() {
-        defaults.set(manualBlocking, forKey: Key.manualBlocking)
+    private func persistArmed() {
+        defaults.set(armed, forKey: Key.armed)
     }
 
     private func persistPendingTriggers() {
@@ -374,14 +412,14 @@ final class ScreenTimeManager {
     }
 
     private func loadStateAndMigrate() {
-        // Manual-toggle migration (unchanged from before).
-        if defaults.object(forKey: Key.manualBlocking) == nil,
+        // Master-toggle migration (unchanged from before, applies to `armed`).
+        if defaults.object(forKey: Key.armed) == nil,
            defaults.object(forKey: Key.legacyBlocking) != nil {
-            manualBlocking = defaults.bool(forKey: Key.legacyBlocking)
+            armed = defaults.bool(forKey: Key.legacyBlocking)
             defaults.removeObject(forKey: Key.legacyBlocking)
-            persistManualBlocking()
+            persistArmed()
         } else {
-            manualBlocking = defaults.bool(forKey: Key.manualBlocking)
+            armed = defaults.bool(forKey: Key.armed)
         }
 
         // v2 wins if present.

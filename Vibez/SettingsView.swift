@@ -8,6 +8,7 @@
 //
 
 import SwiftUI
+import UIKit
 import FamilyControls
 
 // Discrete duration stops for the slider — non-linear by design so a
@@ -128,12 +129,26 @@ struct SettingsView: View {
                 }
             }
             if manager.authState != .authorized {
-                Label {
-                    Text("Screen Time access not granted yet — picker may not work until you approve it on launch.")
-                        .font(.caption)
-                } icon: {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.orange)
+                Button {
+                    if let url = URL(string: UIApplication.openSettingsURLString) {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    HStack {
+                        Label {
+                            Text("Screen Time access not granted — tap to open Settings and enable it.")
+                                .font(.caption)
+                                .foregroundStyle(Color.primary)
+                                .multilineTextAlignment(.leading)
+                        } icon: {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                        }
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.tertiary)
+                    }
                 }
             }
         } header: {

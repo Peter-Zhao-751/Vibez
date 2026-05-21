@@ -1,2 +1,6 @@
 .claude/
 .DS_Store
+
+# Xcode build output
+build/
+DerivedData/
