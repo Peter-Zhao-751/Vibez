@@ -20,6 +20,33 @@
 import Foundation
 import FamilyControls
 import ManagedSettings
+import OSLog
+
+private let shieldLog = Logger(subsystem: "vibezlol.Vibez", category: "ShieldState")
+
+struct ShieldState {
+    enum Agent: String {
+        case claude, codex, both, none
+    }
+
+    var agent: Agent
+    var title: String?
+    var body: String?
+    var expiresAt: Date?
+    var dark: Bool
+
+    var asDict: [String: Any] {
+        var d: [String: Any] = [
+            "agent": agent.rawValue,
+            "dark": dark,
+            "updatedAt": Date().timeIntervalSince1970,
+        ]
+        if let title { d["title"] = title }
+        if let body  { d["body"]  = body }
+        if let expiresAt { d["expiresAt"] = expiresAt.timeIntervalSince1970 }
+        return d
+    }
+}
 
 /// A single open ping awaiting one of {reply, dismiss, timeout}. Keyed
 /// by `sessionId` in the manager.
@@ -62,6 +89,7 @@ final class ScreenTimeManager {
 
     private let store = ManagedSettingsStore(named: .vibez)
     private let defaults = UserDefaults.standard
+    private let sharedDefaults = UserDefaults(suiteName: "group.vibezlol.Vibez")
 
     @ObservationIgnored private var tickTask: Task<Void, Never>?
 
@@ -284,6 +312,18 @@ final class ScreenTimeManager {
             defaults.set(data, forKey: Key.pendingTriggersV2)
         } catch {
             lastError = "Failed to save pending triggers: \(error.localizedDescription)"
+        }
+    }
+
+    private func writeShieldState(_ state: ShieldState?) {
+        guard let sharedDefaults else {
+            shieldLog.error("App Group defaults unavailable — shield state not written")
+            return
+        }
+        if let state {
+            sharedDefaults.set(state.asDict, forKey: "shieldState")
+        } else {
+            sharedDefaults.removeObject(forKey: "shieldState")
         }
     }
 
