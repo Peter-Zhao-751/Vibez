@@ -39,9 +39,23 @@
 		D0628AE12FB03EEA007EA6E5 /* Vibez.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Vibez.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		A1B2C3D4000000000000000E /* PBXFileSystemSynchronizedBuildFileExceptionSet */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				VibezShield.entitlements,
+			);
+			target = A1B2C3D40000000000000002 /* VibezShield */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A1B2C3D40000000000000001 /* VibezShield */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				A1B2C3D4000000000000000E /* PBXFileSystemSynchronizedBuildFileExceptionSet */,
+			);
 			path = VibezShield;
 			sourceTree = "<group>";
 		};
@@ -97,6 +111,7 @@
 			buildPhases = (
 				A1B2C3D40000000000000004 /* Sources */,
 				A1B2C3D40000000000000005 /* Frameworks */,
+				A1B2C3D4000000000000000D /* Resources */,
 			);
 			buildRules = (
 			);
@@ -172,6 +187,13 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		A1B2C3D4000000000000000D /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		D0628ADF2FB03EEA007EA6E5 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
