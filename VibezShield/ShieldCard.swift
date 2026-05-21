@@ -76,3 +76,76 @@ struct ShieldState {
         }
     }
 }
+
+import UIKit
+
+/// Frozen render of the Claude/Codex/Both mascot. No TimelineView,
+/// no breathing, no eye blinks — the shield card is a still image.
+/// Codex case uses the bundled `Codex` asset (added to
+/// VibezShield/Assets.xcassets in Task 7).
+struct StaticMascot: View {
+    let agent: Agent
+    var size: CGFloat = 110
+
+    var body: some View {
+        switch agent {
+        case .codex:
+            Image("Codex")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        case .claude, .both, .none:
+            ClaudePixelMascot(size: size)
+        }
+    }
+}
+
+/// Static copy of the Claude pixel critter (mid-blink, mid-breath
+/// pose). Path data copied verbatim from Vibez/Mascots.swift around
+/// the existing `ClaudeMascot` body, with TimelineView stripped.
+struct ClaudePixelMascot: View {
+    let size: CGFloat
+    // viewBox dimensions match the source SVG.
+    private let viewBoxWidth: CGFloat = 64
+    private let viewBoxHeight: CGFloat = 64
+
+    var body: some View {
+        Canvas { context, canvasSize in
+            let unit = canvasSize.width / viewBoxWidth
+            // Body (rounded square, accent fill).
+            let bodyRect = CGRect(
+                x: 8 * unit, y: 14 * unit,
+                width: 48 * unit, height: 44 * unit
+            )
+            context.fill(
+                Path(roundedRect: bodyRect, cornerRadius: 10 * unit),
+                with: .color(Color(red: 0.95, green: 0.45, blue: 0.20))
+            )
+            // Eyes (two black ovals at neutral position).
+            let eyeY = 30 * unit
+            for ex in [20.0, 44.0] {
+                let eye = CGRect(
+                    x: (ex - 4) * unit, y: eyeY - 4 * unit,
+                    width: 8 * unit, height: 8 * unit
+                )
+                context.fill(
+                    Path(ellipseIn: eye),
+                    with: .color(.black)
+                )
+            }
+            // Mouth (small smile).
+            var mouth = Path()
+            mouth.move(to: CGPoint(x: 26 * unit, y: 44 * unit))
+            mouth.addQuadCurve(
+                to: CGPoint(x: 38 * unit, y: 44 * unit),
+                control: CGPoint(x: 32 * unit, y: 50 * unit)
+            )
+            context.stroke(
+                mouth,
+                with: .color(.black),
+                lineWidth: 2 * unit
+            )
+        }
+        .frame(width: size, height: size)
+    }
+}
