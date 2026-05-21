@@ -12,13 +12,24 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone
 ```
 Vibez/
   VibezApp.swift            SwiftUI @main entry point
-  ContentView.swift         Minimal UI: auth status, picker button, on/off toggle
+  ContentView.swift         Minimal UI: auth status, picker button, on/off toggle,
+                            ntfy ingest. Publishes ShieldState on each incoming ping.
   ScreenTimeManager.swift   @Observable backend; owns auth, persisted FamilyActivitySelection,
-                            ManagedSettingsStore shield apply/remove
-  Vibez.entitlements        com.apple.developer.family-controls = true
+                            ManagedSettingsStore shield apply/remove, and the App Group
+                            writer that hands the latest agent/title/body off to VibezShield.
+  Vibez.entitlements        com.apple.developer.family-controls + application-groups
+VibezShield/                Shield Configuration Extension. Reads ShieldState from the App
+                            Group, rasterizes ShieldCard to a UIImage via ImageRenderer,
+                            slots it into ShieldConfiguration.icon. Self-contained — no
+                            imports of host-target code.
+  ShieldConfigurationExtension.swift  ShieldConfigurationDataSource subclass.
+  ShieldCard.swift                    Agent enum, ShieldState reader, theme, SwiftUI view.
+  Assets.xcassets/                    Codex avatar copied from host.
+  Info.plist                          NSExtensionPointIdentifier = com.apple.ManagedSettingsUI...
+  VibezShield.entitlements            family-controls + application-groups
 Vibez.xcodeproj/            Uses PBXFileSystemSynchronizedRootGroup — drop a .swift into Vibez/
-                            and it auto-builds, no project file edits needed (entitlements
-                            still need CODE_SIGN_ENTITLEMENTS wired manually).
+                            or VibezShield/ and it auto-builds, no project file edits needed.
+                            Entitlements still need CODE_SIGN_ENTITLEMENTS wired manually.
 ```
 
 ## Hard constraints (don't relitigate)
@@ -32,6 +43,10 @@ Vibez.xcodeproj/            Uses PBXFileSystemSynchronizedRootGroup — drop a .
 
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on — assume MainActor by default; only add `nonisolated` deliberately.
 - Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF` (paid Apple Developer Program).
+- App Group: `group.vibezlol.Vibez`. Carries the live shield context (agent, ntfy title/body,
+  expiry, dark/light) from host to VibezShield. Key: `"shieldState"`, value is a property-list
+  dict — see `Vibez/ScreenTimeManager.swift` (`ShieldState.asDict`) and
+  `VibezShield/ShieldCard.swift` (`ShieldState.read`).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. If we add a Shield Action / Device Activity Monitor extension later, we'll need an App Group for shared defaults.
 - Shield store name: `vibez.shield` (so other Family-Controls apps on the device don't clobber our restrictions).
 
