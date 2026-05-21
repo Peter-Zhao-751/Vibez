@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var notifyClient = NotifyClient()
     @State private var triggerStore = TriggerStore()
     @State private var ignoreStore = IgnoreStore()
+    @State private var analytics = AnalyticsTracker()
     /// Picker presented from the blocking panel's "+" tile. Kept
     /// separate from the one inside SettingsView so each surface owns
     /// its own draft state.
@@ -288,6 +289,12 @@ struct ContentView: View {
     }
 
     private func handleIncoming(_ message: NtfyMessage) {
+        // Tracker is a passive observer — fires for every incoming
+        // message, before any of the gating below. shield:off pings
+        // (user replies) and pings that arrive while Vibez is unarmed
+        // both still count as activity for today's stats.
+        analytics.record(message)
+
         // shield:off (the user just replied in Claude) is a control
         // signal — never surface it as a notification, and only act on
         // it if we actually have something to resolve. Handled first so
