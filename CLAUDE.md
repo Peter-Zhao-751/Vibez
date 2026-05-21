@@ -4,8 +4,7 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone
 
 ## Status
 
-- **Backend built and compiling clean.** Screen Time API integration via `FamilyControls` + `ManagedSettings` works end-to-end against the iOS 26.4 SDK. Toggle on → selected apps shielded; toggle off → unblocked. State survives app kill.
-- **Blocked on paid Apple Developer Program.** Personal/free teams cannot get the `com.apple.developer.family-controls` entitlement, so provisioning fails before the app installs. Apple gates this intentionally — no workaround exists. Resume blocking work after Peter enrolls at [developer.apple.com/programs](https://developer.apple.com/programs/) ($99/yr).
+- **Family Controls working on device.** Screen Time API integration via `FamilyControls` + `ManagedSettings` runs end-to-end against the iOS 26.4 SDK on Peter's iPhone. Toggle on → selected apps shielded; toggle off → unblocked. State survives app kill. Peter is enrolled in the paid Apple Developer Program, so the `com.apple.developer.family-controls` entitlement provisions cleanly.
 - **Next phase (active): Claude ↔ phone bridge.** A way for `claude` / `codex` running on Peter's Mac to flip the toggle on his iPhone when the agent stops or asks a question. Approach not yet decided.
 
 ## File map
@@ -26,13 +25,13 @@ Vibez.xcodeproj/            Uses PBXFileSystemSynchronizedRootGroup — drop a .
 
 - **No bundle-ID presets.** Apple does not let apps specify "Instagram + TikTok" by name. The user picks via `FamilyActivityPicker`; the returned `ApplicationToken`s are opaque. The only model is "user selects once → app toggles their selection on/off."
 - **Real device only.** `ManagedSettingsStore` shields are no-ops in the simulator. `xcodebuild` against `iphonesimulator26.4` is fine for compile checks but the feature itself only works on hardware.
-- **Paid ADP required for development on device, not just for App Store.** App Store distribution additionally needs the Family Controls Distribution Request form (~3-week review).
+- **Paid ADP required for development on device, not just for App Store.** Peter is enrolled. App Store distribution additionally needs the Family Controls Distribution Request form (~3-week review) — not yet submitted.
 - **iOS 16+ for the frameworks.** Project deploys 26.4 so all APIs are available.
 
 ## Conventions
 
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on — assume MainActor by default; only add `nonisolated` deliberately.
-- Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF` (currently personal — switch to paid team in Xcode → Signing & Capabilities once enrolled).
+- Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF` (paid Apple Developer Program).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. If we add a Shield Action / Device Activity Monitor extension later, we'll need an App Group for shared defaults.
 - Shield store name: `vibez.shield` (so other Family-Controls apps on the device don't clobber our restrictions).
 
