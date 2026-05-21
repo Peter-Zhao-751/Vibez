@@ -2,66 +2,69 @@
 //  ShieldConfigurationExtension.swift
 //  VibezShield
 //
-//  Replaces iOS's default "App is Restricted, OK" shield with a
-//  Vibez-branded one. Same dark/orange palette as the in-app BlockedOverlay.
+//  Replaces iOS's default "App is Restricted, OK" shield. Reads the
+//  latest ShieldState from the App Group, rasterizes a SwiftUI
+//  ShieldCard to a UIImage via ImageRenderer, and returns a
+//  ShieldConfiguration whose icon slot carries the whole visual.
+//
+//  iOS's surrounding title/subtitle text are intentionally nil so
+//  the rendered card is the focus; the primary "Close" button
+//  remains to give the user a way out.
 //
 
 import ManagedSettings
 import ManagedSettingsUI
+import SwiftUI
 import UIKit
 import os
 
-// `nonisolated` because the project's SWIFT_DEFAULT_ACTOR_ISOLATION is
-// MainActor, but ShieldConfigurationDataSource's overridden methods are
-// `nonisolated` in the framework — keep the override actor-isolation
-// matching the superclass.
 nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     override func configuration(shielding application: Application) -> ShieldConfiguration {
-        makeConfiguration(name: application.localizedDisplayName)
+        makeConfiguration()
     }
 
     override func configuration(
         shielding application: Application,
         in category: ActivityCategory
     ) -> ShieldConfiguration {
-        makeConfiguration(name: application.localizedDisplayName)
+        makeConfiguration()
     }
 
     override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
-        makeConfiguration(name: webDomain.domain)
+        makeConfiguration()
     }
 
     override func configuration(
         shielding webDomain: WebDomain,
         in category: ActivityCategory
     ) -> ShieldConfiguration {
-        makeConfiguration(name: webDomain.domain)
+        makeConfiguration()
     }
 
-    private func makeConfiguration(name: String?) -> ShieldConfiguration {
+    private func makeConfiguration() -> ShieldConfiguration {
         let state = ShieldState.read() ?? .fallback
-        Logger.shieldExt.info("Shield invoked: agent=\(state.agent.rawValue) title=\(state.title ?? "nil")")
+        Logger.shieldExt.info("Shield: agent=\(state.agent.rawValue) title=\(state.title ?? "nil")")
 
-        let displayName = name ?? "this app"
-        return ShieldConfiguration(
-            backgroundBlurStyle: .systemThickMaterial,
-            backgroundColor: nil,
-            icon: nil,
-            title: ShieldConfiguration.Label(
-                text: "BLOCKING IN PROGRESS",
-                color: state.accentUIColor
-            ),
-            subtitle: ShieldConfiguration.Label(
-                text: "Vibez is keeping you off \(displayName).\n\nOpen Vibez to check what your agent needs.",
-                color: .label
-            ),
-            primaryButtonLabel: ShieldConfiguration.Label(
-                text: "Close",
-                color: .white
-            ),
-            primaryButtonBackgroundColor: state.accentUIColor,
-            secondaryButtonLabel: nil
-        )
+        return MainActor.assumeIsolated {
+            let renderer = ImageRenderer(content: ShieldCard(state: state))
+            renderer.scale = UIScreen.main.scale
+            renderer.proposedSize = ProposedViewSize(width: 360, height: 540)
+
+            return ShieldConfiguration(
+                backgroundBlurStyle: .systemThickMaterial,
+                backgroundColor: state.dark
+                    ? UIColor(red: 0.047, green: 0.051, blue: 0.071, alpha: 1)
+                    : UIColor(red: 0.984, green: 0.973, blue: 0.957, alpha: 1),
+                icon: renderer.uiImage,
+                title: nil,
+                subtitle: nil,
+                primaryButtonLabel: ShieldConfiguration.Label(
+                    text: "Close", color: .white
+                ),
+                primaryButtonBackgroundColor: state.accentUIColor,
+                secondaryButtonLabel: nil
+            )
+        }
     }
 }
