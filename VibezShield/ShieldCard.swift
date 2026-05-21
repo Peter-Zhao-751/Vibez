@@ -68,12 +68,7 @@ struct ShieldState {
     /// primary button. Claude orange / Codex blue / Vibez orange for
     /// the generic case.
     nonisolated var accentUIColor: UIColor {
-        switch agent {
-        case .claude, .both, .none:
-            return UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
-        case .codex:
-            return UIColor(red: 0.29, green: 0.48, blue: 1.00, alpha: 1.0)
-        }
+        ShieldTheme.accentUIColor(agent)
     }
 }
 
@@ -119,7 +114,7 @@ struct ClaudePixelMascot: View {
             )
             context.fill(
                 Path(roundedRect: bodyRect, cornerRadius: 10 * unit),
-                with: .color(Color(red: 0.95, green: 0.45, blue: 0.20))
+                with: .color(ShieldTheme.accent(.claude))
             )
             // Eyes (two black ovals at neutral position).
             let eyeY = 30 * unit
@@ -162,6 +157,13 @@ private enum ShieldTheme {
         switch agent {
         case .codex: return Color(red: 0.29, green: 0.48, blue: 1.00)
         default:     return Color(red: 0.95, green: 0.45, blue: 0.20)
+        }
+    }
+
+    static func accentUIColor(_ agent: Agent) -> UIColor {
+        switch agent {
+        case .codex: return UIColor(red: 0.29, green: 0.48, blue: 1.00, alpha: 1.0)
+        default:     return UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
         }
     }
 }
