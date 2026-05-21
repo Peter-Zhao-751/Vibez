@@ -41,7 +41,7 @@ final class AnalyticsTracker {
     private(set) var stats: DailyStats
 
     private let defaults: UserDefaults
-    private let key = "vibez.analytics.v1"
+    private static let key = "vibez.analytics.v1"
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
@@ -91,11 +91,11 @@ final class AnalyticsTracker {
 
     private func save() {
         guard let data = try? JSONEncoder().encode(stats) else { return }
-        defaults.set(data, forKey: key)
+        defaults.set(data, forKey: Self.key)
     }
 
     private static func load(defaults: UserDefaults) -> DailyStats? {
-        guard let data = defaults.data(forKey: "vibez.analytics.v1") else { return nil }
+        guard let data = defaults.data(forKey: Self.key) else { return nil }
         return try? JSONDecoder().decode(DailyStats.self, from: data)
     }
 }
