@@ -309,6 +309,7 @@ struct ContentView: View {
                 }
                 manager.addTrigger(sessionId: sid, durationSeconds: durationFor(message))
             }
+            manager.publishShieldContext(from: message)
 
             notifyClient.scheduleLocalNotification(message)
             withAnimation(.easeInOut(duration: 0.32)) {

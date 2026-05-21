@@ -270,12 +270,26 @@ final class ScreenTimeManager {
         store.shield.applications = apps.isEmpty ? nil : apps
         store.shield.applicationCategories = cats.isEmpty ? nil : .specific(cats)
         store.shield.webDomains = webs.isEmpty ? nil : webs
+
+        // Refresh shared state so the shield extension renders the latest
+        // context. ContentView.handleIncoming may overwrite this immediately
+        // with a richer per-message snapshot; here we just publish a generic
+        // "shields are on" baseline so a freshly-toggled-on Vibez (no ping
+        // yet) shows our card instead of the iOS default.
+        writeShieldState(ShieldState(
+            agent: .none,
+            title: nil,
+            body: nil,
+            expiresAt: nil,
+            dark: true
+        ))
     }
 
     private func clearShield() {
         store.shield.applications = nil
         store.shield.applicationCategories = nil
         store.shield.webDomains = nil
+        writeShieldState(nil)
     }
 
     // MARK: - Persistence
@@ -325,6 +339,38 @@ final class ScreenTimeManager {
         } else {
             sharedDefaults.removeObject(forKey: "shieldState")
         }
+    }
+
+    /// Bridges a fresh NtfyMessage into a ShieldState and writes it to
+    /// the App Group. Called from ContentView.handleIncoming so the
+    /// extension can read the latest agent/title/body next time iOS
+    /// asks for a shield configuration.
+    func publishShieldContext(from message: NtfyMessage) {
+        let agent: ShieldState.Agent
+        if let messageAgent = message.agent {
+            switch messageAgent {
+            case .claude: agent = .claude
+            case .codex:  agent = .codex
+            }
+        } else {
+            // Untagged ntfy ping — no agent context. Use the generic
+            // "both" tint so we don't bias the visual toward one agent.
+            agent = .both
+        }
+
+        var expiry: Date?
+        if let sid = message.sessionId,
+           let trigger = pendingTriggers[sid] {
+            expiry = trigger.expiresAt
+        }
+
+        writeShieldState(ShieldState(
+            agent: agent,
+            title: message.displayTitle,
+            body: message.body.isEmpty ? nil : message.body,
+            expiresAt: expiry,
+            dark: true
+        ))
     }
 
     private func loadStateAndMigrate() {
