@@ -30,13 +30,13 @@ The goal is a small, self-contained tracker that records these counts for the cu
 
 New file: `Vibez/AnalyticsTracker.swift`. Same shape as the other store classes — `@MainActor`, `@Observable`, init takes `defaults: UserDefaults = .standard` for testability symmetry with `TriggerStore`.
 
-`VibezApp` gains one `@State` property:
+`ContentView` already owns all the stores as `@State` (manager, notifyClient, triggerStore, ignoreStore — lines 10–13). It gains one more:
 
 ```swift
 @State private var analytics = AnalyticsTracker()
 ```
 
-It's passed into `ContentView` alongside the existing stores.
+`VibezApp` is untouched.
 
 ### Data model
 
@@ -203,5 +203,4 @@ When a test target is added later, the natural shape is: inject a `UserDefaults(
 ## File summary
 
 - New: `Vibez/AnalyticsTracker.swift`
-- Modified: `Vibez/VibezApp.swift` (one `@State` declaration, pass through)
-- Modified: `Vibez/ContentView.swift` (accept the new store as a parameter, one line in `handleIncoming`)
+- Modified: `Vibez/ContentView.swift` (one `@State` declaration alongside the existing stores, one line at the top of `handleIncoming`)
