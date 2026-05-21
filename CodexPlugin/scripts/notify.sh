@@ -77,6 +77,39 @@ post_ntfy() {
         || log "send failed: ${title}"
 }
 
+# Codex has no hook that fires on the user's response to a PermissionRequest
+# (approve/deny tap in Codex Desktop). The closest observable signal is the
+# PostToolUse on the underlying tool — but PostToolUse also fires for every
+# autonomous tool call in dontAsk/bypassPermissions sessions, which would
+# blow through ntfy.sh's 250/day cap. To gate it, permission-request and
+# pre-tool-use(ask_user_question) drop a per-session marker; post-tool-use
+# only pushes shield-off when the marker exists, then clears it.
+# stop and user-prompt-submit also clear it so a stale marker doesn't
+# trigger a false shield-off later.
+pending_marker_path() {
+    local sid="$1"
+    [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
+    printf '%s/pending.%s' "${CONFIG_DIR}" "${sid}"
+}
+
+mark_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 0
+    : >"${path}" 2>/dev/null || true
+}
+
+clear_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 0
+    rm -f "${path}" 2>/dev/null || true
+}
+
+has_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 1
+    [ -f "${path}" ]
+}
+
 # True when the argument is a slash-command invocation — either the bare
 # "/foo" form or Claude Code's "<command-name>...</command-name>" wrapper
 # (also produced by Codex's transcript when a slash command is the entry
@@ -306,6 +339,7 @@ case "${EVENT}" in
 
         post_ntfy "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
             "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        mark_pending "${sid}"
         ;;
 
     stop)
@@ -335,6 +369,9 @@ case "${EVENT}" in
             post_ntfy "${title}" "${body}" \
                 "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
         fi
+        # Stop is a terminal "needs you" signal — any pending shield-on from
+        # an earlier permission/picker in this turn has been superseded.
+        clear_pending "${sid}"
         ;;
 
     pre-tool-use)
@@ -367,6 +404,46 @@ case "${EVENT}" in
 
         post_ntfy "$(clip_title "${title_raw}")" "$(clip_body "${question}")" \
             "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cx"
+        mark_pending "${sid}"
+        ;;
+
+    post-tool-use)
+        # Codex doesn't fire a hook the moment the user taps Approve/Deny
+        # on a PermissionRequest, or picks an option in ask_user_question.
+        # The earliest observable signal is this PostToolUse: by the time
+        # it fires, the user has engaged. Only push when permission-request
+        # or pre-tool-use(ask_user_question) earlier in this session left
+        # a pending marker — otherwise this fires for every tool call in
+        # autonomous mode and drowns the phone.
+        sid="$(jq_get '.session_id' 'nosid')"
+        has_pending "${sid}" || exit 0
+
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        is_ephemeral_session && { log "post-tool-use: skipping ephemeral session"; exit 0; }
+        proj="$(basename "${cwd:-unknown}")"
+        title_raw="$(read_thread_name_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
+        [ -z "${title_raw}" ] && title_raw="${proj}"
+
+        tool_name="$(jq_get '.tool_name' 'tool')"
+        # For ask_user_question the response is the user's actual answer,
+        # which is meaningful body content. For shell/apply_patch/etc. the
+        # tool_response is command output that may be huge or contain
+        # secrets — keep it generic.
+        case "${tool_name}" in
+            ask_user_question|AskUserQuestion)
+                body="$(jq_get '.tool_response.content')"
+                [ -z "${body}" ] && body="(answered)"
+                ;;
+            *)
+                body="(approved: ${tool_name})"
+                ;;
+        esac
+
+        post_ntfy "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
+            "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cx"
+        clear_pending "${sid}"
         ;;
 
     user-prompt-submit)
@@ -390,6 +467,7 @@ case "${EVENT}" in
         fi
         post_ntfy "${title}" "$(clip_body "${prompt}")" \
             "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cx"
+        clear_pending "${sid}"
         ;;
 
     _selftest)
