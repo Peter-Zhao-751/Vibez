@@ -9,6 +9,7 @@
 import ManagedSettings
 import ManagedSettingsUI
 import UIKit
+import os
 
 // `nonisolated` because the project's SWIFT_DEFAULT_ACTOR_ISOLATION is
 // MainActor, but ShieldConfigurationDataSource's overridden methods are
@@ -38,11 +39,10 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         makeConfiguration(name: webDomain.domain)
     }
 
-    // Vibez accent (orange) — matches Theme.swift's claude/codex accents
-    // closely enough without needing an App Group to share the live theme.
-    private let vibezAccent = UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
-
     private func makeConfiguration(name: String?) -> ShieldConfiguration {
+        let state = ShieldState.read() ?? .fallback
+        Logger.shieldExt.info("Shield invoked: agent=\(state.agent.rawValue) title=\(state.title ?? "nil")")
+
         let displayName = name ?? "this app"
         return ShieldConfiguration(
             backgroundBlurStyle: .systemThickMaterial,
@@ -50,7 +50,7 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
             icon: nil,
             title: ShieldConfiguration.Label(
                 text: "BLOCKING IN PROGRESS",
-                color: vibezAccent
+                color: state.accentUIColor
             ),
             subtitle: ShieldConfiguration.Label(
                 text: "Vibez is keeping you off \(displayName).\n\nOpen Vibez to check what your agent needs.",
@@ -60,7 +60,7 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
                 text: "Close",
                 color: .white
             ),
-            primaryButtonBackgroundColor: vibezAccent,
+            primaryButtonBackgroundColor: state.accentUIColor,
             secondaryButtonLabel: nil
         )
     }
