@@ -118,8 +118,31 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         let keys = userInfo.keys.map { String(describing: $0) }.joined(separator: ",")
-        pushLog.info("Remote push received: \(keys, privacy: .public)")
+        let title = (userInfo["title"] as? String) ?? "(no title)"
+        let event = (userInfo["event"] as? String) ?? "(no event)"
+        let shield = (userInfo["shield"] as? String) ?? "(no shield)"
+        let session = (userInfo["session"] as? String) ?? "(no session)"
+        let agent = (userInfo["agent"] as? String) ?? "(no agent)"
+        let summary = "keys=[\(keys)] title=\(title) event=\(event) shield=\(shield) session=\(session) agent=\(agent)"
+        pushLog.info("Remote push received: \(summary, privacy: .public)")
         NotifyClient.shared.acceptPushUserInfo(userInfo)
+
+        // [debug] Diagnostic local notification — proves the FCM path
+        // reached the AppDelegate, independent of whatever
+        // ContentView.handleIncoming decides to do with the message.
+        // Remove (or gate behind a build flag) once push delivery is
+        // confirmed solid end to end.
+        let content = UNMutableNotificationContent()
+        content.title = "[debug] Received"
+        content.body = "event=\(event) shield=\(shield)"
+        content.sound = .default
+        UNUserNotificationCenter.current().add(
+            UNNotificationRequest(
+                identifier: UUID().uuidString,
+                content: content,
+                trigger: nil
+            )
+        ) { _ in }
 
         // .newData tells iOS we did meaningful work — improves the chance
         // of getting future silent pushes delivered promptly.

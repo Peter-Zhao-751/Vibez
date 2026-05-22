@@ -16,6 +16,7 @@
 //
 
 import Foundation
+import OSLog
 import UserNotifications
 
 /// What lifecycle moment the push represents.
@@ -97,6 +98,8 @@ final class NotifyClient {
 
     private(set) var lastMessage: NtfyMessage?
 
+    private let log = Logger(subsystem: "vibezlol.Vibez", category: "NotifyClient")
+
     // MARK: - Push entry points
 
     /// Build an NtfyMessage from an APN remote-push userInfo dict and
@@ -128,6 +131,17 @@ final class NotifyClient {
         if let shield  = userInfo["shield"]  as? String { msg.shield    = VibezShield(rawValue: shield) }
         if let session = userInfo["session"] as? String { msg.sessionId = session }
         if let agent   = userInfo["agent"]   as? String { msg.agent     = VibezAgent(rawValue: agent) }
+        // [debug] One log line per push so we can confirm parsing.
+        // Enum-with-raw-value fields (event/shield/agent) decode to
+        // nil when the wire string doesn't match a known case — that
+        // shows up as "nil" here, indicating a server-side mismatch.
+        let eventStr = msg.event.map { $0.rawValue } ?? "nil"
+        let shieldStr = msg.shield.map { $0.rawValue } ?? "nil"
+        let agentStr = msg.agent.map { $0.rawValue } ?? "nil"
+        let sessionStr = msg.sessionId ?? "nil"
+        log.info(
+            "Parsed push: event=\(eventStr, privacy: .public) shield=\(shieldStr, privacy: .public) session=\(sessionStr, privacy: .public) agent=\(agentStr, privacy: .public)"
+        )
         lastMessage = msg
     }
 

@@ -5,6 +5,9 @@
 
 import SwiftUI
 import FamilyControls
+import OSLog
+
+private let handleIncomingLog = Logger(subsystem: "vibezlol.Vibez", category: "handleIncoming")
 
 struct ContentView: View {
     @State private var manager: ScreenTimeManager
@@ -355,6 +358,12 @@ struct ContentView: View {
     }
 
     private func handleIncoming(_ message: NtfyMessage) {
+        let shieldStr = message.shield.map { $0.rawValue } ?? "nil"
+        let armedStr = manager.armed ? "armed" : "disarmed"
+        handleIncomingLog.info(
+            "enter: shield=\(shieldStr, privacy: .public) \(armedStr, privacy: .public) session=\(message.sessionId ?? "nil", privacy: .public)"
+        )
+
         // Tracker is a passive observer — fires for every incoming
         // message, before any of the gating below. shield:off pings
         // (user replies) and pings that arrive while Vibez is unarmed
@@ -369,6 +378,7 @@ struct ContentView: View {
         // process (resolveTrigger is a no-op when the session isn't
         // pending) and we don't want stale state to linger.
         if message.shield == .off {
+            handleIncomingLog.info("branch: shield=off → resolve trigger only")
             if let sid = message.sessionId {
                 manager.resolveTrigger(sessionId: sid)
                 triggerStore.clearNeedsReply(forSession: sid)
@@ -382,15 +392,20 @@ struct ContentView: View {
         // Toggle off → Vibez is dormant. Don't notify, don't show the
         // overlay, don't add a trigger — the user has explicitly told us
         // to stay out of the way.
-        guard manager.armed else { return }
+        guard manager.armed else {
+            handleIncomingLog.info("branch: disarmed → drop")
+            return
+        }
 
         switch message.shield {
         case .on:
+            handleIncomingLog.info("branch: shield=on → record trigger + maybe shield/overlay")
             recordTrigger(from: message)
 
             if let sid = message.sessionId,
                !sid.isEmpty, sid != "nosid" {
                 if ignoreStore.contains(sessionId: sid, name: message.title) {
+                    handleIncomingLog.info("→ ignored, no overlay/shield")
                     // Ignored conversation — keep the row in Recent
                     // triggers (dimmed) but skip the shield and the
                     // overlay. Refresh the cached name so Settings
@@ -416,8 +431,9 @@ struct ContentView: View {
             }
 
         case .none:
-            // Plain ntfy ping (test push, third-party producer, etc.)
-            // — show the overlay as we always did.
+            handleIncomingLog.info("branch: shield=nil → record trigger + overlay")
+            // Plain push (test ping, third-party producer, etc.) — show
+            // the overlay as we always did.
             recordTrigger(from: message)
             notifyClient.scheduleLocalNotification(message)
             withAnimation(.easeInOut(duration: 0.32)) {
