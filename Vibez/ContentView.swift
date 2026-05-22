@@ -60,6 +60,13 @@ struct ContentView: View {
     @State private var setupCardVisible = true
     @State private var unlockedLayoutExpanded = false
     @State private var setupTransitionGeneration = 0
+    /// Tracks which incoming push id we've already routed through
+    /// handleIncoming. Needed because SwiftUI's .onChange doesn't fire
+    /// for changes that landed while the view wasn't actively observing
+    /// (e.g. push processed by AppDelegate while the app was suspended).
+    /// Pair with .onAppear so a push seen during background-wake gets
+    /// reprocessed once the view comes back.
+    @State private var lastProcessedMessageId: String?
 
     private var agent: Agent {
         Agent(rawValue: agentRaw) ?? .claude
@@ -139,6 +146,10 @@ struct ContentView: View {
         .onAppear {
             appearance.applyToWindows()
             syncSetupPresentation(animated: false)
+            // Catch pushes that landed via AppDelegate while the view
+            // wasn't actively observing — .onChange below won't fire
+            // for those because the value was set before subscription.
+            processIfNew(notifyClient.lastMessage)
         }
         .onChange(of: appearance) { _, newPref in
             newPref.applyToWindows()
@@ -156,8 +167,7 @@ struct ContentView: View {
             syncSetupPresentation(animated: true)
         }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
-            guard let newValue else { return }
-            handleIncoming(newValue)
+            processIfNew(newValue)
         }
         .onChange(of: manager.pendingTriggers) { _, newPending in
             // A non-top entry's per-session timer expired in the
@@ -355,6 +365,17 @@ struct ContentView: View {
         case .stack: overlayQueue.insert(message, at: 0)
         case .queue: overlayQueue.append(message)
         }
+    }
+
+    /// Single entry-point for incoming pushes. Dedupes by message id
+    /// so a push that gets observed twice (once via .onChange while
+    /// foreground, again via .onAppear after a background wake) only
+    /// updates state once.
+    private func processIfNew(_ message: NtfyMessage?) {
+        guard let message else { return }
+        guard message.id != lastProcessedMessageId else { return }
+        lastProcessedMessageId = message.id
+        handleIncoming(message)
     }
 
     private func handleIncoming(_ message: NtfyMessage) {

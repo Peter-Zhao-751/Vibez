@@ -94,15 +94,14 @@ export const registerPushToken = onCall(
  *   }
  *
  * We look up every device registered to that Vibez ID and fan an FCM
- * push out to each. Pushes are ALERT + content-available:1 so iOS
- * (a) reliably wakes the app to process the payload (silent pushes
- * are throttled too aggressively for our use case) and (b) shows a
- * banner if the app's handleIncoming decides it should. The app
- * suppresses iOS's auto-banner in foreground via the
- * userNotificationCenter willPresent callback (any remote push with
- * "aps" in userInfo gets options [] back), so handleIncoming →
- * scheduleLocalNotification remains the sole owner of visibility in
- * foreground — matching the pre-FCM ntfy behavior exactly.
+ * push out to each. Visibility is controlled by the shield axis,
+ * matching the user-facing expectation from the ntfy era — only agent
+ * events surface as banners, user replies are silent:
+ *
+ *   shield:on / shield:nil → alert + content-available push. iOS
+ *     auto-banner shows in foreground (via willPresent) and background.
+ *   shield:off → background push only. App is woken to lift the
+ *     shield via handleIncoming, but iOS displays no banner.
  */
 export const notify = onRequest(
   {invoker: "public"},
@@ -154,37 +153,30 @@ export const notify = onRequest(
     // aps). That's how iOS surfaces them in userInfo, matching the
     // shape NotifyClient.acceptPushUserInfo expects.
     //
-    // `content-available: 1` wakes the app in background. The alert
-    // block is what iOS would auto-display, but the app's
-    // willPresent callback returns [] for remote pushes in foreground,
-    // so handleIncoming → scheduleLocalNotification stays in charge
-    // there. In background iOS still shows the banner — that's the
-    // cost of reliable wake-up vs silent-push throttling.
-    const apnsPayload: {
-      aps: {
-        alert: {title: string; body: string};
-        sound: string;
-        "content-available": number;
-      };
-      title: string;
-      body: string;
-      event?: string;
-      shield?: string;
-      session?: string;
-      agent?: string;
-    } = {
-      aps: {
+    // Shield axis controls visibility:
+    //   shield:off (user just replied) → silent push, no banner. The
+    //     app still wakes via content-available so handleIncoming can
+    //     lift the shield, but iOS doesn't surface anything visible.
+    //   shield:on / shield:nil (agent event) → alert push, banner is
+    //     auto-displayed by iOS.
+    const isSilent = shield === "off";
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const aps: any = isSilent ?
+      {"content-available": 1} :
+      {
         "alert": {title, body: bodyText},
         "sound": "default",
         "content-available": 1,
-      },
-      title,
-      body: bodyText,
-    };
+      };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const apnsPayload: any = {aps, title, body: bodyText};
     if (event !== undefined) apnsPayload.event = event;
     if (shield !== undefined) apnsPayload.shield = shield;
     if (session !== undefined) apnsPayload.session = session;
     if (agent !== undefined) apnsPayload.agent = agent;
+    const apnsHeaders: Record<string, string> = isSilent ?
+      {"apns-push-type": "background", "apns-priority": "5"} :
+      {"apns-push-type": "alert", "apns-priority": "10"};
 
     let success = 0;
     let failure = 0;
@@ -196,17 +188,7 @@ export const notify = onRequest(
       const response: BatchResponse =
         await getMessaging().sendEachForMulticast({
           tokens: chunk,
-          apns: {
-            headers: {
-              // Alert + priority 10 so iOS delivers immediately and
-              // wakes the app even when suspended. The foreground
-              // banner is suppressed in-app via willPresent — see
-              // AppDelegate in VibezApp.swift.
-              "apns-push-type": "alert",
-              "apns-priority": "10",
-            },
-            payload: apnsPayload,
-          },
+          apns: {headers: apnsHeaders, payload: apnsPayload},
         });
       success += response.successCount;
       failure += response.failureCount;

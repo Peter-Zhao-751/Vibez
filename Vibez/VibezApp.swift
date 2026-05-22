@@ -127,47 +127,20 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         pushLog.info("Remote push received: \(summary, privacy: .public)")
         NotifyClient.shared.acceptPushUserInfo(userInfo)
 
-        // [debug] Diagnostic local notification — proves the FCM path
-        // reached the AppDelegate, independent of whatever
-        // ContentView.handleIncoming decides to do with the message.
-        // Remove (or gate behind a build flag) once push delivery is
-        // confirmed solid end to end.
-        let content = UNMutableNotificationContent()
-        content.title = "[debug] Received"
-        content.body = "event=\(event) shield=\(shield)"
-        content.sound = .default
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(
-                identifier: UUID().uuidString,
-                content: content,
-                trigger: nil
-            )
-        ) { _ in }
-
         // .newData tells iOS we did meaningful work — improves the chance
         // of getting future silent pushes delivered promptly.
         completionHandler(.newData)
     }
 
-    // Foreground display gate. Remote pushes carry "aps" in userInfo —
-    // we suppress those so iOS doesn't auto-banner before
-    // ContentView.handleIncoming has a chance to run its armed /
-    // shield / ignored gating. Local notifications (the ones the app
-    // itself raises via NotifyClient.scheduleLocalNotification when
-    // handleIncoming decides a banner is appropriate) have no "aps"
-    // key, so they pass through and display normally. Matches the
-    // pre-FCM ntfy WebSocket behavior: app code, not iOS, owns
-    // foreground visibility.
+    // Always display incoming notifications in foreground. The server
+    // controls visibility by branching on shield value: shield:off is
+    // sent as a silent push (no banner, app still wakes to lift the
+    // shield), shield:on/nil is sent as an alert push.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        let userInfo = notification.request.content.userInfo
-        if userInfo["aps"] != nil {
-            completionHandler([])
-            return
-        }
         completionHandler([.banner, .sound, .list])
     }
 }
