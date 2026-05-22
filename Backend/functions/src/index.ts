@@ -94,13 +94,15 @@ export const registerPushToken = onCall(
  *   }
  *
  * We look up every device registered to that Vibez ID and fan an FCM
- * push out to each. Pushes are SILENT (content-available:1, no aps.alert,
- * apns-push-type:background) — iOS doesn't auto-display a banner. The
- * iOS app's NotifyClient.acceptPushUserInfo parses the userInfo, then
- * ContentView.handleIncoming applies the same armed / shield / ignored
- * gating the old ntfy WebSocket path used. The app calls
- * scheduleLocalNotification only when it decides a notification should
- * actually be shown — matching the pre-FCM behavior exactly.
+ * push out to each. Pushes are ALERT + content-available:1 so iOS
+ * (a) reliably wakes the app to process the payload (silent pushes
+ * are throttled too aggressively for our use case) and (b) shows a
+ * banner if the app's handleIncoming decides it should. The app
+ * suppresses iOS's auto-banner in foreground via the
+ * userNotificationCenter willPresent callback (any remote push with
+ * "aps" in userInfo gets options [] back), so handleIncoming →
+ * scheduleLocalNotification remains the sole owner of visibility in
+ * foreground — matching the pre-FCM ntfy behavior exactly.
  */
 export const notify = onRequest(
   {invoker: "public"},
@@ -152,12 +154,18 @@ export const notify = onRequest(
     // aps). That's how iOS surfaces them in userInfo, matching the
     // shape NotifyClient.acceptPushUserInfo expects.
     //
-    // `content-available: 1` makes this a silent push — iOS wakes the
-    // app to process the payload but doesn't display a banner on its
-    // own. The app then runs handleIncoming and may call
-    // scheduleLocalNotification if armed + shield rules say to.
+    // `content-available: 1` wakes the app in background. The alert
+    // block is what iOS would auto-display, but the app's
+    // willPresent callback returns [] for remote pushes in foreground,
+    // so handleIncoming → scheduleLocalNotification stays in charge
+    // there. In background iOS still shows the banner — that's the
+    // cost of reliable wake-up vs silent-push throttling.
     const apnsPayload: {
-      aps: {"content-available": number};
+      aps: {
+        alert: {title: string; body: string};
+        sound: string;
+        "content-available": number;
+      };
       title: string;
       body: string;
       event?: string;
@@ -165,7 +173,11 @@ export const notify = onRequest(
       session?: string;
       agent?: string;
     } = {
-      aps: {"content-available": 1},
+      aps: {
+        "alert": {title, body: bodyText},
+        "sound": "default",
+        "content-available": 1,
+      },
       title,
       body: bodyText,
     };
@@ -186,12 +198,12 @@ export const notify = onRequest(
           tokens: chunk,
           apns: {
             headers: {
-              // Required by iOS 13+. `background` matches the silent
-              // payload (content-available:1, no alert). `priority: 5`
-              // is the only priority Apple accepts for background
-              // pushes — `10` would be rejected with BadPriority.
-              "apns-push-type": "background",
-              "apns-priority": "5",
+              // Alert + priority 10 so iOS delivers immediately and
+              // wakes the app even when suspended. The foreground
+              // banner is suppressed in-app via willPresent — see
+              // AppDelegate in VibezApp.swift.
+              "apns-push-type": "alert",
+              "apns-priority": "10",
             },
             payload: apnsPayload,
           },

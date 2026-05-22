@@ -3,8 +3,8 @@
 //  Vibez
 //
 //  Sheet presented from the top-right gear button. Lets the user pick
-//  apps to block, set the block duration, paste their ntfy.sh URL, and
-//  override the appearance preference.
+//  apps to block, set the block duration, change the Vibez ID this
+//  phone is paired to, and override the appearance preference.
 //
 
 import SwiftUI
@@ -34,6 +34,7 @@ struct SettingsView: View {
     @Binding var isPresented: Bool
     @Bindable var manager: ScreenTimeManager
     @Bindable var notifyClient: NotifyClient
+    @Bindable var registrar: PushTokenRegistrar
     @Bindable var triggerStore: TriggerStore
     @Bindable var ignoreStore: IgnoreStore
 
@@ -46,10 +47,15 @@ struct SettingsView: View {
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
     @State private var showAddIgnoreSheet = false
+    @State private var vibezIdDraft: String = ""
+    @State private var vibezIdError: String? = nil
+    @State private var copiedFeedback = false
+    @FocusState private var vibezIdFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
 
     private func dismissSheet() {
+        vibezIdFocused = false
         isPresented = false
         dismiss()
     }
@@ -61,6 +67,7 @@ struct SettingsView: View {
                 appsSection
                 durationSection
                 overlaySection
+                vibezIdSection
                 ignoredConversationsSection
             }
             .scrollDismissesKeyboard(.interactively)
@@ -240,6 +247,123 @@ struct SettingsView: View {
         }
     }
 
+    // MARK: Vibez ID
+
+    @ViewBuilder
+    private var vibezIdSection: some View {
+        Section {
+            // Current ID display + copy. Shown whenever there's a paired
+            // ID — gives the user a visible anchor and a quick way to
+            // re-share the ID with their Mac if they ever need to.
+            if !registrar.vibezId.isEmpty {
+                HStack {
+                    Text(registrar.vibezId)
+                        .font(.system(.body, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer()
+                    Button(action: copyVibezId) {
+                        Text(copiedFeedback ? "Copied" : "Copy")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            // Edit field — typed in, validated on commit. Same pattern
+            // as the home-screen VibezSetupCard.
+            ZStack(alignment: .leading) {
+                if vibezIdDraft.isEmpty && !vibezIdFocused {
+                    Text("moss-pine-fox-jazz")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $vibezIdDraft)
+                    .font(.system(.body, design: .monospaced))
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($vibezIdFocused)
+                    .submitLabel(.done)
+                    .onSubmit { commitVibezId() }
+                    .onChange(of: vibezIdDraft) { _, _ in
+                        if vibezIdError != nil { vibezIdError = nil }
+                    }
+            }
+
+            HStack {
+                Text("Status")
+                Spacer()
+                Text(registrarStatusLabel)
+                    .foregroundStyle(registrarStatusColor)
+                    .monospaced()
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+
+            if let err = vibezIdError {
+                Text(err)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
+            if vibezIdDraftIsCommittable {
+                Button("Save Vibez ID") { commitVibezId() }
+                    .fontWeight(.semibold)
+            }
+        } header: {
+            Text("Vibez ID")
+        } footer: {
+            Text("This phone listens to one Vibez ID. Run /vibez:setup (Claude Code) or the vibez-setup skill (Codex) on a Mac to see or regenerate its ID, then paste it here to re-pair.")
+        }
+    }
+
+    private var vibezIdDraftIsCommittable: Bool {
+        let trimmed = vibezIdDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        return PushTokenRegistrar.isValidVibezId(trimmed)
+            && trimmed != registrar.vibezId
+    }
+
+    private var registrarStatusLabel: String {
+        switch registrar.state {
+        case .idle:
+            return registrar.vibezId.isEmpty ? "not paired" : "waiting"
+        case .registering: return "registering…"
+        case .registered:  return "paired"
+        case .error(let m): return "error: \(m.prefix(40))"
+        }
+    }
+
+    private var registrarStatusColor: Color {
+        switch registrar.state {
+        case .registered:  return .green
+        case .registering: return .orange
+        case .error:       return .red
+        case .idle:        return .secondary
+        }
+    }
+
+    private func commitVibezId() {
+        let trimmed = vibezIdDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !trimmed.isEmpty else { return }
+        if !PushTokenRegistrar.isValidVibezId(trimmed) {
+            vibezIdError = "Format: 4 hyphenated words, each 3-5 letters."
+            return
+        }
+        vibezIdError = nil
+        vibezIdFocused = false
+        registrar.setVibezId(trimmed)
+        vibezIdDraft = ""
+    }
+
+    private func copyVibezId() {
+        UIPasteboard.general.string = registrar.vibezId
+        copiedFeedback = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            copiedFeedback = false
+        }
+    }
 }
 
 // MARK: - Blocked app icons
@@ -478,12 +602,15 @@ private struct AddIgnoreSheet: View {
     }
 }
 
+#if DEBUG
 #Preview {
     SettingsView(
         isPresented: .constant(true),
         manager: ScreenTimeManager(),
         notifyClient: NotifyClient(),
+        registrar: PushTokenRegistrar.previewRegistrar(),
         triggerStore: TriggerStore(),
         ignoreStore: IgnoreStore()
     )
 }
+#endif

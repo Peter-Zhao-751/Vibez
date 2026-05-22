@@ -174,6 +174,7 @@ struct ContentView: View {
                 isPresented: $showSettings,
                 manager: manager,
                 notifyClient: notifyClient,
+                registrar: registrar,
                 triggerStore: triggerStore,
                 ignoreStore: ignoreStore
             )

@@ -126,14 +126,25 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         completionHandler(.newData)
     }
 
-    // Show local notifications even when the app is in the foreground.
-    // Without this, ntfy pings are swallowed silently while you're looking
-    // at Vibez — defeats the whole point.
+    // Foreground display gate. Remote pushes carry "aps" in userInfo —
+    // we suppress those so iOS doesn't auto-banner before
+    // ContentView.handleIncoming has a chance to run its armed /
+    // shield / ignored gating. Local notifications (the ones the app
+    // itself raises via NotifyClient.scheduleLocalNotification when
+    // handleIncoming decides a banner is appropriate) have no "aps"
+    // key, so they pass through and display normally. Matches the
+    // pre-FCM ntfy WebSocket behavior: app code, not iOS, owns
+    // foreground visibility.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        let userInfo = notification.request.content.userInfo
+        if userInfo["aps"] != nil {
+            completionHandler([])
+            return
+        }
         completionHandler([.banner, .sound, .list])
     }
 }
