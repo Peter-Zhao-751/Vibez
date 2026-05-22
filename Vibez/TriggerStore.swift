@@ -37,11 +37,14 @@ final class TriggerStore {
 
     /// Marks any TriggerEvent for the given session id as no-longer-
     /// awaiting-reply. Called when a `_vibez:shield:off` push arrives
-    /// because the user just replied in that conversation.
+    /// because the user just replied in that conversation. Also stamps
+    /// `repliedAt` so the analytics panel can compute time-to-reply.
     func clearNeedsReply(forSession sid: String) {
+        let now = Date()
         var changed = false
         for i in events.indices where events[i].sessionId == sid && events[i].needsReply {
             events[i].needsReply = false
+            events[i].repliedAt = now
             changed = true
         }
         if changed {

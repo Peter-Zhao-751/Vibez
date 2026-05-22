@@ -367,6 +367,12 @@ final class ScreenTimeManager {
         }
     }
 
+    private var sharedShieldImageURL: URL? {
+        FileManager.default
+            .containerURL(forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez")?
+            .appendingPathComponent("shield.png")
+    }
+
     private func writeShieldState(_ state: ShieldState?) {
         guard let sharedDefaults else {
             shieldLog.error("App Group defaults unavailable — shield state not written")
@@ -374,8 +380,14 @@ final class ScreenTimeManager {
         }
         if let state {
             sharedDefaults.set(state.asDict, forKey: "shieldState")
+            if let url = sharedShieldImageURL, let png = renderShieldCardPNG(state: state) {
+                try? png.write(to: url)
+            }
         } else {
             sharedDefaults.removeObject(forKey: "shieldState")
+            if let url = sharedShieldImageURL {
+                try? FileManager.default.removeItem(at: url)
+            }
         }
     }
 
@@ -402,10 +414,19 @@ final class ScreenTimeManager {
             expiry = trigger.expiresAt
         }
 
+        // ShieldConfiguration.Label.text is plain text — iOS does not
+        // render markdown there. Strip the inline markers (**bold**,
+        // *italic*, `code`, etc.) so they don't show literally on the
+        // shield. Matches what NotifyClient does for push notifications.
+        let cleanTitle = NotifyClient.stripMarkdown(message.displayTitle)
+        let cleanBody = message.body.isEmpty
+            ? nil
+            : NotifyClient.stripMarkdown(message.body)
+
         writeShieldState(ShieldState(
             agent: agent,
-            title: message.displayTitle,
-            body: message.body.isEmpty ? nil : message.body,
+            title: cleanTitle,
+            body: cleanBody,
             expiresAt: expiry,
             dark: true
         ))
@@ -454,3 +475,26 @@ final class ScreenTimeManager {
 private extension ManagedSettingsStore.Name {
     static let vibez = ManagedSettingsStore.Name("vibez.shield")
 }
+
+#if DEBUG
+extension ScreenTimeManager {
+    /// Yields a ScreenTimeManager pre-seeded for SwiftUI previews. The
+    /// real `init` still runs (its ManagedSettings calls are no-ops in
+    /// the simulator per CLAUDE.md), then we overwrite the bits the UI
+    /// reads so the home screen renders an armed/blocked state without
+    /// going through Family Controls.
+    static func previewManager(
+        armed: Bool,
+        pendingTriggers: [PendingTrigger] = [],
+        authState: AuthState = .authorized
+    ) -> ScreenTimeManager {
+        let m = ScreenTimeManager()
+        m.armed = armed
+        m.pendingTriggers = Dictionary(
+            uniqueKeysWithValues: pendingTriggers.map { ($0.sessionId, $0) }
+        )
+        m.authState = authState
+        return m
+    }
+}
+#endif

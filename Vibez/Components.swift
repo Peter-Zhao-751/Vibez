@@ -197,194 +197,6 @@ extension View {
     }
 }
 
-// MARK: - Notification setup (home screen prompt when ntfy URL is empty)
-
-struct NotificationSetupCard: View {
-    @Binding var ntfyURL: String
-    @Bindable var notifyClient: NotifyClient
-    let theme: Theme
-
-    @State private var draft: String = ""
-    @State private var verifying: Bool = false
-    @State private var verifyError: String? = nil
-    @State private var verifyTask: Task<Void, Never>? = nil
-    @FocusState private var focused: Bool
-
-    private var trimmedDraft: String {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var trimmedSavedURL: String {
-        ntfyURL.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    /// Save is enabled only when there's a new value to test AND we're
-    /// not already verifying. The "trimmed != saved" gate doubles as
-    /// the "you already tried this URL and it didn't work, change it
-    /// before pressing Save again" gate — verifyError stays on screen
-    /// to tell them why.
-    private var saveable: Bool {
-        !trimmedDraft.isEmpty
-            && !verifying
-            && trimmedDraft != trimmedSavedURL
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Set up notifications")
-                .font(.system(size: 12, weight: .bold))
-                .tracking(0.5)
-                .foregroundStyle(theme.fg)
-
-            Text("Run /vibez:setup in Claude Code on your Mac, then paste your URL here.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.fgMute)
-                .fixedSize(horizontal: false, vertical: true)
-
-            HStack(spacing: 8) {
-                ZStack(alignment: .leading) {
-                    if draft.isEmpty && !focused {
-                        Text("https://ntfy.sh/…")
-                            .font(.system(size: 13, design: .monospaced))
-                            .foregroundStyle(theme.fgFaint)
-                            .allowsHitTesting(false)
-                    }
-                    TextField("", text: $draft)
-                        .font(.system(size: 13, design: .monospaced))
-                        .foregroundStyle(theme.fg)
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        .keyboardType(.URL)
-                        .focused($focused)
-                        .submitLabel(.done)
-                        .onSubmit { commit() }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.bgChip)
-                )
-
-                Button(action: commit) {
-                    Group {
-                        if verifying {
-                            ProgressView()
-                                .controlSize(.mini)
-                                .tint(theme.onAccent)
-                        } else {
-                            Text("Save")
-                                .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                                .tracking(1.6)
-                                .foregroundStyle(saveable ? theme.onAccent : theme.fgMute)
-                        }
-                    }
-                    .frame(minWidth: 44)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 11)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill((saveable || verifying)
-                                  ? theme.saveActiveBg
-                                  : AnyShapeStyle(theme.bgChip))
-                    )
-                }
-                .buttonStyle(.plain)
-                .disabled(!saveable)
-            }
-            .onChange(of: focused) { _, newFocused in
-                if !newFocused { commit() }
-            }
-            .onChange(of: draft) { _, _ in
-                // User edited the draft — the previous error no longer
-                // applies. Clear it so the failure indicator doesn't
-                // shout at them while they're typing the fix.
-                if verifyError != nil { verifyError = nil }
-            }
-
-            statusLine
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(theme.bgWidget)
-        )
-        .onDisappear {
-            verifyTask?.cancel()
-            verifyTask = nil
-        }
-    }
-
-    /// Inline state under the input. Verify state wins; otherwise we
-    /// surface the live notifyClient state so the user knows what's
-    /// happening if a previously-saved URL has dropped.
-    @ViewBuilder
-    private var statusLine: some View {
-        if verifying {
-            HStack(spacing: 6) {
-                ProgressView()
-                    .controlSize(.mini)
-                Text("Verifying connection…")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.fgMute)
-            }
-        } else if let err = verifyError {
-            Text(err)
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.fgMute)
-        } else if !trimmedSavedURL.isEmpty {
-            switch notifyClient.state {
-            case .connecting:
-                HStack(spacing: 6) {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Connecting…")
-                        .font(.system(size: 11.5))
-                        .foregroundStyle(theme.fgMute)
-                }
-            case .error:
-                Text("Connection lost — retrying…")
-                    .font(.system(size: 11.5))
-                    .foregroundStyle(theme.fgMute)
-            case .idle, .connected:
-                EmptyView()
-            }
-        }
-    }
-
-    /// Kicks off a verify against the draft URL. Only writes `ntfyURL`
-    /// (which is what unlocks the BigToggle) after the probe actually
-    /// receives a frame from the server — so a junk URL never unlocks
-    /// the toggle, and the card stays put with an error.
-    private func commit() {
-        let trimmed = trimmedDraft
-        guard !trimmed.isEmpty else { return }
-        guard !verifying else { return }
-        guard trimmed != trimmedSavedURL else { return }
-
-        verifyTask?.cancel()
-        verifying = true
-        verifyError = nil
-        focused = false
-
-        verifyTask = Task { @MainActor in
-            let ok = await notifyClient.validate(urlString: trimmed)
-            // The view may have been torn down (parent removed it
-            // because state == .connected against the previous URL, or
-            // user navigated away). Bail rather than mutate stale state.
-            if Task.isCancelled { return }
-            verifying = false
-            if ok {
-                // Only NOW does ntfyURL get the new value — the binding
-                // is what flips the big toggle from locked to usable.
-                ntfyURL = trimmed
-            } else {
-                verifyError = "Couldn't connect. Check the URL and try again."
-            }
-        }
-    }
-}
-
 // MARK: - Wordmark
 
 struct VibezWordmark: View {
@@ -398,6 +210,13 @@ struct VibezWordmark: View {
 }
 
 // MARK: - Top bar
+
+enum TopBarLayout {
+    static let horizontalPadding: CGFloat = 22
+    static let topPadding: CGFloat = 4
+    static let bottomPadding: CGFloat = 6
+    static let settingsButtonSize: CGFloat = 34
+}
 
 struct TopBar: View {
     let isDark: Bool
@@ -415,9 +234,9 @@ struct TopBar: View {
                 action: onOpenSettings
             )
         }
-        .padding(.horizontal, 22)
-        .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.horizontal, TopBarLayout.horizontalPadding)
+        .padding(.top, TopBarLayout.topPadding)
+        .padding(.bottom, TopBarLayout.bottomPadding)
     }
 }
 
@@ -432,7 +251,10 @@ struct ChipIconButton: View {
             Image(systemName: systemName)
                 .font(.system(size: 14, weight: .bold))
                 .foregroundStyle(theme.fg)
-                .frame(width: 34, height: 34)
+                .frame(
+                    width: TopBarLayout.settingsButtonSize,
+                    height: TopBarLayout.settingsButtonSize
+                )
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(theme.bgChip)
@@ -510,7 +332,7 @@ struct BlockingPanel: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 18)
-                .fill(theme.bgWidget)
+                .fill(theme.bgPanel)
         )
     }
 
@@ -700,6 +522,166 @@ private struct HorizontalFadeScroll<Content: View>: View {
     }
 }
 
+// MARK: - Analytics panel
+
+/// Today-only usage summary. Reads counts straight from the
+/// `AnalyticsTracker` (resets at local midnight) and derives avg
+/// time-to-reply from `TriggerStore` events stamped with `repliedAt`.
+struct AnalyticsPanel: View {
+    let analytics: AnalyticsTracker
+    let triggerStore: TriggerStore
+    let theme: Theme
+    let onSelectMostBlocked: () -> Void
+
+    private var avgReplyDisplay: String {
+        guard let seconds = todaysAvgReplySeconds else { return "—" }
+        return formatDuration(seconds)
+    }
+
+    private var todaysAvgReplySeconds: TimeInterval? {
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let intervals = triggerStore.events.compactMap { event -> TimeInterval? in
+            guard let replied = event.repliedAt,
+                  event.receivedAt >= startOfDay else { return nil }
+            return replied.timeIntervalSince(event.receivedAt)
+        }
+        guard !intervals.isEmpty else { return nil }
+        return intervals.reduce(0, +) / Double(intervals.count)
+    }
+
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 60 { return "\(Int(seconds.rounded()))s" }
+        if seconds < 3600 {
+            let m = Int(seconds / 60)
+            return "\(m)m"
+        }
+        let h = Int(seconds / 3600)
+        let m = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
+        return m == 0 ? "\(h)h" : "\(h)h\(m)m"
+    }
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack {
+                Text("Today")
+                    .font(.system(size: 12, weight: .bold))
+                    .tracking(0.5)
+                    .foregroundStyle(theme.fg)
+                Spacer()
+            }
+            HStack(spacing: 6) {
+                AnalyticsColumn(
+                    value: "\(analytics.conversationsToday)",
+                    label: "chats",
+                    theme: theme
+                )
+                AnalyticsColumn(
+                    value: "\(analytics.responsesToday)",
+                    label: "replies",
+                    theme: theme
+                )
+                AnalyticsColumn(
+                    value: avgReplyDisplay,
+                    label: "avg reply",
+                    theme: theme
+                )
+                MostBlockedColumn(
+                    tokens: analytics.topBlockedApps(limit: 3),
+                    theme: theme,
+                    onTap: onSelectMostBlocked
+                )
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(theme.bgWidget)
+        )
+    }
+}
+
+private struct AnalyticsColumn: View {
+    let value: String
+    let label: String
+    let theme: Theme
+
+    var body: some View {
+        VStack(spacing: 4) {
+            Text(value)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .foregroundStyle(theme.fg)
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(label)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(theme.fgMute)
+                .tracking(0.5)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .padding(.horizontal, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(theme.fgMute.opacity(0.22), lineWidth: 1)
+        )
+    }
+}
+
+/// Sibling of AnalyticsColumn for the "most blocked" tile. Renders up
+/// to three system-drawn app icons in a tight horizontal row above the
+/// label; falls back to an em-dash when nothing's been blocked yet.
+private struct MostBlockedColumn: View {
+    let tokens: [ApplicationToken]
+    let theme: Theme
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            VStack(spacing: 4) {
+                ZStack {
+                    if tokens.isEmpty {
+                        Text("—")
+                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .foregroundStyle(theme.fg)
+                    } else {
+                        HStack(spacing: 3) {
+                            ForEach(Array(tokens.prefix(3)), id: \.self) { token in
+                                Label(token)
+                                    .labelStyle(.iconOnly)
+                                    // Same trick we use elsewhere — Apple
+                                    // ignores `.frame` on token labels, so
+                                    // scaleEffect is the only path to a
+                                    // visible size at this tile scale.
+                                    .scaleEffect(0.9, anchor: .center)
+                                    .frame(width: 22, height: 22)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 32)
+
+                Text("most blocked")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(theme.fgMute)
+                    .tracking(0.5)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .padding(.horizontal, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .stroke(theme.fgMute.opacity(0.22), lineWidth: 1)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Most blocked apps. Tap to add more apps to block.")
+    }
+}
+
 // MARK: - Recent triggers
 
 struct TriggerEvent: Identifiable, Codable, Equatable {
@@ -724,6 +706,11 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
     /// _vibez:unblock arrives. Defaults to false so old persisted
     /// events render without a dot.
     var needsReply: Bool
+    /// Wall-clock time when the user replied to this trigger (matched
+    /// via `_vibez:shield:off`). Set by `TriggerStore.clearNeedsReply`.
+    /// Nil if the user never replied (still pending, timed out, or
+    /// dismissed) — also nil for older persisted events.
+    var repliedAt: Date?
 
     init(
         id: UUID = UUID(),
@@ -733,7 +720,8 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         label: String,
         blockSeconds: Int,
         sessionId: String? = nil,
-        needsReply: Bool = false
+        needsReply: Bool = false,
+        repliedAt: Date? = nil
     ) {
         self.id = id
         self.receivedAt = receivedAt
@@ -743,10 +731,11 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         self.blockSeconds = blockSeconds
         self.sessionId = sessionId
         self.needsReply = needsReply
+        self.repliedAt = repliedAt
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, receivedAt, source, title, label, blockSeconds, sessionId, needsReply
+        case id, receivedAt, source, title, label, blockSeconds, sessionId, needsReply, repliedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -759,6 +748,7 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
         blockSeconds = try c.decode(Int.self, forKey: .blockSeconds)
         sessionId = try c.decodeIfPresent(String.self, forKey: .sessionId)
         needsReply = try c.decodeIfPresent(Bool.self, forKey: .needsReply) ?? false
+        repliedAt = try c.decodeIfPresent(Date.self, forKey: .repliedAt)
     }
 
     func relativeTime(from now: Date) -> String {
@@ -901,6 +891,17 @@ struct TriggerRow: View {
     }
 }
 
+enum RecentTriggersLayout {
+    static let collapsedReserveHeight: CGFloat = 198
+
+    fileprivate static let collapsedHeight: CGFloat = 196
+    fileprivate static let collapsedCornerRadius: CGFloat = 48
+    fileprivate static let expandedCornerRadius: CGFloat = 24
+    fileprivate static let headerDragHeight: CGFloat = 112
+    fileprivate static let horizontalInset: CGFloat = 14
+    fileprivate static let collapsedPreviewCount = 3
+}
+
 struct RecentTriggersSection: View {
     let events: [TriggerEvent]
     let theme: Theme
@@ -915,13 +916,10 @@ struct RecentTriggersSection: View {
         var atEnd: Bool
     }
 
+    @State private var isExpanded = false
     @State private var atTop = true
     @State private var atEnd = false
 
-    // Fades follow the actual scroll geometry (atTop/atEnd come from
-    // onScrollGeometryChange) rather than a row-count proxy — row heights
-    // are variable since rows render a description line, so "more than 5
-    // events" no longer maps to "content overflows."
     private var showTopFade: Bool { !atTop }
     private var showBottomFade: Bool { !atEnd }
 
@@ -936,77 +934,104 @@ struct RecentTriggersSection: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Recent triggers")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(0.5)
-                    .foregroundStyle(theme.fg)
-                Spacer()
-//                Text(events.isEmpty ? "—" : "last \(events.count)")
-//                    .font(.system(size: 11, design: .monospaced))
-//                    .foregroundStyle(theme.fgMute)
-            }
-            if events.isEmpty {
-                emptyState
-            } else {
-                // Refresh the "Nm ago" labels every 30s without a manual timer.
-                TimelineView(.periodic(from: .now, by: 30)) { context in
-                    ScrollView {
-                        VStack(spacing: 6) {
-                            ForEach(events) { event in
-                                TriggerRow(
-                                    event: event,
-                                    theme: theme,
-                                    now: context.date,
-                                    ignoredBySession: ignoredBySession(event),
-                                    ignoredByName: ignoredByName(event),
-                                    onIgnoreSession: { onIgnoreSession(event) },
-                                    onIgnoreName: { onIgnoreName(event) },
-                                    onUnignoreSession: { onUnignoreSession(event) },
-                                    onUnignoreName: { onUnignoreName(event) }
-                                )
-                            }
-                        }
-                    }
-                    .frame(maxHeight: 400)
-                    .scrollBounceBehavior(.basedOnSize)
-                    .scrollIndicators(.hidden)
-                    .onScrollGeometryChange(for: ScrollEdges.self) { geo in
-                        let maxOffset = max(0, geo.contentSize.height - geo.containerSize.height)
-                        return ScrollEdges(
-                            atTop: geo.contentOffset.y <= 1,
-                            atEnd: geo.contentOffset.y >= maxOffset - 1
-                        )
-                    } action: { _, newValue in
-                        withAnimation(.easeInOut(duration: 0.35)) {
-                            atTop = newValue.atTop
-                            atEnd = newValue.atEnd
-                        }
-                    }
-                    .mask {
-                        // Fixed-location stops with animated opacity at the
-                        // edges — interpolating opacity is smoother than
-                        // sliding stop positions, so the fade reads as a
-                        // fade rather than a wipe.
-                        UnevenRoundedRectangle(
-                            topLeadingRadius: 0,
-                            bottomLeadingRadius: 47,
-                            bottomTrailingRadius: 47,
-                            topTrailingRadius: 0
-                        )
-                        .fill(
-                            LinearGradient(
-                                stops: [
-                                    .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
-                                    .init(color: .black, location: 0.14),
-                                    .init(color: .black, location: 0.86),
-                                    .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
-                                ],
-                                startPoint: .top,
-                                endPoint: .bottom
+        GeometryReader { proxy in
+            let bottomInset = max(0, proxy.safeAreaInsets.bottom)
+            let fullHeight = proxy.size.height
+            let collapsedHeight = min(
+                fullHeight,
+                RecentTriggersLayout.collapsedHeight + bottomInset
+            )
+            let height = isExpanded ? fullHeight : collapsedHeight
+
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+
+                panel(bottomInset: bottomInset)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: height)
+                    .background {
+                        panelShape
+                            .fill(theme.bgChip)
+                            .shadow(
+                                color: .black.opacity(0.22),
+                                radius: isExpanded ? 24 : 48,
+                                x: 0,
+                                y: -8
                             )
-                        )
+                    }
+                    .clipShape(panelShape)
+                    .contentShape(panelShape)
+                    .simultaneousGesture(sheetDragGesture)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .animation(sheetAnimation, value: isExpanded)
+    }
+
+    @ViewBuilder
+    private func panel(bottomInset: CGFloat) -> some View {
+        VStack(spacing: 0) {
+            sheetHeader
+                .padding(.top, isExpanded ? 16 : 20)
+                .padding(.horizontal, 22)
+
+            if isExpanded {
+                expandedList(bottomInset: bottomInset)
+            } else {
+                collapsedPreview(bottomInset: bottomInset)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .top)
+    }
+
+    private var sheetHeader: some View {
+        VStack(spacing: isExpanded ? 6 : 8) {
+            Image(systemName: isExpanded ? "chevron.down" : "chevron.up")
+                .font(.system(size: isExpanded ? 24 : 30, weight: .bold))
+                .foregroundStyle(theme.fg)
+                .frame(height: 28)
+                .accessibilityHidden(true)
+
+            Text("Recent Triggers")
+                .font(.system(size: isExpanded ? 24 : 31, weight: .heavy))
+                .foregroundStyle(theme.fg)
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
+        }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { setExpanded(!isExpanded) }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(isExpanded ? "Collapse Recent Triggers" : "Expand Recent Triggers")
+    }
+
+    @ViewBuilder
+    private func collapsedPreview(bottomInset: CGFloat) -> some View {
+        if events.isEmpty {
+            VStack(spacing: 0) {
+                emptyState
+            }
+            .padding(.horizontal, RecentTriggersLayout.horizontalInset)
+            .padding(.top, 14)
+            .padding(.bottom, max(12, bottomInset + 8))
+        } else {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                GeometryReader { proxy in
+                    VStack(spacing: 8) {
+                        ForEach(events.prefix(RecentTriggersLayout.collapsedPreviewCount)) { event in
+                            triggerRow(for: event, now: context.date)
+                        }
+                    }
+                    .padding(.horizontal, RecentTriggersLayout.horizontalInset)
+                    .padding(.top, 14)
+                    .padding(.bottom, max(12, bottomInset + 8))
+                    .frame(
+                        width: proxy.size.width,
+                        height: proxy.size.height,
+                        alignment: .top
+                    )
+                    .mask {
+                        collapsedPreviewMask(fadesBottom: events.count > 1)
                     }
                 }
             }
@@ -1014,6 +1039,73 @@ struct RecentTriggersSection: View {
     }
 
     @ViewBuilder
+    private func expandedList(bottomInset: CGFloat) -> some View {
+        if events.isEmpty {
+            VStack(spacing: 0) {
+                emptyState
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, RecentTriggersLayout.horizontalInset)
+            .padding(.top, 18)
+            .padding(.bottom, max(24, bottomInset + 18))
+            .frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            TimelineView(.periodic(from: .now, by: 30)) { context in
+                ScrollView {
+                    LazyVStack(spacing: 8) {
+                        ForEach(events) { event in
+                            triggerRow(for: event, now: context.date)
+                        }
+                    }
+                    .padding(.horizontal, RecentTriggersLayout.horizontalInset)
+                    .padding(.top, 18)
+                    .padding(.bottom, max(28, bottomInset + 24))
+                }
+                .scrollBounceBehavior(.basedOnSize)
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: ScrollEdges.self) { geo in
+                    let maxOffset = max(0, geo.contentSize.height - geo.containerSize.height)
+                    return ScrollEdges(
+                        atTop: geo.contentOffset.y <= 1,
+                        atEnd: geo.contentOffset.y >= maxOffset - 1
+                    )
+                } action: { _, newValue in
+                    withAnimation(.easeInOut(duration: 0.35)) {
+                        atTop = newValue.atTop
+                        atEnd = newValue.atEnd
+                    }
+                }
+                .mask {
+                    LinearGradient(
+                        stops: [
+                            .init(color: .black.opacity(showTopFade ? 0 : 1), location: 0.0),
+                            .init(color: .black, location: 0.10),
+                            .init(color: .black, location: 0.88),
+                            .init(color: .black.opacity(showBottomFade ? 0 : 1), location: 1.0),
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                }
+            }
+            .frame(maxHeight: .infinity, alignment: .top)
+        }
+    }
+
+    private func triggerRow(for event: TriggerEvent, now: Date) -> some View {
+        TriggerRow(
+            event: event,
+            theme: theme,
+            now: now,
+            ignoredBySession: ignoredBySession(event),
+            ignoredByName: ignoredByName(event),
+            onIgnoreSession: { onIgnoreSession(event) },
+            onIgnoreName: { onIgnoreName(event) },
+            onUnignoreSession: { onUnignoreSession(event) },
+            onUnignoreName: { onUnignoreName(event) }
+        )
+    }
+
     private var emptyState: some View {
         HStack {
             Text("No triggers yet — pings from Claude or Codex will land here.")
@@ -1028,6 +1120,70 @@ struct RecentTriggersSection: View {
             RoundedRectangle(cornerRadius: 12)
                 .fill(theme.bgWidget)
         )
+    }
+
+    private func collapsedPreviewMask(fadesBottom: Bool) -> some View {
+        UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: RecentTriggersLayout.collapsedCornerRadius,
+            bottomTrailingRadius: RecentTriggersLayout.collapsedCornerRadius,
+            topTrailingRadius: 0
+        )
+        .fill(
+            LinearGradient(
+                stops: [
+                    .init(color: .black, location: 0.0),
+                    .init(color: .black, location: fadesBottom ? 0.58 : 1.0),
+                    .init(color: .black.opacity(fadesBottom ? 0 : 1), location: 1.0),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+    }
+
+    private var panelShape: UnevenRoundedRectangle {
+        UnevenRoundedRectangle(
+            topLeadingRadius: isExpanded
+                ? RecentTriggersLayout.expandedCornerRadius
+                : RecentTriggersLayout.collapsedCornerRadius,
+            bottomLeadingRadius: 0,
+            bottomTrailingRadius: 0,
+            topTrailingRadius: isExpanded
+                ? RecentTriggersLayout.expandedCornerRadius
+                : RecentTriggersLayout.collapsedCornerRadius
+        )
+    }
+
+    private var sheetDragGesture: some Gesture {
+        DragGesture(minimumDistance: 8)
+            .onEnded { value in
+                guard canToggleSheet(from: value.startLocation) else { return }
+                let translation = value.translation.height
+                let predicted = value.predictedEndTranslation.height
+                if isExpanded {
+                    if translation > 44 || predicted > 110 {
+                        setExpanded(false)
+                    }
+                } else if translation < -44 || predicted < -110 {
+                    setExpanded(true)
+                }
+            }
+    }
+
+    private var sheetAnimation: Animation {
+        .spring(response: 0.44, dampingFraction: 0.86)
+    }
+
+    private func canToggleSheet(from startLocation: CGPoint) -> Bool {
+        !isExpanded || startLocation.y <= RecentTriggersLayout.headerDragHeight
+    }
+
+    private func setExpanded(_ expanded: Bool) {
+        guard isExpanded != expanded else { return }
+        withAnimation(sheetAnimation) {
+            isExpanded = expanded
+        }
     }
 }
 

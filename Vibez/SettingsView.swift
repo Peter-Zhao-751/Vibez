@@ -10,6 +10,7 @@
 import SwiftUI
 import UIKit
 import FamilyControls
+import ManagedSettings
 
 // Discrete duration stops for the slider — non-linear by design so a
 // single slider covers seconds, minutes, and hours without burning
@@ -41,17 +42,14 @@ struct SettingsView: View {
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
-    @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
     @State private var showAddIgnoreSheet = false
-    @FocusState private var ntfyFieldFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
 
     private func dismissSheet() {
-        ntfyFieldFocused = false
         isPresented = false
         dismiss()
     }
@@ -63,7 +61,6 @@ struct SettingsView: View {
                 appsSection
                 durationSection
                 overlaySection
-                notificationsSection
                 ignoredConversationsSection
             }
             .scrollDismissesKeyboard(.interactively)
@@ -113,6 +110,10 @@ struct SettingsView: View {
     @ViewBuilder
     private var appsSection: some View {
         Section {
+            if manager.hasSelection {
+                BlockedSelectionIconGrid(selection: manager.selection)
+            }
+
             Button {
                 draftSelection = manager.selection
                 pickerPresented = true
@@ -239,61 +240,57 @@ struct SettingsView: View {
         }
     }
 
-    @ViewBuilder
-    private var notificationsSection: some View {
-        Section {
-            ZStack(alignment: .leading) {
-                if ntfyURL.isEmpty && !ntfyFieldFocused {
-                    Text("https://ntfy.sh/ur-generated-url")
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
-                }
-                TextField("", text: $ntfyURL)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .keyboardType(.URL)
-                    .focused($ntfyFieldFocused)
-                    .submitLabel(.done)
-                    .onSubmit { ntfyFieldFocused = false }
-            }
+}
 
-            HStack {
-                Text("Connection")
-                Spacer()
-                Text(connectionLabel)
-                    .foregroundStyle(connectionColor)
-                    .monospaced()
-                    .font(.caption)
-            }
+// MARK: - Blocked app icons
 
-            if !ntfyURL.isEmpty {
-                Button("Clear URL", role: .destructive) {
-                    ntfyURL = ""
-                }
-            }
-        } header: {
-            Text("Notifications")
-        } footer: {
-            Text("Run /vibez:setup in Claude Code on your Mac to get the URL. The app subscribes via WebSocket while open and posts a local notification on every message.")
-        }
+private struct BlockedSelectionIconGrid: View {
+    let selection: FamilyActivitySelection
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 34), spacing: 8, alignment: .leading)
+    ]
+
+    private var apps: [ApplicationToken] { Array(selection.applicationTokens) }
+    private var cats: [ActivityCategoryToken] { Array(selection.categoryTokens) }
+    private var webs: [WebDomainToken] { Array(selection.webDomainTokens) }
+
+    private var selectedCount: Int {
+        apps.count + cats.count + webs.count
     }
 
-    private var connectionLabel: String {
-        switch notifyClient.state {
-        case .idle: return "off"
-        case .connecting: return "connecting…"
-        case .connected: return "live"
-        case .error(let m): return "error: \(m.prefix(20))"
+    var body: some View {
+        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
+            ForEach(apps, id: \.self) { token in
+                SettingsBlockedTokenIcon { Label(token) }
+            }
+            ForEach(cats, id: \.self) { token in
+                SettingsBlockedTokenIcon { Label(token) }
+            }
+            ForEach(webs, id: \.self) { token in
+                SettingsBlockedTokenIcon { Label(token) }
+            }
         }
+        .padding(.vertical, 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(selectedCount) selected apps")
     }
+}
 
-    private var connectionColor: Color {
-        switch notifyClient.state {
-        case .connected: return .green
-        case .connecting: return .orange
-        case .error: return .red
-        case .idle: return .secondary
-        }
+private struct SettingsBlockedTokenIcon<Icon: View>: View {
+    @ViewBuilder let icon: () -> Icon
+
+    var body: some View {
+        icon()
+            .labelStyle(.iconOnly)
+            .imageScale(.large)
+            .dynamicTypeSize(.accessibility5)
+            .scaleEffect(1.55, anchor: .center)
+            .frame(width: 34, height: 34)
+            .overlay {
+                RoundedRectangle(cornerRadius: 7)
+                    .stroke(Color.secondary.opacity(0.28), lineWidth: 1)
+            }
     }
 }
 

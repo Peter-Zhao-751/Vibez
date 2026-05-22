@@ -137,7 +137,7 @@ struct Theme {
         if dark {
             return Theme(
                 bg: Color(hex: 0x0c0d12),
-                bgPanel: Color(hex: 0x15161c),
+                bgPanel: Color(hex: 0x16171d),
                 bgWidget: Color(hex: 0x1f2027),
                 bgChip: Color(hex: 0x16171d),
                 fg: Color(hex: 0xf5f1ec),

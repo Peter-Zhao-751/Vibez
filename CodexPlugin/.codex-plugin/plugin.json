@@ -1,12 +1,12 @@
 {
   "name": "vibez",
-  "description": "Push Codex session events to your phone via ntfy.sh. Shares its topic with the Claude Code vibez plugin so a single subscription receives notifications from both agents.",
-  "version": "0.7.0",
+  "description": "Push Codex session events to the Vibez iPhone app via Firebase Cloud Messaging. Shares its Vibez ID with the Claude Code vibez plugin so one ID covers both agents.",
+  "version": "0.8.0",
   "author": {
     "name": "Peter Zhao"
   },
-  "homepage": "https://github.com/",
-  "keywords": ["notifications", "ntfy", "push", "mobile", "focus"],
+  "homepage": "https://github.com/Peter-Zhao-751/Vibez",
+  "keywords": ["notifications", "firebase", "fcm", "push", "mobile", "focus"],
   "hooks": "./hooks.json",
   "skills": "./skills/"
 }

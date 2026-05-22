@@ -4,3 +4,8 @@
 # Xcode build output
 build/
 DerivedData/
+
+# Firebase Console downloads land at the repo root by default; the
+# real copy lives at Vibez/GoogleService-Info.plist and is bundled
+# into the iOS target. Anchor to root so the bundled one is unaffected.
+/GoogleService-Info.plist

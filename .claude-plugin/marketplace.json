@@ -7,7 +7,7 @@
     {
       "name": "vibez",
       "source": "./ClaudePlugin",
-      "description": "Push Claude Code notifications and stop events to your phone via ntfy.sh."
+      "description": "Push Claude Code notifications and stop events to the Vibez iPhone app via Firebase Cloud Messaging."
     }
   ]
 }

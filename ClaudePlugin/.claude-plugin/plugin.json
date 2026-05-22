@@ -1,10 +1,10 @@
 {
   "name": "vibez",
-  "description": "Push Claude Code notifications and stop events to your phone via ntfy.sh. First session auto-generates a private topic and shows you the subscribe URL.",
-  "version": "0.13.0",
+  "description": "Push Claude Code notifications and stop events to the Vibez iPhone app via Firebase Cloud Messaging. First session auto-generates a 4-word Vibez ID; enter it once in the app to pair your Mac with your phone.",
+  "version": "0.14.0",
   "author": {
     "name": "Peter Zhao"
   },
-  "homepage": "https://github.com/",
-  "keywords": ["notifications", "ntfy", "push", "mobile", "focus"]
+  "homepage": "https://github.com/Peter-Zhao-751/Vibez",
+  "keywords": ["notifications", "firebase", "fcm", "push", "mobile", "focus"]
 }

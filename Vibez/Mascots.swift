@@ -157,10 +157,10 @@ struct ClaudeMascot: View {
                 .fill(bodyColor)
                 .frame(width: size, height: h)
             // Bottom shadow band
-            Rectangle()
-                .fill(bodyShade.opacity(0.35))
-                .frame(width: size * 0.84, height: size * 0.06)
-                .offset(x: size * 0.08, y: size * 0.58)
+//            Rectangle()
+//                .fill(bodyShade.opacity(0.35))
+//                .frame(width: size * 0.84, height: size * 0.06)
+//                .offset(x: size * 0.08, y: size * 0.58)
             // Eyes
             ClaudeEyes(expression: listening ? expression : .blink, color: dark)
                 .frame(width: size, height: h)

@@ -2,9 +2,10 @@
 #
 # vibez hook script.
 #
-# Dispatches Claude Code lifecycle events to ntfy.sh as push notifications.
-# Topic is auto-generated on first SessionStart and persisted at
-# ~/.config/vibez/topic. NTFY_TOPIC env var overrides if set.
+# Dispatches Claude Code lifecycle events to the Vibez Firebase backend
+# as push notifications. The user's Vibez ID is generated on first
+# SessionStart (or via /vibez:setup) and persisted at
+# ~/.config/vibez/vibez-id. VIBEZ_ID env var overrides if set.
 #
 # Hooks must never block Claude — this script always exits 0, network
 # failures are swallowed.
@@ -14,11 +15,17 @@ set -uo pipefail
 EVENT="${1:-}"
 
 CONFIG_DIR="${HOME}/.config/vibez"
-TOPIC_FILE="${CONFIG_DIR}/topic"
+ID_FILE="${CONFIG_DIR}/vibez-id"
+LEGACY_TOPIC_FILE="${CONFIG_DIR}/topic"
 LOG_FILE="${CONFIG_DIR}/log"
+BACKEND_URL="${VIBEZ_BACKEND_URL:-https://us-central1-vibez-backend.cloudfunctions.net}"
 
-# One-shot migration from the old claude-ntfy-named directory. Single user
-# (Peter) — same machine, same topic, no phone re-subscribe needed.
+# Where setup.sh lives. CLAUDE_PLUGIN_ROOT is set by Claude Code when
+# invoking the hook; we fall back to BASH_SOURCE-relative for direct
+# `bash notify.sh` runs (mostly _selftest).
+SCRIPT_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts"
+
+# One-shot migration from the old claude-ntfy-named directory.
 OLD_CONFIG_DIR="${HOME}/.config/claude-ntfy"
 if [ -d "${OLD_CONFIG_DIR}" ] && [ ! -d "${CONFIG_DIR}" ]; then
     mv "${OLD_CONFIG_DIR}" "${CONFIG_DIR}" 2>/dev/null || true
@@ -37,53 +44,77 @@ if [ ! -t 0 ]; then
     INPUT="$(cat 2>/dev/null || true)"
 fi
 
-# Resolve topic: env wins, else file.
-TOPIC="${NTFY_TOPIC:-}"
-if [ -z "${TOPIC}" ] && [ -f "${TOPIC_FILE}" ]; then
-    TOPIC="$(cat "${TOPIC_FILE}" 2>/dev/null | tr -d '[:space:]')"
+# Resolve the Vibez ID: env wins, else file.
+VIBEZ_ID="${VIBEZ_ID:-}"
+if [ -z "${VIBEZ_ID}" ] && [ -f "${ID_FILE}" ]; then
+    VIBEZ_ID="$(cat "${ID_FILE}" 2>/dev/null | tr -d '[:space:]')"
 fi
 
-SERVER="${NTFY_SERVER:-https://ntfy.sh}"
-
-generate_topic() {
-    # 32 alphanumeric chars, ~190 bits of entropy. Plenty for a private
-    # public-ntfy topic where security is the topic name.
-    LC_ALL=C tr -dc 'a-zA-Z0-9' </dev/urandom 2>/dev/null | head -c 32
+# Lazy bridge to setup.sh for first-run ID generation. Keeps the
+# wordlist in one place (setup.sh) instead of duplicating it here.
+ensure_vibez_id() {
+    if [ -n "${VIBEZ_ID}" ]; then
+        return 0
+    fi
+    local setup="${SCRIPT_DIR}/setup.sh"
+    if [ -x "${setup}" ] || [ -f "${setup}" ]; then
+        # Discard human-readable output; we only care about the side
+        # effect of writing the ID file.
+        bash "${setup}" show >/dev/null 2>&1 || true
+        if [ -f "${ID_FILE}" ]; then
+            VIBEZ_ID="$(cat "${ID_FILE}" 2>/dev/null | tr -d '[:space:]')"
+        fi
+    fi
 }
 
-post_ntfy() {
+# POST a Vibez payload to the backend's /notify endpoint. Title and
+# body are required; the four trailing args are the same control axes
+# the old ntfy bridge carried as `_vibez:...` tags.
+post_vibez() {
     local title="$1"
     local body="$2"
-    local tags="${3:-}"
+    local event="${3:-}"
+    local shield="${4:-}"
+    local session="${5:-}"
+    local agent="${6:-}"
 
-    if [ -z "${TOPIC}" ]; then
-        log "skip: no topic configured (event=${EVENT})"
+    if [ -z "${VIBEZ_ID}" ]; then
+        log "skip: no Vibez ID configured (event=${EVENT})"
+        return 0
+    fi
+    if ! command -v jq >/dev/null 2>&1; then
+        log "skip: jq not installed (event=${EVENT})"
         return 0
     fi
 
-    local -a curl_args=(
-        -fsS --max-time 5
-        -H "Title: ${title}"
-    )
-    if [ -n "${tags}" ]; then
-        curl_args+=(-H "Tags: ${tags}")
-    fi
-    if [ -n "${NTFY_AUTH:-}" ]; then
-        curl_args+=(-H "Authorization: Bearer ${NTFY_AUTH}")
-    fi
-    curl_args+=(-d "${body}" "${SERVER}/${TOPIC}")
+    local payload
+    payload=$(jq -nc \
+        --arg vibezId "${VIBEZ_ID}" \
+        --arg title "${title}" \
+        --arg body "${body}" \
+        --arg event "${event}" \
+        --arg shield "${shield}" \
+        --arg session "${session}" \
+        --arg agent "${agent}" \
+        '{vibezId:$vibezId,title:$title,body:$body}
+         + (if $event   != "" then {event:$event}     else {} end)
+         + (if $shield  != "" then {shield:$shield}   else {} end)
+         + (if $session != "" then {session:$session} else {} end)
+         + (if $agent   != "" then {agent:$agent}     else {} end)')
 
-    curl "${curl_args[@]}" >/dev/null 2>&1 \
-        && log "sent: ${title}" \
-        || log "send failed: ${title}"
+    curl -fsS --max-time 5 \
+        -H "content-type: application/json" \
+        -X POST -d "${payload}" \
+        "${BACKEND_URL}/notify" >/dev/null 2>&1 \
+        && log "sent: ${title} (event=${event})" \
+        || log "send failed: ${title} (event=${event})"
 }
 
 # True when the argument is a slash-command invocation — either the bare
 # "/foo" form (.prompt of a UserPromptSubmit) or the
 # "<command-name>...</command-name>" wrapper Claude Code stores in the
 # transcript. Used to suppress phone pushes for scheduled cron-style
-# commands like /trade-cycle, which alone can burn ~200 of the 250
-# msgs/day allowed by ntfy.sh's free tier.
+# commands that would otherwise spam the phone with bot-driven traffic.
 is_slash_command() {
     case "$1" in
         "<command-name>"*|"<command-message>"*|"/"[a-zA-Z]*) return 0 ;;
@@ -203,7 +234,7 @@ read_conversation_title() {
     fi
 
     # Cap at 72 chars — the title is the conversation name on its own;
-    # status (done / needs-input / replied) lives in the _vibez:event tag.
+    # status (done / needs-input / replied) lives in the event field.
     if [ "${#title}" -gt 72 ]; then
         printf '%s…' "${title:0:71}"
     else
@@ -336,26 +367,23 @@ last_turn_is_asking() {
 case "${EVENT}" in
 
     session-start)
-        if [ -z "${TOPIC}" ]; then
-            TOPIC="$(generate_topic)"
-            if [ -n "${TOPIC}" ]; then
-                printf '%s\n' "${TOPIC}" >"${TOPIC_FILE}"
-                chmod 600 "${TOPIC_FILE}" 2>/dev/null || true
-                log "generated topic ${TOPIC}"
-
-                url="${SERVER}/${TOPIC}"
-                msg="vibez plugin: notification topic generated. Subscribe in the ntfy app: ${url}  —  or run /vibez:setup for a QR code. Until you subscribe, push notifications won't reach your phone."
-
-                # systemMessage = visible warning banner shown to the user.
+        if [ -z "${VIBEZ_ID}" ]; then
+            ensure_vibez_id
+            if [ -n "${VIBEZ_ID}" ]; then
+                log "generated Vibez ID ${VIBEZ_ID}"
+                msg="vibez plugin: your Vibez ID is ${VIBEZ_ID}. Type it into the Vibez iPhone app (Set up notifications widget) to pair this Mac with your phone. Run /vibez:setup to surface it again."
+                # systemMessage = visible banner shown to the user.
                 # additionalContext = injected so Claude can answer follow-ups.
-                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez plugin first-run setup complete. Subscribe URL: %s. Run /vibez:setup for a QR code."}}\n' \
-                    "${msg}" "${url}"
+                printf '{"systemMessage":"%s","hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"vibez plugin first-run setup complete. Vibez ID: %s. The iOS app pairs with this ID via the registerPushToken Cloud Function."}}\n' \
+                    "${msg}" "${VIBEZ_ID}"
             else
-                log "topic generation failed"
+                log "vibez ID generation failed"
             fi
         else
-            log "session-start (topic exists)"
+            log "session-start (Vibez ID exists)"
         fi
+        # Clean up the legacy ntfy topic file if it's still around.
+        [ -f "${LEGACY_TOPIC_FILE}" ] && rm -f "${LEGACY_TOPIC_FILE}" 2>/dev/null || true
         ;;
 
     stop)
@@ -372,9 +400,9 @@ case "${EVENT}" in
             exit 0
         fi
         if last_turn_is_asking "${excerpt}"; then
-            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
+            post_vibez "${convo_title}" "${excerpt}" "needs-input" "on" "${sid}" "cc"
         else
-            post_ntfy "${convo_title}" "${excerpt}" "_vibez:event:done,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
+            post_vibez "${convo_title}" "${excerpt}" "done" "on" "${sid}" "cc"
         fi
         ;;
 
@@ -400,7 +428,7 @@ case "${EVENT}" in
         if [ "${#question}" -gt 160 ]; then
             question="${question:0:159}…"
         fi
-        post_ntfy "${convo_title}" "${question}" "_vibez:event:needs-input,_vibez:session:${sid},_vibez:shield:on,_vibez:agent:cc"
+        post_vibez "${convo_title}" "${question}" "needs-input" "on" "${sid}" "cc"
         ;;
 
     post-tool-use)
@@ -428,13 +456,13 @@ case "${EVENT}" in
         if [ "${#answer}" -gt 160 ]; then
             answer="${answer:0:159}…"
         fi
-        post_ntfy "${convo_title}" "${answer}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cc"
+        post_vibez "${convo_title}" "${answer}" "replied" "off" "${sid}" "cc"
         ;;
 
     user-prompt-submit)
-        # User replied in Claude — fire a push with _vibez:shield:off so
-        # the iOS app lifts the shield for this session. Body is mostly
-        # informational; the Vibez app routes on the tag axes.
+        # User replied in Claude — fire a push with shield:off so the
+        # iOS app lifts the shield for this session. Body is mostly
+        # informational; the Vibez app routes on the event + shield axes.
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
@@ -450,7 +478,7 @@ case "${EVENT}" in
             prompt="${prompt:0:79}…"
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
-        post_ntfy "${convo_title}" "${prompt}" "_vibez:event:replied,_vibez:session:${sid},_vibez:shield:off,_vibez:agent:cc"
+        post_vibez "${convo_title}" "${prompt}" "replied" "off" "${sid}" "cc"
         ;;
 
     _selftest)

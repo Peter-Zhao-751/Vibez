@@ -7,20 +7,41 @@ import SwiftUI
 import FamilyControls
 
 struct ContentView: View {
-    @State private var manager = ScreenTimeManager()
-    @State private var notifyClient = NotifyClient()
-    @State private var triggerStore = TriggerStore()
-    @State private var ignoreStore = IgnoreStore()
-    @State private var analytics = AnalyticsTracker()
-    /// Picker presented from the blocking panel's "+" tile. Kept
-    /// separate from the one inside SettingsView so each surface owns
-    /// its own draft state.
-    @State private var pickerPresented = false
-    @State private var pickerDraft = FamilyActivitySelection()
+    @State private var manager: ScreenTimeManager
+    // Singletons in prod so AppDelegate can deliver FCM pushes into the
+    // same lastMessage → handleIncoming pipeline (notifyClient) and
+    // restore the persisted Vibez ID at launch (registrar). Both are
+    // @Observable, so SwiftUI re-renders on their state changes
+    // without @State. Injectable for previews.
+    private let notifyClient: NotifyClient
+    private let registrar: PushTokenRegistrar
+    @State private var triggerStore: TriggerStore
+    @State private var ignoreStore: IgnoreStore
+    @State private var analytics: AnalyticsTracker
+
+    @MainActor
+    init(
+        manager: ScreenTimeManager? = nil,
+        notifyClient: NotifyClient? = nil,
+        registrar: PushTokenRegistrar? = nil,
+        triggerStore: TriggerStore? = nil,
+        ignoreStore: IgnoreStore? = nil,
+        analytics: AnalyticsTracker? = nil
+    ) {
+        // Default-arg expressions evaluate at the caller's isolation, so
+        // any defaults that touch @MainActor types (the whole project,
+        // SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor) have to be built inside
+        // this @MainActor body instead.
+        _manager = State(initialValue: manager ?? ScreenTimeManager())
+        self.notifyClient = notifyClient ?? .shared
+        self.registrar = registrar ?? .shared
+        _triggerStore = State(initialValue: triggerStore ?? TriggerStore())
+        _ignoreStore = State(initialValue: ignoreStore ?? IgnoreStore())
+        _analytics = State(initialValue: analytics ?? AnalyticsTracker())
+    }
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
-    @AppStorage("vibez.ntfyURL") private var ntfyURL = ""
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
@@ -32,6 +53,10 @@ struct ContentView: View {
     @State private var showSettings = false
     @State private var toggleShake = 0
     @State private var setupShake = 0
+    @State private var setupCardMounted = true
+    @State private var setupCardVisible = true
+    @State private var unlockedLayoutExpanded = false
+    @State private var setupTransitionGeneration = 0
 
     private var agent: Agent {
         Agent(rawValue: agentRaw) ?? .claude
@@ -53,6 +78,14 @@ struct ContentView: View {
 
     private var overlayOrder: OverlayOrder {
         OverlayOrder(rawValue: overlayOrderRaw) ?? .stack
+    }
+
+    private var setupNeeded: Bool {
+        // We're set up when the user has entered a Vibez ID AND the
+        // Firebase backend has accepted it (state == .registered).
+        // Anything else — no ID, registering, error — keeps the setup
+        // card visible.
+        registrar.vibezId.isEmpty || registrar.state != .registered
     }
 
     /// Pick the block duration based on what kind of ping landed:
@@ -77,6 +110,10 @@ struct ContentView: View {
             mainScreen
                 .ignoresSafeArea(edges: .bottom)
 
+            recentTriggersSheet
+                .ignoresSafeArea(edges: .bottom)
+                .zIndex(2)
+
             if let msg = topOverlayMessage {
                 BlockedOverlay(
                     agent: agent,
@@ -96,22 +133,24 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .animation(.easeInOut(duration: 0.4), value: agent)
-        .onAppear { appearance.applyToWindows() }
+        .onAppear {
+            appearance.applyToWindows()
+            syncSetupPresentation(animated: false)
+        }
         .onChange(of: appearance) { _, newPref in
             newPref.applyToWindows()
         }
         .task {
-            // Subscribe immediately — don't block on permission prompts,
-            // otherwise the WebSocket sits idle while the user is staring
-            // at "Allow Notifications?" and incoming messages get dropped.
-            notifyClient.updateURL(ntfyURL)
+            // Request notification permission early — the setup card
+            // is still visible while iOS shows the system prompt, so
+            // the user can do both in parallel.
             await NotifyClient.requestAuthorization()
             if manager.authState == .notDetermined {
                 await manager.requestAuthorization()
             }
         }
-        .onChange(of: ntfyURL) { _, newValue in
-            notifyClient.updateURL(newValue)
+        .onChange(of: setupNeeded) { _, _ in
+            syncSetupPresentation(animated: true)
         }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             guard let newValue else { return }
@@ -139,15 +178,6 @@ struct ContentView: View {
                 ignoreStore: ignoreStore
             )
         }
-        .familyActivityPicker(
-            isPresented: $pickerPresented,
-            selection: $pickerDraft
-        )
-        .onChange(of: pickerPresented) { _, presented in
-            if !presented {
-                manager.updateSelection(pickerDraft)
-            }
-        }
     }
 
     @ViewBuilder
@@ -159,56 +189,46 @@ struct ContentView: View {
                 onOpenSettings: { showSettings = true }
             )
 
-            hero
-                .padding(.horizontal, 10)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-
-            BlockingPanel(
-                selection: manager.selection,
-                enabled: manager.armed,
-                theme: theme,
-                onPickMore: {
-                    pickerDraft = manager.selection
-                    pickerPresented = true
-                }
-            )
-            .padding(.horizontal, 10)
-            .padding(.bottom, 12)
-
-            if !triggerStore.events.isEmpty {
-                Spacer(minLength: 0)
+            GeometryReader { proxy in
+                homeContent(
+                    availableHeight: proxy.size.height,
+                    availableWidth: proxy.size.width
+                )
+                .frame(width: proxy.size.width, height: proxy.size.height)
             }
 
-            RecentTriggersSection(
-                events: triggerStore.events,
-                theme: theme,
-                ignoreStore: ignoreStore,
-                onIgnoreSession: { event in
-                    guard let sid = event.sessionId else { return }
-                    let name = displayName(for: event)
-                    ignoreStore.ignoreSession(sessionId: sid, name: name)
-                },
-                onIgnoreName: { event in
-                    let name = displayName(for: event)
-                    ignoreStore.ignoreName(name)
-                },
-                onUnignoreSession: { event in
-                    guard let sid = event.sessionId,
-                          let rule = ignoreStore.sessionRuleMatching(sessionId: sid)
-                    else { return }
-                    ignoreStore.remove(ruleId: rule.id)
-                },
-                onUnignoreName: { event in
-                    let name = displayName(for: event)
-                    guard let rule = ignoreStore.nameRuleMatching(name: name)
-                    else { return }
-                    ignoreStore.remove(ruleId: rule.id)
-                }
-            )
-            .padding(.horizontal, 10)
-            .padding(.bottom, 10)
+            Color.clear
+                .frame(height: RecentTriggersLayout.collapsedReserveHeight)
         }
+    }
+
+    private var recentTriggersSheet: some View {
+        RecentTriggersSection(
+            events: triggerStore.events,
+            theme: theme,
+            ignoreStore: ignoreStore,
+            onIgnoreSession: { event in
+                guard let sid = event.sessionId else { return }
+                let name = displayName(for: event)
+                ignoreStore.ignoreSession(sessionId: sid, name: name)
+            },
+            onIgnoreName: { event in
+                let name = displayName(for: event)
+                ignoreStore.ignoreName(name)
+            },
+            onUnignoreSession: { event in
+                guard let sid = event.sessionId,
+                      let rule = ignoreStore.sessionRuleMatching(sessionId: sid)
+                else { return }
+                ignoreStore.remove(ruleId: rule.id)
+            },
+            onUnignoreName: { event in
+                let name = displayName(for: event)
+                guard let rule = ignoreStore.nameRuleMatching(name: name)
+                else { return }
+                ignoreStore.remove(ruleId: rule.id)
+            }
+        )
     }
 
     /// Best display name for an ignore rule sourced from a Recent
@@ -242,6 +262,51 @@ struct ContentView: View {
         toggleShake &+= 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
             setupShake &+= 1
+        }
+    }
+
+    /// The setup card owns enough height that removing it and expanding
+    /// the unlocked layout in one animation looks like a jump. Fade the
+    /// card first while it still occupies space; then, a beat later,
+    /// let the mascot grow and move the controls down toward the sheet.
+    private func syncSetupPresentation(animated: Bool) {
+        setupTransitionGeneration &+= 1
+        let generation = setupTransitionGeneration
+
+        if setupNeeded {
+            if animated {
+                withAnimation(.spring(response: 0.42, dampingFraction: 0.88)) {
+                    unlockedLayoutExpanded = false
+                    setupCardMounted = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                    guard generation == setupTransitionGeneration, setupNeeded else { return }
+                    withAnimation(.easeInOut(duration: 0.22)) {
+                        setupCardVisible = true
+                    }
+                }
+            } else {
+                unlockedLayoutExpanded = false
+                setupCardMounted = true
+                setupCardVisible = true
+            }
+        } else {
+            if animated {
+                withAnimation(.easeInOut(duration: 0.44)) {
+                    setupCardVisible = false
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.56) {
+                    guard generation == setupTransitionGeneration, !setupNeeded else { return }
+                    withAnimation(.spring(response: 0.58, dampingFraction: 0.86)) {
+                        setupCardMounted = false
+                        unlockedLayoutExpanded = true
+                    }
+                }
+            } else {
+                setupCardVisible = false
+                setupCardMounted = false
+                unlockedLayoutExpanded = true
+            }
         }
     }
 
@@ -336,6 +401,11 @@ struct ContentView: View {
                     return
                 }
                 manager.addTrigger(sessionId: sid, durationSeconds: durationFor(message))
+                // Bump per-app block counts only when the shield
+                // actually engages — same guard as addTrigger above.
+                analytics.recordShieldActivation(
+                    applicationTokens: manager.selection.applicationTokens
+                )
             }
             manager.publishShieldContext(from: message)
 
@@ -360,49 +430,395 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private var hero: some View {
-        let setupVisible = ntfyURL.isEmpty || notifyClient.state != .connected
+    private func homeContent(availableHeight: CGFloat, availableWidth: CGFloat) -> some View {
         VStack(spacing: 0) {
-            MascotForAgent(
-                agent: agent,
-                listening: manager.armed,
-                size: agent == .both ? 92 : 100,
-                gap: 4
+            if unlockedLayoutExpanded {
+                Spacer(minLength: 0)
+            }
+
+            VStack(spacing: 1.5) {
+                MascotForAgent(
+                    agent: agent,
+                    listening: manager.armed,
+                    size: mascotSize(for: availableHeight),
+                    gap: 4
+                )
+                .offset(y: mascotOffset())
+
+                // Ground line — solid, ~60% of available width, sits
+                // just under the mascot's feet so it reads as standing
+                // on the ground.
+                Rectangle()
+                    .fill(theme.fgMute.opacity(0.45))
+                    .frame(width: availableWidth * 0.6, height: 1.5)
+            }
+            .frame(
+                height: mascotFrameHeight(for: availableHeight),
+                alignment: unlockedLayoutExpanded ? .center : .bottom
             )
-            .frame(height: 110, alignment: .bottom)
-            .padding(.bottom, 18)
+            .padding(.horizontal, 10)
+            .padding(.top, unlockedLayoutExpanded ? 0 : 8)
+            .padding(.bottom, unlockedLayoutExpanded ? 0 : 18)
+
+            if unlockedLayoutExpanded {
+                Spacer(minLength: 0)
+            }
 
             BigToggle(
                 enabled: Binding(
-                    get: { manager.armed && !setupVisible},
+                    get: { manager.armed && !setupNeeded },
                     set: { manager.setArmed($0) }
                 ),
                 agent: agent,
                 theme: theme,
-                isInteractive: !ntfyURL.isEmpty,
+                isInteractive: !registrar.vibezId.isEmpty,
                 onLockedTap: bounceToShowSetup
             )
             // Tight gap to the setup card so the locked toggle visually
             // leads into "fix it here"; more breathing room when the
             // toggle stands alone above the blocking panel below.
-            .padding(.bottom, setupVisible ? 14 : 22)
+            .padding(.bottom, setupCardMounted ? 14 : 32)
             .shake(trigger: toggleShake)
 
-            if setupVisible {
-                NotificationSetupCard(
-                    ntfyURL: $ntfyURL,
-                    notifyClient: notifyClient,
+            if setupCardMounted {
+                VibezSetupCard(
+                    registrar: registrar,
                     theme: theme
                 )
+                .opacity(setupCardVisible ? 1 : 0)
+                .allowsHitTesting(setupCardVisible)
+                .accessibilityHidden(!setupCardVisible)
+                .padding(.horizontal, 10)
                 .padding(.bottom, 6)
                 .shake(trigger: setupShake, amount: 5, duration: 0.84)
-                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+
+            AnalyticsPanel(
+                analytics: analytics,
+                triggerStore: triggerStore,
+                theme: theme,
+                onSelectMostBlocked: { showSettings = true }
+            )
+            .padding(.horizontal, 10)
+            .padding(.bottom, unlockedLayoutExpanded ? 10 : 12)
+
+            if !unlockedLayoutExpanded {
+                Spacer(minLength: 0)
             }
         }
-        .animation(.easeInOut(duration: 0.28), value: setupVisible)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private func mascotOffset() -> CGFloat {
+        unlockedLayoutExpanded ? -(TopBarLayout.bottomPadding / 2) : 0
+    }
+
+    private func mascotSize(for availableHeight: CGFloat) -> CGFloat {
+        if unlockedLayoutExpanded {
+            switch agent {
+            case .claude:
+                return min(140, max(128, availableHeight * 0.22))
+            case .codex:
+                return min(130, max(120, availableHeight * 0.20))
+            case .both:
+                return min(128, max(118, availableHeight * 0.20))
+            }
+        }
+        return agent == .both ? 92 : 100
+    }
+
+    private func mascotFrameHeight(for availableHeight: CGFloat) -> CGFloat {
+        if unlockedLayoutExpanded {
+            switch agent {
+            case .claude:
+                return min(180, max(158, availableHeight * 0.27))
+            case .codex:
+                return min(188, max(164, availableHeight * 0.29))
+            case .both:
+                return min(174, max(154, availableHeight * 0.27))
+            }
+        }
+        return 110
     }
 }
 
 #Preview("bruh") {
     ContentView()
 }
+
+#if DEBUG
+
+// MARK: - Preview support
+//
+// Each preview wires up a fully-seeded environment so the home screen
+// renders as if Vibez had been running for a while. Three knobs:
+//   • seedAppStorageDefaults() pre-fills the agent + appearance
+//     @AppStorage values.
+//   • PushTokenRegistrar.previewRegistrar() bypasses the FCM round-trip
+//     and pins a Vibez ID + a `.registered` state, the second half of
+//     setupNeeded.
+//   • ScreenTimeManager.previewManager(...) sets armed and any pending
+//     triggers; the rest of the store (selection, auth) is left to the
+//     real init (no-op on the simulator).
+
+private func seedAppStorageDefaults(
+    agent: Agent = .claude,
+    appearance: AppearancePref = .dark
+) {
+    let d = UserDefaults.standard
+    d.set(agent.rawValue, forKey: "vibez.agent")
+    d.set(appearance.rawValue, forKey: "vibez.appearance")
+}
+
+private func previewTrigger(
+    minutesAgo: Int,
+    source: TriggerEvent.Source,
+    title: String,
+    label: String,
+    blockSeconds: Int = 900,
+    needsReply: Bool = false,
+    repliedAfterSeconds: Int? = nil
+) -> TriggerEvent {
+    let receivedAt = Date().addingTimeInterval(-Double(minutesAgo) * 60)
+    return TriggerEvent(
+        receivedAt: receivedAt,
+        source: source,
+        title: title,
+        label: label,
+        blockSeconds: blockSeconds,
+        sessionId: "preview-\(UUID().uuidString.prefix(8))",
+        needsReply: needsReply,
+        repliedAt: repliedAfterSeconds.map { receivedAt.addingTimeInterval(Double($0)) }
+    )
+}
+
+private func previewTriggerStore(events: [TriggerEvent]) -> TriggerStore {
+    let store = TriggerStore()
+    store.clear()
+    // Insert oldest first so the resulting `events` array has newest at
+    // index 0, which is the natural order downstream code expects.
+    for event in events.sorted(by: { $0.receivedAt < $1.receivedAt }) {
+        store.record(event)
+    }
+    return store
+}
+
+/// Pre-bakes a DailyStats JSON into UserDefaults so the analytics panel
+/// shows non-zero counters without having to replay messages. Per-app
+/// block counts are left empty — ApplicationToken can't be synthesized
+/// from outside Family Controls, so the "most blocked" tile renders the
+/// em-dash placeholder.
+private func previewAnalytics(
+    pings: Int,
+    chats: Int,
+    replies: Int,
+    replyLengths: [Int] = []
+) -> AnalyticsTracker {
+    let stats = DailyStats(
+        date: Calendar.current.startOfDay(for: Date()),
+        conversationIds: Set((0..<chats).map { "preview-chat-\($0)" }),
+        responseCount: replies,
+        responseLengths: replyLengths,
+        pingCount: pings,
+        appBlockCounts: [:]
+    )
+    if let data = try? JSONEncoder().encode(stats) {
+        UserDefaults.standard.set(data, forKey: "vibez.analytics.v1")
+    }
+    return AnalyticsTracker()
+}
+
+private let previewClaudeTitles: [(String, String)] = [
+    ("Refactor blocking panel", "Wrapped the panel in a lazy stack and trimmed the unused gradient. Tests pass."),
+    ("Investigate WebSocket disconnects", "Reconnect logic is dropping the second frame on iOS 17 — want me to add a retry guard?"),
+    ("Ship the Q4 changelog", "Want me to bundle the design-system entries under a single section, or keep them split out?"),
+    ("Wire up SSE handler", "Need confirmation before I rip out the polling fallback."),
+    ("Trace the analytics rollover", "Stats persisted across midnight on the simulator — added a regression test."),
+    ("Audit Vibez entitlements", "Distribution request needs the family-controls justification — should I draft the copy?"),
+    ("Migrate trigger store to v2", "Old persisted events decode fine. Ready to remove the v1 fallback?"),
+    ("Plan plugin distribution", "Permission required to run `npm install` in the plugin package."),
+    ("Profile blocked overlay", "Time-to-first-frame dropped from 180ms to 42ms after the GeometryReader rip-out."),
+    ("Fix App Group write race", "Two writers were racing on `shieldState`. Want a serial queue or a lock?"),
+    ("Document hook env-var quirks", "Wrote up the `${VAR}` vs `${VAR:-fallback}` gotcha in CLAUDE.md."),
+    ("Bump iOS deploy target", "Ready to set it to 17.0 and drop the availability checks?"),
+]
+
+private let previewCodexTitles: [(String, String)] = [
+    ("Rescue plan: stale shield", "Manager carried `shieldApplied=true` across an unblock. Reset hook proposed."),
+    ("Rebuild ShieldCard renderer", "Want me to swap ImageRenderer for a UIGraphicsImageRenderer pass?"),
+    ("Diagnose ntfy reconnect storm", "Backoff was 3s flat — bumped to exponential with jitter."),
+    ("Codex hook permission probe", "Need approval to write `~/.claude/hooks/`."),
+    ("Sweep dead code in Components", "Found 4 unused helpers. Safe to delete?"),
+    ("Audit MainActor isolation", "Three call sites missed `@MainActor`. Patch ready for review."),
+    ("Verify SettingsView regression", "Toggle survived a force-quit on the simulator. Want me to add a snapshot test?"),
+    ("Plan VibezShield asset sync", "Codex avatar copy step is fragile. Suggesting a build phase."),
+]
+
+@MainActor
+private func previewContent(
+    vibezId: String = "moss-pine-fox-jazz",
+    registrarState: PushTokenRegistrar.State = .registered,
+    agent: Agent = .claude,
+    appearance: AppearancePref = .dark,
+    armed: Bool = true,
+    pendingTriggers: [PendingTrigger] = [],
+    events: [TriggerEvent] = [],
+    analytics: AnalyticsTracker? = nil
+) -> some View {
+    let analytics = analytics ?? AnalyticsTracker()
+    seedAppStorageDefaults(agent: agent, appearance: appearance)
+    return ContentView(
+        manager: ScreenTimeManager.previewManager(
+            armed: armed,
+            pendingTriggers: pendingTriggers
+        ),
+        notifyClient: NotifyClient.previewClient(),
+        registrar: PushTokenRegistrar.previewRegistrar(
+            vibezId: vibezId,
+            state: registrarState
+        ),
+        triggerStore: previewTriggerStore(events: events),
+        ignoreStore: IgnoreStore(),
+        analytics: analytics
+    )
+    .preferredColorScheme(appearance == .light ? .light : .dark)
+}
+
+#Preview("Paired · ready · dark") {
+    // Right after the user pastes a working Vibez ID. Setup card has
+    // animated out, toggle is interactive but still OFF. Nothing else has
+    // happened yet — no triggers, no analytics. This is the "everything
+    // is wired up and ready" empty state.
+    previewContent(
+        armed: false,
+        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+    )
+}
+
+#Preview("Armed · listening · dark") {
+    // Toggle flipped ON, mascot is in its listening pose, but no pings
+    // have landed yet. Same blank Recent triggers sheet as the idle
+    // state, but the analytics panel still shows zeros — Vibez is
+    // armed, just waiting.
+    previewContent(
+        armed: true,
+        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+    )
+}
+
+#Preview("Recent triggers · dark") {
+    // A full Recent triggers list — collapsed sheet shows the top three,
+    // with the rest available on expand. Mix of replied/pending and a
+    // Codex row so the sheet shows both accent colors.
+    let events: [TriggerEvent] = [
+        previewTrigger(minutesAgo: 1,   source: .claude,
+                       title: previewClaudeTitles[0].0, label: previewClaudeTitles[0].1,
+                       needsReply: true),
+        previewTrigger(minutesAgo: 6,   source: .claude,
+                       title: previewClaudeTitles[1].0, label: previewClaudeTitles[1].1,
+                       repliedAfterSeconds: 142),
+        previewTrigger(minutesAgo: 22,  source: .codex,
+                       title: previewCodexTitles[0].0, label: previewCodexTitles[0].1,
+                       repliedAfterSeconds: 38),
+        previewTrigger(minutesAgo: 41,  source: .claude,
+                       title: previewClaudeTitles[2].0, label: previewClaudeTitles[2].1,
+                       repliedAfterSeconds: 95),
+        previewTrigger(minutesAgo: 84,  source: .claude,
+                       title: previewClaudeTitles[3].0, label: previewClaudeTitles[3].1,
+                       blockSeconds: 30),
+        previewTrigger(minutesAgo: 132, source: .codex,
+                       title: previewCodexTitles[1].0, label: previewCodexTitles[1].1,
+                       repliedAfterSeconds: 220),
+        previewTrigger(minutesAgo: 175, source: .claude,
+                       title: previewClaudeTitles[4].0, label: previewClaudeTitles[4].1,
+                       repliedAfterSeconds: 60),
+        previewTrigger(minutesAgo: 240, source: .claude,
+                       title: previewClaudeTitles[5].0, label: previewClaudeTitles[5].1,
+                       repliedAfterSeconds: 410),
+        previewTrigger(minutesAgo: 310, source: .codex,
+                       title: previewCodexTitles[2].0, label: previewCodexTitles[2].1,
+                       repliedAfterSeconds: 18),
+        previewTrigger(minutesAgo: 405, source: .claude,
+                       title: previewClaudeTitles[6].0, label: previewClaudeTitles[6].1,
+                       repliedAfterSeconds: 70),
+    ]
+    return previewContent(
+        armed: true,
+        events: events,
+        analytics: previewAnalytics(
+            pings: 28,
+            chats: 9,
+            replies: 7,
+            replyLengths: [42, 78, 110, 64, 130, 88, 92]
+        )
+    )
+}
+
+#Preview("Busy day · Claude · dark") {
+    // Everything: armed, a block in progress for one session, 12 recent
+    // triggers across the day, strong analytics. This is the "you've
+    // been pairing with Claude all afternoon" view.
+    let active = PendingTrigger(
+        sessionId: "preview-active-session",
+        addedAt: Date().addingTimeInterval(-90),
+        durationSeconds: 900
+    )
+    let events: [TriggerEvent] = (0..<12).map { i in
+        let (title, label) = previewClaudeTitles[i % previewClaudeTitles.count]
+        return previewTrigger(
+            minutesAgo: i == 0 ? 1 : (i * 17),
+            source: i % 4 == 3 ? .codex : .claude,
+            title: title,
+            label: label,
+            needsReply: i == 0,
+            repliedAfterSeconds: i == 0 ? nil : 30 + (i * 22)
+        )
+    }
+    return previewContent(
+        armed: true,
+        pendingTriggers: [active],
+        events: events,
+        analytics: previewAnalytics(
+            pings: 64,
+            chats: 14,
+            replies: 11,
+            replyLengths: [40, 62, 110, 88, 56, 130, 74, 92, 48, 102, 80]
+        )
+    )
+}
+
+#Preview("Busy day · Codex · dark") {
+    // Same shape as the Claude variant but with the Codex accent and a
+    // higher proportion of `.codex` rows.
+    let active = PendingTrigger(
+        sessionId: "preview-codex-active",
+        addedAt: Date().addingTimeInterval(-180),
+        durationSeconds: 900
+    )
+    let events: [TriggerEvent] = (0..<11).map { i in
+        let pool = i % 3 == 0 ? previewClaudeTitles : previewCodexTitles
+        let (title, label) = pool[i % pool.count]
+        return previewTrigger(
+            minutesAgo: i == 0 ? 3 : (i * 21),
+            source: i % 3 == 0 ? .claude : .codex,
+            title: title,
+            label: label,
+            needsReply: i == 0,
+            repliedAfterSeconds: i == 0 ? nil : 45 + (i * 19)
+        )
+    }
+    return previewContent(
+        agent: .codex,
+        armed: true,
+        pendingTriggers: [active],
+        events: events,
+        analytics: previewAnalytics(
+            pings: 51,
+            chats: 12,
+            replies: 9,
+            replyLengths: [56, 88, 120, 72, 64, 96, 80, 110, 48]
+        )
+    )
+}
+
+#endif

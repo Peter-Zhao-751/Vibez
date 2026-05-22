@@ -11,6 +11,8 @@
 //
 
 import Foundation
+import FamilyControls
+import ManagedSettings
 
 struct DailyStats: Codable, Equatable {
     /// Calendar day (startOfDay) these stats are for. Drives midnight rollover.
@@ -23,6 +25,13 @@ struct DailyStats: Codable, Equatable {
     var responseLengths: [Int]
     /// Count of all incoming ntfy messages today (any event, including untagged).
     var pingCount: Int
+    /// Per-app shield-activation count for today. Bumped once per
+    /// ApplicationToken in the active selection each time a shield
+    /// actually fires (i.e. trigger arrived, blocking armed, session
+    /// not ignored). Categories and web domains aren't counted —
+    /// they don't expose member apps, so a category-only blocker
+    /// shows nothing here.
+    var appBlockCounts: [ApplicationToken: Int]
 
     static func zero(on date: Date) -> DailyStats {
         DailyStats(
@@ -30,8 +39,40 @@ struct DailyStats: Codable, Equatable {
             conversationIds: [],
             responseCount: 0,
             responseLengths: [],
-            pingCount: 0
+            pingCount: 0,
+            appBlockCounts: [:]
         )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case date, conversationIds, responseCount, responseLengths, pingCount, appBlockCounts
+    }
+
+    init(
+        date: Date,
+        conversationIds: Set<String>,
+        responseCount: Int,
+        responseLengths: [Int],
+        pingCount: Int,
+        appBlockCounts: [ApplicationToken: Int]
+    ) {
+        self.date = date
+        self.conversationIds = conversationIds
+        self.responseCount = responseCount
+        self.responseLengths = responseLengths
+        self.pingCount = pingCount
+        self.appBlockCounts = appBlockCounts
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        date = try c.decode(Date.self, forKey: .date)
+        conversationIds = try c.decode(Set<String>.self, forKey: .conversationIds)
+        responseCount = try c.decode(Int.self, forKey: .responseCount)
+        responseLengths = try c.decode([Int].self, forKey: .responseLengths)
+        pingCount = try c.decode(Int.self, forKey: .pingCount)
+        // Back-compat: older persisted DailyStats predates this field.
+        appBlockCounts = try c.decodeIfPresent([ApplicationToken: Int].self, forKey: .appBlockCounts) ?? [:]
     }
 }
 
@@ -66,6 +107,17 @@ final class AnalyticsTracker {
         save()
     }
 
+    /// Bump per-app block counts. Call once per shield activation
+    /// with the active `FamilyActivitySelection.applicationTokens`.
+    func recordShieldActivation(applicationTokens: Set<ApplicationToken>) {
+        guard !applicationTokens.isEmpty else { return }
+        rollIfNeeded()
+        for token in applicationTokens {
+            stats.appBlockCounts[token, default: 0] += 1
+        }
+        save()
+    }
+
     // MARK: - Derived views
 
     var conversationsToday: Int { stats.conversationIds.count }
@@ -75,6 +127,16 @@ final class AnalyticsTracker {
         guard !stats.responseLengths.isEmpty else { return 0 }
         let sum = stats.responseLengths.reduce(0, +)
         return Double(sum) / Double(stats.responseLengths.count)
+    }
+
+    /// Today's top-N most-blocked apps, ordered by descending count.
+    /// Tie-broken by hash so the ordering is stable within a session.
+    func topBlockedApps(limit: Int = 3) -> [ApplicationToken] {
+        let sorted = stats.appBlockCounts.sorted { lhs, rhs in
+            if lhs.value != rhs.value { return lhs.value > rhs.value }
+            return lhs.key.hashValue > rhs.key.hashValue
+        }
+        return sorted.prefix(limit).map { $0.key }
     }
 
     // MARK: - Rollover

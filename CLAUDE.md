@@ -5,60 +5,121 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone
 ## Status
 
 - **Family Controls working on device.** Screen Time API integration via `FamilyControls` + `ManagedSettings` runs end-to-end against the iOS 26.4 SDK on Peter's iPhone. Toggle on → selected apps shielded; toggle off → unblocked. State survives app kill. Peter is enrolled in the paid Apple Developer Program, so the `com.apple.developer.family-controls` entitlement provisions cleanly.
-- **Next phase (active): Claude ↔ phone bridge.** A way for `claude` / `codex` running on Peter's Mac to flip the toggle on his iPhone when the agent stops or asks a question. Approach not yet decided.
+- **Firebase-backed push pipeline working end-to-end.** Mac plugin (Claude Code or Codex) POSTs lifecycle events to a Firebase Cloud Function (`/notify`); the function fans out via FCM to every device registered to the user's Vibez ID. Push lands while Vibez is suspended (the whole reason FCM replaces ntfy). The four-word Vibez ID pairs Mac → phone.
+- **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and renders a custom shield (mascot + push title/body, tinted accent background, "Close" button).
+- **ntfy is gone.** WebSocket subscription, ntfy URL UI, push-vibez.py, and the topic-based plugin path are all removed. One push path: plugin → Firebase → FCM → APNs → Vibez.
+- **Next phase: Family Controls Distribution Request + App Store review.** Backend already runs on Peter's Firebase project; .p8 lives in Firebase Cloud Messaging, never ships to users.
 
 ## File map
 
 ```
 Vibez/
-  VibezApp.swift            SwiftUI @main entry point
-  ContentView.swift         Minimal UI: auth status, picker button, on/off toggle,
-                            ntfy ingest. Publishes ShieldState on each incoming ping.
-  ScreenTimeManager.swift   @Observable backend; owns auth, persisted FamilyActivitySelection,
-                            ManagedSettingsStore shield apply/remove, and the App Group
-                            writer that hands the latest agent/title/body off to VibezShield.
-  Vibez.entitlements        com.apple.developer.family-controls + application-groups
-VibezShield/                Shield Configuration Extension. Reads ShieldState from the App
-                            Group, rasterizes ShieldCard to a UIImage via ImageRenderer,
-                            slots it into ShieldConfiguration.icon. Self-contained — no
-                            imports of host-target code.
+  VibezApp.swift              SwiftUI @main; AppDelegate calls FirebaseApp.configure(),
+                              registers for remote notifications, sets Messaging delegate,
+                              forwards APN→FCM, and delivers pushes via NotifyClient.shared.
+  ContentView.swift           Home screen: mascot, big toggle, VibezSetupCard, analytics,
+                              recent triggers. `setupNeeded` gates on
+                              `registrar.vibezId.isEmpty || registrar.state != .registered`.
+  VibezSetupCard.swift        Pairing card — user types in the 4-word Vibez ID, calls
+                              registrar.setVibezId(...). Replaces the old NotificationSetupCard.
+  PushTokenRegistrar.swift    @Observable singleton; FCM MessagingDelegate. Holds the
+                              FCM token + user's Vibez ID, persists vibezId in UserDefaults
+                              under "vibez.vibezId", calls the registerPushToken Cloud
+                              Function on every fresh token OR ID change.
+  NotifyClient.swift          Push inbox. WebSocket is gone; class still exists because
+                              AppDelegate routes incoming FCM userInfo through
+                              acceptPushUserInfo → lastMessage → ContentView.handleIncoming.
+                              Owns VibezEvent / VibezShield / VibezAgent / NtfyMessage types.
+  ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
+                              ManagedSettingsStore shield apply/remove, App Group writer.
+  Vibez.entitlements          aps-environment=development + family-controls + application-groups
+  GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
+VibezShield/                  Shield Configuration Extension. Reads ShieldState from the App
+                              Group, rasterizes ShieldCard to a UIImage via ImageRenderer,
+                              slots it into ShieldConfiguration.icon. Self-contained.
   ShieldConfigurationExtension.swift  ShieldConfigurationDataSource subclass.
   ShieldCard.swift                    Agent enum, ShieldState reader, theme, SwiftUI view.
-  Assets.xcassets/                    Codex avatar copied from host.
-  Info.plist                          NSExtensionPointIdentifier = com.apple.ManagedSettingsUI...
   VibezShield.entitlements            family-controls + application-groups
-Vibez.xcodeproj/            Uses PBXFileSystemSynchronizedRootGroup — drop a .swift into Vibez/
-                            or VibezShield/ and it auto-builds, no project file edits needed.
-                            Entitlements still need CODE_SIGN_ENTITLEMENTS wired manually.
+Backend/                      Firebase project: vibez-backend.
+  firebase.json               Cloud Functions deploy config (codebase=default).
+  .firebaserc                 default project = vibez-backend.
+  functions/src/index.ts      Two functions:
+    - registerPushToken (callable, public): {fcmToken, vibezId, platform} →
+      Firestore "tokens" db, "devices" collection, doc id = fcmToken.
+    - notify (HTTP, public): {vibezId, title, body, event?, shield?, session?, agent?} →
+      queries devices where vibezId == X, fans out via sendEachForMulticast.
+ClaudePlugin/                 Claude Code plugin source.
+  scripts/setup.sh            Generates the 4-word Vibez ID, embeds the 2016-word wordlist,
+                              prints instructions. /vibez:setup invokes this.
+  scripts/notify.sh           Hook script. POSTs lifecycle events to /notify with the
+                              user's Vibez ID. Handles session-start, stop, pre/post-tool-use
+                              (AskUserQuestion), user-prompt-submit. Falls back to setup.sh
+                              for first-run ID generation.
+  hooks/hooks.json            Registers notify.sh against the Claude Code lifecycle hooks.
+CodexPlugin/                  Codex plugin source. Parallel structure to ClaudePlugin.
+  scripts/setup.sh            Same Vibez ID generator as the Claude plugin (shared
+                              ~/.config/vibez/vibez-id file so one ID covers both agents).
+  scripts/notify.sh           Codex-flavored hook script — adds permission-request,
+                              ephemeral-session detection, "cx" agent tag.
+.claude-plugin/marketplace.json  Plugin marketplace manifest.
+Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swift into
+                              Vibez/ or VibezShield/ and it auto-builds. Entitlements still
+                              need CODE_SIGN_ENTITLEMENTS wired manually.
 ```
 
 ## Hard constraints (don't relitigate)
 
-- **No bundle-ID presets.** Apple does not let apps specify "Instagram + TikTok" by name. The user picks via `FamilyActivityPicker`; the returned `ApplicationToken`s are opaque. The only model is "user selects once → app toggles their selection on/off."
-- **Real device only.** `ManagedSettingsStore` shields are no-ops in the simulator. `xcodebuild` against `iphonesimulator26.4` is fine for compile checks but the feature itself only works on hardware.
+- **No bundle-ID presets.** Apple does not let apps specify "Instagram + TikTok" by name. The user picks via `FamilyActivityPicker`; the returned `ApplicationToken`s are opaque.
+- **Real device only for shielding.** `ManagedSettingsStore` shields are no-ops in the simulator. `xcodebuild` against `iphonesimulator26.4` is fine for compile checks but the feature itself only works on hardware.
 - **Paid ADP required for development on device, not just for App Store.** Peter is enrolled. App Store distribution additionally needs the Family Controls Distribution Request form (~3-week review) — not yet submitted.
-- **iOS 16+ for the frameworks.** Project deploys 26.4 so all APIs are available.
+- **APNs auth key must be enabled for BOTH Sandbox and Production at Apple Developer Center.** Single-environment keys cause `messaging/third-party-auth-error` → `BadEnvironmentKeyInToken` on debug builds (sandbox tokens). Always create keys with both environments enabled.
 
 ## Conventions
 
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on — assume MainActor by default; only add `nonisolated` deliberately.
-- Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF` (paid Apple Developer Program).
-- App Group: `group.vibezlol.Vibez`. Carries the live shield context (agent, ntfy title/body,
+- Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF`. Firebase project: `vibez-backend`.
+- App Group: `group.vibezlol.Vibez`. Carries the live shield context (agent, push title/body,
   expiry, dark/light) from host to VibezShield. Key: `"shieldState"`, value is a property-list
   dict — see `Vibez/ScreenTimeManager.swift` (`ShieldState.asDict`) and
   `VibezShield/ShieldCard.swift` (`ShieldState.read`).
-- Selection persists in standard `UserDefaults` via `PropertyListEncoder`. A Shield Action / Device Activity Monitor extension would reuse the existing `group.vibezlol.Vibez` App Group.
-- Shield store name: `vibez.shield` (so other Family-Controls apps on the device don't clobber our restrictions).
+- Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
+- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy. Enforced both client and server-side. Same regex constant in `PushTokenRegistrar.vibezIdPattern` and the backend's `VIBEZ_ID_PATTERN`.
+- **Firestore database is named "tokens" (non-default).** Always use `getFirestore("tokens")` on the server; the iOS app never touches Firestore directly — it goes through `registerPushToken`.
+- **All Cloud Functions are deployed with `{invoker: "public"}`.** Gen-2 functions are Cloud Run services that default to authenticated; we explicitly open them.
 
 ## Worktree workflow
 
 The repo runs Claude Code sessions inside `.claude/worktrees/<name>/` on a `claude/<name>` branch. Real changes belong on `main` in the repo root (`/Users/peter/Desktop/Vibez/`). After committing on the worktree branch, fast-forward merge into `main` so files appear in Peter's working checkout. Don't manually delete worktrees — the harness owns them.
 
-## Open question for next session
+## End-to-end push pipeline (current, working)
 
-How should the Mac-side agent trigger the iPhone toggle? Two candidates, both undecided:
+```
+┌──────────────┐  HTTPS POST  ┌──────────────────────┐    FCM     ┌──────────────┐
+│ Mac plugin   │─────────────▶│ Firebase Function    │───────────▶│ User's       │
+│ notify.sh    │ /notify      │ /notify              │  via APNs  │ iPhone       │
+│              │ {vibezId,    │ (queries Firestore)  │            │ (Vibez)      │
+│              │  title,body, │                      │            │              │
+│              │  event,...}  │                      │            │              │
+└──────────────┘              └──────────────────────┘            └──────────────┘
+                                       ▲
+                                       │ callable
+                                       │ registerPushToken
+                              ┌────────┴───────────┐
+                              │ PushTokenRegistrar │
+                              │ {fcmToken, vibezId}│
+                              └────────────────────┘
+```
 
-1. **Vibez runs a local listener** (HTTP on LAN, or a `vibez://` URL via push). Claude Code hook posts to it on Stop/Notification.
-2. **Apple Shortcuts bridge.** Mac-side hook calls `shortcuts run "Block Apps"`, an iCloud-synced shortcut runs on the iPhone and either calls Vibez via its URL scheme or uses Shortcuts' built-in "Set App Limit" action directly (which would let us skip Vibez entirely for the MVP).
+### What happens on first run
 
-Pick before writing code. Option 2 lets Peter prototype without paying for ADP first.
+1. Mac: user runs `/vibez:setup` (Claude Code) or invokes the `vibez-setup` skill (Codex). `setup.sh` generates a 4-word Vibez ID (`moss-pine-fox-jazz` style), stores it at `~/.config/vibez/vibez-id`, prints it.
+2. Phone: user enters that Vibez ID into the home-screen Setup card. `PushTokenRegistrar.setVibezId(...)` validates the format, persists to `UserDefaults["vibez.vibezId"]`, and calls `registerPushToken({fcmToken, vibezId, platform})`.
+3. Server: `registerPushToken` writes `{fcmToken, vibezId, createdAt, lastSeen}` to Firestore `tokens` db / `devices` collection, doc id = fcmToken.
+4. Mac: every subsequent hook (Stop, AskUserQuestion, etc.) calls `post_vibez` → POST to `/notify` with the Vibez ID and lifecycle payload.
+5. Server: `/notify` queries Firestore for all devices where `vibezId == X`, fans out via `getMessaging().sendEachForMulticast()`. APNs delivers to the phone, AppDelegate parses the payload, `NotifyClient.acceptPushUserInfo` publishes `lastMessage`, `ContentView.handleIncoming` raises overlay + shield.
+
+### Roadmap to App Store ship
+
+1. Family Controls Distribution Request (~3-week Apple review). Not yet submitted.
+2. App Check on the Cloud Functions (currently `invoker: "public"`; Vibez ID is the only secret).
+3. App Store review (~1-week typical).
