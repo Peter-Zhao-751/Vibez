@@ -11,13 +11,13 @@ private let handleIncomingLog = Logger(subsystem: "vibezlol.Vibez", category: "h
 
 struct ContentView: View {
     @State private var manager: ScreenTimeManager
-    // Singletons in prod so AppDelegate can deliver FCM pushes into the
-    // same lastMessage → handleIncoming pipeline (notifyClient) and
-    // restore the persisted Vibez ID at launch (registrar). Both are
-    // @Observable, so SwiftUI re-renders on their state changes
-    // without @State. Injectable for previews.
-    private let notifyClient: NotifyClient
-    private let registrar: PushTokenRegistrar
+    // @State-wrapped on purpose. With a plain `private let`, SwiftUI
+    // doesn't reliably hook the @Observable into this view's render
+    // dependency graph, so .onChange(of: notifyClient.lastMessage)
+    // silently stops firing and handleIncoming never runs. @State on
+    // an @Observable singleton is the canonical pattern.
+    @State private var notifyClient: NotifyClient
+    @State private var registrar: PushTokenRegistrar
     @State private var triggerStore: TriggerStore
     @State private var ignoreStore: IgnoreStore
     @State private var analytics: AnalyticsTracker
@@ -36,8 +36,8 @@ struct ContentView: View {
         // SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor) have to be built inside
         // this @MainActor body instead.
         _manager = State(initialValue: manager ?? ScreenTimeManager())
-        self.notifyClient = notifyClient ?? .shared
-        self.registrar = registrar ?? .shared
+        _notifyClient = State(initialValue: notifyClient ?? .shared)
+        _registrar = State(initialValue: registrar ?? .shared)
         _triggerStore = State(initialValue: triggerStore ?? TriggerStore())
         _ignoreStore = State(initialValue: ignoreStore ?? IgnoreStore())
         _analytics = State(initialValue: analytics ?? AnalyticsTracker())
