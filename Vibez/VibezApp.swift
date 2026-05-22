@@ -121,19 +121,6 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         pushLog.info("Remote push received: \(keys, privacy: .public)")
         NotifyClient.shared.acceptPushUserInfo(userInfo)
 
-        // Diagnostic: surface a visible "Received" local notification on
-        // every incoming APN so the server → phone path is verifiable
-        // without relying on the payload's own alert content.
-        let content = UNMutableNotificationContent()
-        content.title = "Received"
-        content.sound = .default
-        let request = UNNotificationRequest(
-            identifier: UUID().uuidString,
-            content: content,
-            trigger: nil
-        )
-        UNUserNotificationCenter.current().add(request) { _ in }
-
         // .newData tells iOS we did meaningful work — improves the chance
         // of getting future silent pushes delivered promptly.
         completionHandler(.newData)

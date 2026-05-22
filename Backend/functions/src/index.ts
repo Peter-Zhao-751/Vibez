@@ -94,10 +94,13 @@ export const registerPushToken = onCall(
  *   }
  *
  * We look up every device registered to that Vibez ID and fan an FCM
- * push out to each. The APNS payload mirrors what the old ntfy bridge
- * delivered — top-level title/body/event/shield/session/agent so the
- * iOS app's existing NotifyClient.acceptPushUserInfo parser keeps
- * working unchanged.
+ * push out to each. Pushes are SILENT (content-available:1, no aps.alert,
+ * apns-push-type:background) — iOS doesn't auto-display a banner. The
+ * iOS app's NotifyClient.acceptPushUserInfo parses the userInfo, then
+ * ContentView.handleIncoming applies the same armed / shield / ignored
+ * gating the old ntfy WebSocket path used. The app calls
+ * scheduleLocalNotification only when it decides a notification should
+ * actually be shown — matching the pre-FCM behavior exactly.
  */
 export const notify = onRequest(
   {invoker: "public"},
@@ -148,8 +151,13 @@ export const notify = onRequest(
     // Custom fields go at the top level of apns.payload (siblings of
     // aps). That's how iOS surfaces them in userInfo, matching the
     // shape NotifyClient.acceptPushUserInfo expects.
+    //
+    // `content-available: 1` makes this a silent push — iOS wakes the
+    // app to process the payload but doesn't display a banner on its
+    // own. The app then runs handleIncoming and may call
+    // scheduleLocalNotification if armed + shield rules say to.
     const apnsPayload: {
-      aps: {alert: {title: string; body: string}; sound: string};
+      aps: {"content-available": number};
       title: string;
       body: string;
       event?: string;
@@ -157,10 +165,7 @@ export const notify = onRequest(
       session?: string;
       agent?: string;
     } = {
-      aps: {
-        alert: {title, body: bodyText},
-        sound: "default",
-      },
+      aps: {"content-available": 1},
       title,
       body: bodyText,
     };
@@ -179,7 +184,17 @@ export const notify = onRequest(
       const response: BatchResponse =
         await getMessaging().sendEachForMulticast({
           tokens: chunk,
-          apns: {payload: apnsPayload},
+          apns: {
+            headers: {
+              // Required by iOS 13+. `background` matches the silent
+              // payload (content-available:1, no alert). `priority: 5`
+              // is the only priority Apple accepts for background
+              // pushes — `10` would be rejected with BadPriority.
+              "apns-push-type": "background",
+              "apns-priority": "5",
+            },
+            payload: apnsPayload,
+          },
         });
       success += response.successCount;
       failure += response.failureCount;
