@@ -110,6 +110,35 @@ post_vibez() {
         || log "send failed: ${title} (event=${event})"
 }
 
+# Per-session pending marker — set by PreToolUse:AskUserQuestion so the
+# Notification hook can skip its near-duplicate push (~5-7s after the
+# picker appears). PostToolUse:AskUserQuestion clears it; Stop and
+# UserPromptSubmit clear defensively so a stale marker can't suppress a
+# legitimate later Notification (e.g. a Bash permission prompt next turn).
+pending_marker_path() {
+    local sid="$1"
+    [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
+    printf '%s/pending.%s' "${CONFIG_DIR}" "${sid}"
+}
+
+mark_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 0
+    : >"${path}" 2>/dev/null || true
+}
+
+clear_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 0
+    rm -f "${path}" 2>/dev/null || true
+}
+
+has_pending() {
+    local sid="$1" path
+    path="$(pending_marker_path "${sid}")" || return 1
+    [ -f "${path}" ]
+}
+
 # True when the argument is a slash-command invocation — either the bare
 # "/foo" form (.prompt of a UserPromptSubmit) or the
 # "<command-name>...</command-name>" wrapper Claude Code stores in the
@@ -404,6 +433,7 @@ case "${EVENT}" in
         else
             post_vibez "${convo_title}" "${excerpt}" "done" "on" "${sid}" "cc"
         fi
+        clear_pending "${sid}"
         ;;
 
     pre-tool-use)
@@ -429,6 +459,7 @@ case "${EVENT}" in
             question="${question:0:159}…"
         fi
         post_vibez "${convo_title}" "${question}" "needs-input" "on" "${sid}" "cc"
+        mark_pending "${sid}"
         ;;
 
     post-tool-use)
@@ -457,6 +488,7 @@ case "${EVENT}" in
             answer="${answer:0:159}…"
         fi
         post_vibez "${convo_title}" "${answer}" "replied" "off" "${sid}" "cc"
+        clear_pending "${sid}"
         ;;
 
     user-prompt-submit)
@@ -479,6 +511,39 @@ case "${EVENT}" in
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
         post_vibez "${convo_title}" "${prompt}" "replied" "off" "${sid}" "cc"
+        clear_pending "${sid}"
+        ;;
+
+    notification)
+        # Claude Code fires Notification when Claude needs the user — either
+        # asking permission to run a tool (Bash, Edit, Write, etc.) or after
+        # ~60s of idle awaiting a response. This hook is the only signal for
+        # permission prompts because the plugin's PreToolUse matcher is
+        # AskUserQuestion-only.
+        #
+        # Skip when an AskUserQuestion PreToolUse just pushed for this
+        # session — Claude Code fires Notification ~5-7s after the picker
+        # appears, which would otherwise look like a duplicate. The marker
+        # is cleared by PostToolUse:AskUserQuestion (or Stop /
+        # UserPromptSubmit as a safety net).
+        sid="$(jq_get '.session_id' 'nosid')"
+        if has_pending "${sid}"; then
+            log "notification: skip (AskUserQuestion already pushed for ${sid})"
+            exit 0
+        fi
+
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
+        is_slash_command "${convo_title}" && exit 0
+
+        message="$(jq_get '.message')"
+        [ -z "${message}" ] && message="Claude needs your input."
+        if [ "${#message}" -gt 160 ]; then
+            message="${message:0:159}…"
+        fi
+        post_vibez "${convo_title}" "${message}" "needs-input" "on" "${sid}" "cc"
         ;;
 
     _selftest)
