@@ -113,8 +113,12 @@ post_vibez() {
 # Per-session pending marker — set by PreToolUse:AskUserQuestion so the
 # Notification hook can skip its near-duplicate push (~5-7s after the
 # picker appears). PostToolUse:AskUserQuestion clears it; Stop and
-# UserPromptSubmit clear defensively so a stale marker can't suppress a
-# legitimate later Notification (e.g. a Bash permission prompt next turn).
+# UserPromptSubmit clear defensively. Marker file holds an epoch-second
+# timestamp and auto-expires after PENDING_TTL_SECONDS, so a missed
+# PostToolUse (Claude Code crash, chat closed mid-question, etc.) can't
+# silently silence every later Notification for the rest of the session.
+PENDING_TTL_SECONDS=30
+
 pending_marker_path() {
     local sid="$1"
     [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
@@ -124,7 +128,7 @@ pending_marker_path() {
 mark_pending() {
     local sid="$1" path
     path="$(pending_marker_path "${sid}")" || return 0
-    : >"${path}" 2>/dev/null || true
+    date +%s >"${path}" 2>/dev/null || true
 }
 
 clear_pending() {
@@ -134,9 +138,16 @@ clear_pending() {
 }
 
 has_pending() {
-    local sid="$1" path
+    local sid="$1" path ts now
     path="$(pending_marker_path "${sid}")" || return 1
-    [ -f "${path}" ]
+    [ -f "${path}" ] || return 1
+    ts="$(cat "${path}" 2>/dev/null || echo 0)"
+    now="$(date +%s)"
+    if [ "$((now - ts))" -gt "${PENDING_TTL_SECONDS}" ]; then
+        rm -f "${path}" 2>/dev/null || true
+        return 1
+    fi
+    return 0
 }
 
 # True when the argument is a slash-command invocation — either the bare
@@ -527,20 +538,20 @@ case "${EVENT}" in
         # is cleared by PostToolUse:AskUserQuestion (or Stop /
         # UserPromptSubmit as a safety net).
         sid="$(jq_get '.session_id' 'nosid')"
+        message="$(jq_get '.message')"
+        log "notification: received (sid=${sid}, message=${message})"
+
         if has_pending "${sid}"; then
-            log "notification: skip (AskUserQuestion already pushed for ${sid})"
+            log "notification: skip — AskUserQuestion still pending for ${sid}"
             exit 0
         fi
 
-        # Filter out the 60s-idle reminder ("Claude is waiting for your
-        # input"). Claude Code fires Notification both for tool-permission
-        # prompts AND after ~60s of idle awaiting user input. The idle one
-        # is noise — Stop already pushed when the turn ended, so the user
-        # is just being re-pinged for the same conversation.
-        message="$(jq_get '.message')"
-        case "$(printf '%s' "${message}" | tr '[:upper:]' '[:lower:]')" in
-            *"waiting for your input"*)
-                log "notification: skip (idle reminder)"
+        # Filter out the 60s-idle reminder. Anchored prefix match against
+        # Claude Code's default idle text — won't accidentally catch a
+        # permission message that happens to contain the substring later.
+        case "${message}" in
+            "Claude is waiting"*)
+                log "notification: skip — idle reminder"
                 exit 0 ;;
         esac
 
@@ -548,7 +559,7 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        is_slash_command "${convo_title}" && exit 0
+        is_slash_command "${convo_title}" && { log "notification: skip — slash command title"; exit 0; }
 
         [ -z "${message}" ] && message="Claude needs your input."
         if [ "${#message}" -gt 160 ]; then
