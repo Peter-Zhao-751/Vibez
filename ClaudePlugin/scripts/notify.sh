@@ -474,31 +474,65 @@ case "${EVENT}" in
         ;;
 
     post-tool-use)
-        # AskUserQuestion just returned — the user picked an option (or
-        # clicked Clarify). Picker answers arrive as tool_result on the
-        # next user record, NOT as a typed prompt, so UserPromptSubmit
-        # doesn't fire. This is the only hook that can lift the shield
-        # the PreToolUse push raised.
+        # Two paths land here now that PostToolUse matches every tool:
+        #
+        # 1. AskUserQuestion just returned — the user picked an option
+        #    (or clicked Clarify). Picker answers arrive as tool_result
+        #    on the next user record, NOT as a typed prompt, so
+        #    UserPromptSubmit doesn't fire. This is the only hook that
+        #    can lift the shield the PreToolUse push raised. Always
+        #    push shield:off.
+        #
+        # 2. Any other tool — this fires whenever Claude runs a tool
+        #    (Bash, Edit, Write, …). When Claude needed permission, the
+        #    Notification hook fired earlier and set the pending marker;
+        #    the tool only ran because the user pressed 1/2 to grant it.
+        #    Push shield:off in that case and clear pending. When no
+        #    marker is set, Claude is just autonomously running tools
+        #    (accept-edits / bypass / pre-approved) — exit silently so
+        #    we don't drown the phone with one shield:off per tool call.
+        #
+        #    File existence is checked directly instead of has_pending
+        #    so the TTL doesn't apply: the marker's 30s window exists
+        #    only to dedup Notification's near-duplicate push, but the
+        #    user's permission response itself can take longer than
+        #    that. PostToolUse firing for the gated tool is itself
+        #    proof the user responded, no matter how long they took.
         tool_name="$(jq_get '.tool_name')"
-        [ "${tool_name}" = "AskUserQuestion" ] || exit 0
-
         sid="$(jq_get '.session_id' 'nosid')"
+
+        case "${tool_name}" in
+            "AskUserQuestion")
+                ;;
+            *)
+                marker="$(pending_marker_path "${sid}")" || exit 0
+                [ -f "${marker}" ] || exit 0
+                ;;
+        esac
+
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         is_slash_command "${convo_title}" && exit 0
 
-        # Tool response shape is "Your questions have been answered:
-        # \"<q>\"=\"<a>\"" on a normal pick, or "The user doesn't want
-        # to proceed…" on Clarify. Both mean the user interacted, so
-        # both should lift the shield.
-        answer="$(jq_get '.tool_response.content')"
-        [ -z "${answer}" ] && answer="(answered)"
-        if [ "${#answer}" -gt 160 ]; then
-            answer="${answer:0:159}…"
+        # AskUserQuestion's tool_response is the user's actual answer,
+        # which is meaningful body content. For shell/edit/etc. the
+        # response is command output that may be huge or contain
+        # secrets — keep it generic, mirroring the Codex side.
+        case "${tool_name}" in
+            "AskUserQuestion")
+                body="$(jq_get '.tool_response.content')"
+                [ -z "${body}" ] && body="(answered)"
+                ;;
+            *)
+                body="(approved: ${tool_name})"
+                ;;
+        esac
+        if [ "${#body}" -gt 160 ]; then
+            body="${body:0:159}…"
         fi
-        post_vibez "${convo_title}" "${answer}" "replied" "off" "${sid}" "cc"
+        post_vibez "${convo_title}" "${body}" "replied" "off" "${sid}" "cc"
         clear_pending "${sid}"
         ;;
 
@@ -566,6 +600,12 @@ case "${EVENT}" in
             message="${message:0:159}…"
         fi
         post_vibez "${convo_title}" "${message}" "needs-input" "on" "${sid}" "cc"
+        # Mark pending so the next PostToolUse can detect the user's
+        # response to this permission prompt and push shield:off. The
+        # AskUserQuestion path marks pending via PreToolUse; this is
+        # the equivalent for tool-permission prompts that arrive via
+        # Notification instead.
+        mark_pending "${sid}"
         ;;
 
     _selftest)

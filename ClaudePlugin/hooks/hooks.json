@@ -33,7 +33,6 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "AskUserQuestion",
         "hooks": [
           {
             "type": "command",
