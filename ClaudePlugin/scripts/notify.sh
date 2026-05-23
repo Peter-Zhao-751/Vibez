@@ -532,13 +532,24 @@ case "${EVENT}" in
             exit 0
         fi
 
+        # Filter out the 60s-idle reminder ("Claude is waiting for your
+        # input"). Claude Code fires Notification both for tool-permission
+        # prompts AND after ~60s of idle awaiting user input. The idle one
+        # is noise — Stop already pushed when the turn ended, so the user
+        # is just being re-pinged for the same conversation.
+        message="$(jq_get '.message')"
+        case "$(printf '%s' "${message}" | tr '[:upper:]' '[:lower:]')" in
+            *"waiting for your input"*)
+                log "notification: skip (idle reminder)"
+                exit 0 ;;
+        esac
+
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         is_slash_command "${convo_title}" && exit 0
 
-        message="$(jq_get '.message')"
         [ -z "${message}" ] && message="Claude needs your input."
         if [ "${#message}" -gt 160 ]; then
             message="${message:0:159}…"
