@@ -5,6 +5,7 @@
 
 import SwiftUI
 import FamilyControls
+import UIKit
 import OSLog
 
 private let handleIncomingLog = Logger(subsystem: "vibezlol.Vibez", category: "handleIncoming")
@@ -35,12 +36,15 @@ struct ContentView: View {
         // any defaults that touch @MainActor types (the whole project,
         // SWIFT_DEFAULT_ACTOR_ISOLATION=MainActor) have to be built inside
         // this @MainActor body instead.
-        _manager = State(initialValue: manager ?? ScreenTimeManager())
+        // .shared for the singletons so AppDelegate / NotifyClient and
+        // this view operate on the same state. Previews pass explicit
+        // instances and remain isolated from prod.
+        _manager = State(initialValue: manager ?? .shared)
         _notifyClient = State(initialValue: notifyClient ?? .shared)
         _registrar = State(initialValue: registrar ?? .shared)
         _triggerStore = State(initialValue: triggerStore ?? TriggerStore())
-        _ignoreStore = State(initialValue: ignoreStore ?? IgnoreStore())
-        _analytics = State(initialValue: analytics ?? AnalyticsTracker())
+        _ignoreStore = State(initialValue: ignoreStore ?? .shared)
+        _analytics = State(initialValue: analytics ?? .shared)
     }
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
@@ -49,8 +53,14 @@ struct ContentView: View {
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
+    /// Whether agent pings surface as an OS banner + sound. When off,
+    /// blocks still engage; the push just arrives silently (passive) in
+    /// Notification Center. Mirrored to the App Group by ScreenTimeManager
+    /// so VibezPushService honors it on the background path too.
+    @AppStorage("vibez.notifyBanners") private var notifyBanners = true
 
     @Environment(\.colorScheme) private var systemColorScheme
+    @Environment(\.scenePhase) private var scenePhase
 
     @State private var overlayQueue: [NtfyMessage] = []   // newest first
     @State private var showSettings = false
@@ -81,7 +91,7 @@ struct ContentView: View {
     }
 
     private var theme: Theme {
-        Theme.make(agent: agent, dark: effectiveDark)
+        Theme.make(agent: agent)
     }
 
     private var topOverlayMessage: NtfyMessage? { overlayQueue.first }
@@ -128,7 +138,6 @@ struct ContentView: View {
                 BlockedOverlay(
                     agent: agent,
                     theme: theme,
-                    dark: effectiveDark,
                     message: msg,
                     expiresAt: msg.sessionId.flatMap { manager.pendingTriggers[$0]?.expiresAt },
                     stackDepth: overlayQueue.count,
@@ -143,16 +152,22 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .animation(.easeInOut(duration: 0.4), value: agent)
+        .preferredColorScheme(appearance.colorScheme)
         .onAppear {
-            appearance.applyToWindows()
             syncSetupPresentation(animated: false)
             // Catch pushes that landed via AppDelegate while the view
             // wasn't actively observing — .onChange below won't fire
             // for those because the value was set before subscription.
+            // Also drain any NSE-written push file from the App Group
+            // so background-engaged blocks get an in-app overlay on
+            // first launch / cold start (not just on subsequent
+            // scenePhase transitions). Reload pendingTriggers *first*
+            // so handleIncoming (and subsequent user actions like
+            // Dismiss) see the NSE-added trigger instead of a stale
+            // empty in-memory dict.
+            manager.reloadFromAppGroup()
+            notifyClient.drainPendingPushFromAppGroup()
             processIfNew(notifyClient.lastMessage)
-        }
-        .onChange(of: appearance) { _, newPref in
-            newPref.applyToWindows()
         }
         .task {
             // Request notification permission early — the setup card
@@ -168,6 +183,27 @@ struct ContentView: View {
         }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             processIfNew(newValue)
+        }
+        // Catch the case where a push arrived while the scene was
+        // suspended: didReceiveRemoteNotification updated lastMessage
+        // in the background, but SwiftUI's .onChange isn't guaranteed
+        // to fire for value changes that happened while the view was
+        // not actively observing. .onAppear above only fires on first
+        // appearance — not on resume — so without this, opening the
+        // app via the icon (not the banner tap) leaves the trigger /
+        // shield in stale state.
+        .onChange(of: scenePhase) { _, newPhase in
+            if newPhase == .active {
+                // Drain anything the NSE wrote to the App Group while
+                // we were suspended before processing — this sets
+                // lastMessage to the most recent NSE-handled push so
+                // handleIncoming can enqueue its overlay. Reload
+                // pendingTriggers first so user-driven actions (Dismiss)
+                // see the NSE-added trigger instead of an empty cache.
+                manager.reloadFromAppGroup()
+                notifyClient.drainPendingPushFromAppGroup()
+                processIfNew(notifyClient.lastMessage)
+            }
         }
         .onChange(of: manager.pendingTriggers) { _, newPending in
             // A non-top entry's per-session timer expired in the
@@ -198,7 +234,6 @@ struct ContentView: View {
     private var mainScreen: some View {
         VStack(spacing: 0) {
             TopBar(
-                isDark: effectiveDark,
                 theme: theme,
                 onOpenSettings: { showSettings = true }
             )
@@ -329,6 +364,14 @@ struct ContentView: View {
     private func dismissTopOverlay() {
         guard let msg = overlayQueue.first else { return }
         if let sid = msg.sessionId, !sid.isEmpty, sid != "nosid" {
+            // Sync from App Group first — the NSE may have engaged
+            // the shield for this session in the background, but
+            // host's in-memory pendingTriggers is empty until the
+            // tick reloads. Without this, resolveTrigger no-ops
+            // (removeValue returns nil) and recomputeBlocking →
+            // clearShield never fires, so the apps stay blocked
+            // even though the user explicitly dismissed.
+            manager.reloadFromAppGroup()
             manager.resolveTrigger(sessionId: sid)
             triggerStore.clearNeedsReply(forSession: sid)
         }
@@ -348,6 +391,26 @@ struct ContentView: View {
         withAnimation(.easeInOut(duration: 0.32)) {
             _ = overlayQueue.removeFirst()
         }
+    }
+
+    /// Whether an overlay should be surfaced for this message. A
+    /// session-tagged message must have a live (present, non-expired)
+    /// trigger behind it — that trigger is the clock the overlay's
+    /// countdown and its `onExpire` auto-dismiss both read from
+    /// (`BlockedOverlay` gates the whole `TimelineView` on
+    /// `expiresAt != nil`). Without a live trigger the overlay shows no
+    /// timer and can never self-close, so the only escape is the Dismiss
+    /// button — exactly the stuck state users hit on the background-replay
+    /// path, where `tick()` can prune the expired trigger before
+    /// `drainPendingPushFromAppGroup` replays its overlay. Untagged
+    /// messages (no session) carry no trigger by design and keep the old
+    /// informational-overlay behavior.
+    private func shouldEnqueueOverlay(for message: NtfyMessage) -> Bool {
+        guard let sid = message.sessionId, !sid.isEmpty, sid != "nosid" else {
+            return true
+        }
+        guard let trigger = manager.pendingTriggers[sid] else { return false }
+        return !trigger.isExpired(now: Date())
     }
 
     /// Push a fresh ping onto the queue. If an entry exists with the
@@ -437,18 +500,44 @@ struct ContentView: View {
                     )
                     return
                 }
-                manager.addTrigger(sessionId: sid, durationSeconds: durationFor(message))
-                // Bump per-app block counts only when the shield
-                // actually engages — same guard as addTrigger above.
-                analytics.recordShieldActivation(
-                    applicationTokens: manager.selection.applicationTokens
-                )
+                // Skip addTrigger when the NSE already did it in the
+                // background — re-adding would reset the per-session
+                // timer to now (giving the user extra free time).
+                if !message.wasBackgroundEngaged {
+                    manager.addTrigger(sessionId: sid, durationSeconds: durationFor(message))
+                }
+                // Per-app block counts are no longer bumped here — the
+                // VibezShield extension tallies them per actual open, so
+                // "most blocked" reflects what you hit, not the whole list.
             }
-            manager.publishShieldContext(from: message)
+            // Skip context refresh on drain — NSE wrote it. Otherwise
+            // we'd overwrite with the same data.
+            if !message.wasBackgroundEngaged {
+                manager.publishShieldContext(from: message)
+            }
 
-            notifyClient.scheduleLocalNotification(message)
-            withAnimation(.easeInOut(duration: 0.32)) {
-                enqueueOverlay(message)
+            // Skip local notification on drain — iOS already displayed
+            // the NSE-modified banner when the push arrived. Otherwise
+            // the user sees a second banner the moment they open Vibez.
+            // Also skip when the user has turned banners off — the shield
+            // still engaged above; we just don't interrupt them.
+            if !message.wasBackgroundEngaged && notifyBanners {
+                notifyClient.scheduleLocalNotification(message)
+            }
+            // Only surface the overlay when a live trigger backs it. On
+            // the background-replay path (wasBackgroundEngaged), tick()
+            // can prune the NSE-engaged block right before
+            // drainPendingPushFromAppGroup replays it; re-enqueuing then
+            // strands a timerless overlay that only the Dismiss button can
+            // clear (the foreground race). The foreground path called
+            // addTrigger just above, so a live trigger is always present
+            // there and this stays a no-op guard.
+            if shouldEnqueueOverlay(for: message) {
+                withAnimation(.easeInOut(duration: 0.32)) {
+                    enqueueOverlay(message)
+                }
+            } else {
+                handleIncomingLog.info("→ stale replay, no live trigger — skipping overlay")
             }
 
         case .none:
@@ -456,7 +545,9 @@ struct ContentView: View {
             // Plain push (test ping, third-party producer, etc.) — show
             // the overlay as we always did.
             recordTrigger(from: message)
-            notifyClient.scheduleLocalNotification(message)
+            if !message.wasBackgroundEngaged && notifyBanners {
+                notifyClient.scheduleLocalNotification(message)
+            }
             withAnimation(.easeInOut(duration: 0.32)) {
                 enqueueOverlay(message)
             }
@@ -479,15 +570,21 @@ struct ContentView: View {
                     agent: agent,
                     listening: manager.armed,
                     size: mascotSize(for: availableHeight),
-                    gap: 4
+                    gap: 4,
+                    focused: manager.focusMode
                 )
                 .offset(y: mascotOffset())
+                .background {
+                    if manager.focusMode {
+                        FocusHalo(color: theme.accent)
+                    }
+                }
 
                 // Ground line — solid, ~60% of available width, sits
                 // just under the mascot's feet so it reads as standing
-                // on the ground.
+                // on the ground. Tints to the accent while focused.
                 Rectangle()
-                    .fill(theme.fgMute.opacity(0.45))
+                    .fill(manager.focusMode ? theme.accent.opacity(0.85) : theme.fgMute.opacity(0.45))
                     .frame(width: availableWidth * 0.6, height: 1.5)
             }
             .frame(
@@ -497,6 +594,10 @@ struct ContentView: View {
             .padding(.horizontal, 10)
             .padding(.top, unlockedLayoutExpanded ? 0 : 8)
             .padding(.bottom, unlockedLayoutExpanded ? 0 : 18)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleFocusMode() }
+
+            focusStatusLabel
 
             if unlockedLayoutExpanded {
                 Spacer(minLength: 0)
@@ -533,7 +634,6 @@ struct ContentView: View {
 
             AnalyticsPanel(
                 analytics: analytics,
-                triggerStore: triggerStore,
                 theme: theme,
                 onSelectMostBlocked: { showSettings = true }
             )
@@ -549,6 +649,41 @@ struct ContentView: View {
 
     private func mascotOffset() -> CGFloat {
         unlockedLayoutExpanded ? -(TopBarLayout.bottomPadding / 2) : 0
+    }
+
+    @ViewBuilder
+    private var focusStatusLabel: some View {
+        if manager.focusMode {
+            FocusPill(
+                startedAt: manager.focusModeStartedAt,
+                theme: theme,
+                onTap: { toggleFocusMode() }
+            )
+            .padding(.top, 8)
+            .transition(.opacity.combined(with: .move(edge: .top)))
+        } else if manager.armed {
+            Text("tap to lock in")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .tracking(1.5)
+                .foregroundStyle(theme.fgFaint)
+                .padding(.top, 8)
+                .transition(.opacity)
+        }
+    }
+
+    /// Tap the mascot to start/stop a manual focus hold. Only meaningful
+    /// while armed. With no apps selected, route to Settings so the user
+    /// can pick apps rather than engage an empty shield.
+    private func toggleFocusMode() {
+        guard manager.armed else { return }
+        guard manager.hasSelection else {
+            showSettings = true
+            return
+        }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+            manager.setFocusMode(!manager.focusMode)
+        }
     }
 
     private func mascotSize(for availableHeight: CGFloat) -> CGFloat {
@@ -642,15 +777,16 @@ private func previewTriggerStore(events: [TriggerEvent]) -> TriggerStore {
 }
 
 /// Pre-bakes a DailyStats JSON into UserDefaults so the analytics panel
-/// shows non-zero counters without having to replay messages. Per-app
-/// block counts are left empty — ApplicationToken can't be synthesized
-/// from outside Family Controls, so the "most blocked" tile renders the
-/// em-dash placeholder.
+/// shows non-zero counters without having to replay messages. The "most
+/// blocked" tile reads its per-app tally from the App Group file (written
+/// only by the shield extension on-device), so it renders the em-dash
+/// placeholder in previews.
 private func previewAnalytics(
     pings: Int,
     chats: Int,
     replies: Int,
-    replyLengths: [Int] = []
+    replyLengths: [Int] = [],
+    focusSeconds: TimeInterval = 0
 ) -> AnalyticsTracker {
     let stats = DailyStats(
         date: Calendar.current.startOfDay(for: Date()),
@@ -658,7 +794,8 @@ private func previewAnalytics(
         responseCount: replies,
         responseLengths: replyLengths,
         pingCount: pings,
-        appBlockCounts: [:]
+        focusSeconds: focusSeconds,
+        shieldArmedAt: nil
     )
     if let data = try? JSONEncoder().encode(stats) {
         UserDefaults.standard.set(data, forKey: "vibez.analytics.v1")
@@ -699,6 +836,7 @@ private func previewContent(
     agent: Agent = .claude,
     appearance: AppearancePref = .dark,
     armed: Bool = true,
+    focusMode: Bool = false,
     pendingTriggers: [PendingTrigger] = [],
     events: [TriggerEvent] = [],
     analytics: AnalyticsTracker? = nil
@@ -708,7 +846,8 @@ private func previewContent(
     return ContentView(
         manager: ScreenTimeManager.previewManager(
             armed: armed,
-            pendingTriggers: pendingTriggers
+            pendingTriggers: pendingTriggers,
+            focusMode: focusMode
         ),
         notifyClient: NotifyClient.previewClient(),
         registrar: PushTokenRegistrar.previewRegistrar(
@@ -740,6 +879,17 @@ private func previewContent(
     // armed, just waiting.
     previewContent(
         armed: true,
+        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+    )
+}
+
+#Preview("Focus mode · dark") {
+    // Armed and holding a manual focus block: determined mascot, accent
+    // halo + ground line, and the live "Focus mode · MM:SS · tap to
+    // release" pill. No triggers — the shield is held by the tap alone.
+    previewContent(
+        armed: true,
+        focusMode: true,
         analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
     )
 }
@@ -787,7 +937,8 @@ private func previewContent(
             pings: 28,
             chats: 9,
             replies: 7,
-            replyLengths: [42, 78, 110, 64, 130, 88, 92]
+            replyLengths: [42, 78, 110, 64, 130, 88, 92],
+            focusSeconds: 18 * 60
         )
     )
 }
@@ -820,7 +971,8 @@ private func previewContent(
             pings: 64,
             chats: 14,
             replies: 11,
-            replyLengths: [40, 62, 110, 88, 56, 130, 74, 92, 48, 102, 80]
+            replyLengths: [40, 62, 110, 88, 56, 130, 74, 92, 48, 102, 80],
+            focusSeconds: 2 * 3600 + 14 * 60
         )
     )
 }
@@ -854,7 +1006,8 @@ private func previewContent(
             pings: 51,
             chats: 12,
             replies: 9,
-            replyLengths: [56, 88, 120, 72, 64, 96, 80, 110, 48]
+            replyLengths: [56, 88, 120, 72, 64, 96, 80, 110, 48],
+            focusSeconds: 1 * 3600 + 47 * 60
         )
     )
 }

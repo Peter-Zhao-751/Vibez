@@ -64,17 +64,18 @@ struct MascotForAgent: View {
     let listening: Bool
     let size: CGFloat
     var gap: CGFloat = 6
+    var focused: Bool = false
 
     var body: some View {
         switch agent {
         case .claude:
-            ClaudeMascot(listening: listening, size: size)
+            ClaudeMascot(listening: listening, size: size, focused: focused)
         case .codex:
-            CodexMascot(listening: listening, size: size)
+            CodexMascot(listening: listening, size: size, focused: focused)
         case .both:
             HStack(alignment: .bottom, spacing: gap) {
-                ClaudeMascot(listening: listening, size: size * 0.78)
-                CodexMascot(listening: listening, size: size * 0.78)
+                ClaudeMascot(listening: listening, size: size * 0.78, focused: focused)
+                CodexMascot(listening: listening, size: size * 0.78, focused: focused)
             }
         }
     }
@@ -143,6 +144,7 @@ private struct BodyBob: ViewModifier {
 struct ClaudeMascot: View {
     let listening: Bool
     let size: CGFloat
+    var focused: Bool = false
     @State private var expression: Expression = .open
 
     private let bodyColor = Theme.claudeOrange
@@ -162,7 +164,7 @@ struct ClaudeMascot: View {
 //                .frame(width: size * 0.84, height: size * 0.06)
 //                .offset(x: size * 0.08, y: size * 0.58)
             // Eyes
-            ClaudeEyes(expression: listening ? expression : .blink, color: dark)
+            ClaudeEyes(expression: focused ? .squint : (listening ? expression : .blink), color: dark)
                 .frame(width: size, height: h)
             // Sleeping z's
             if !listening {
@@ -172,7 +174,7 @@ struct ClaudeMascot: View {
             }
         }
         .frame(width: size, height: h, alignment: .topLeading)
-        .modifier(ExpressionCycler(listening: listening, expression: $expression))
+        .modifier(ExpressionCycler(listening: listening && !focused, expression: $expression))
         .modifier(BodyBob(listening: listening))
     }
 }
@@ -258,6 +260,7 @@ private struct ChevronShape: Shape {
 struct CodexMascot: View {
     let listening: Bool
     let size: CGFloat
+    var focused: Bool = false
     @State private var expression: Expression = .open
     @State private var cursorOn: Bool = true
 
@@ -302,7 +305,7 @@ struct CodexMascot: View {
 
             // Eyes
             CodexEyes(
-                expression: listening ? expression : .open, // arches when sleeping too
+                expression: focused ? .squint : (listening ? expression : .open), // arches when sleeping too
                 color: eyeColor,
                 listening: listening
             )
@@ -373,7 +376,7 @@ struct CodexMascot: View {
             }
         }
         .frame(width: w, height: h, alignment: .topLeading)
-        .modifier(ExpressionCycler(listening: listening, expression: $expression))
+        .modifier(ExpressionCycler(listening: listening && !focused, expression: $expression))
         .modifier(BodyBob(listening: listening))
         .task(id: listening) {
             if !listening { return }
@@ -472,3 +475,15 @@ private struct ArchEyeShape: Shape {
         return p
     }
 }
+
+#if DEBUG
+#Preview("Mascot · focused") {
+    HStack(spacing: 28) {
+        VStack { ClaudeMascot(listening: true, size: 110); Text("listening").font(.caption2) }
+        VStack { ClaudeMascot(listening: true, size: 110, focused: true); Text("focused").font(.caption2) }
+        VStack { CodexMascot(listening: true, size: 110, focused: true); Text("focused").font(.caption2) }
+    }
+    .padding()
+    .preferredColorScheme(.dark)
+}
+#endif

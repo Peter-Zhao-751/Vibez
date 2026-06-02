@@ -219,7 +219,6 @@ enum TopBarLayout {
 }
 
 struct TopBar: View {
-    let isDark: Bool
     let theme: Theme
     let onOpenSettings: () -> Void
 
@@ -525,29 +524,12 @@ private struct HorizontalFadeScroll<Content: View>: View {
 // MARK: - Analytics panel
 
 /// Today-only usage summary. Reads counts straight from the
-/// `AnalyticsTracker` (resets at local midnight) and derives avg
-/// time-to-reply from `TriggerStore` events stamped with `repliedAt`.
+/// `AnalyticsTracker` (resets at local midnight) and shows total shield-up
+/// time today, including any currently-running interval.
 struct AnalyticsPanel: View {
     let analytics: AnalyticsTracker
-    let triggerStore: TriggerStore
     let theme: Theme
     let onSelectMostBlocked: () -> Void
-
-    private var avgReplyDisplay: String {
-        guard let seconds = todaysAvgReplySeconds else { return "—" }
-        return formatDuration(seconds)
-    }
-
-    private var todaysAvgReplySeconds: TimeInterval? {
-        let startOfDay = Calendar.current.startOfDay(for: Date())
-        let intervals = triggerStore.events.compactMap { event -> TimeInterval? in
-            guard let replied = event.repliedAt,
-                  event.receivedAt >= startOfDay else { return nil }
-            return replied.timeIntervalSince(event.receivedAt)
-        }
-        guard !intervals.isEmpty else { return nil }
-        return intervals.reduce(0, +) / Double(intervals.count)
-    }
 
     private func formatDuration(_ seconds: TimeInterval) -> String {
         if seconds < 60 { return "\(Int(seconds.rounded()))s" }
@@ -580,11 +562,19 @@ struct AnalyticsPanel: View {
                     label: "replies",
                     theme: theme
                 )
-                AnalyticsColumn(
-                    value: avgReplyDisplay,
-                    label: "avg reply",
-                    theme: theme
-                )
+                // TimelineView nudges this column every 30s so an
+                // in-flight focus interval visibly ticks up rather than
+                // freezing until the next push lands. focusSecondsToday
+                // recomputes the running delta from Date() each render.
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    AnalyticsColumn(
+                        value: analytics.focusSecondsToday > 0
+                            ? formatDuration(analytics.focusSecondsToday)
+                            : "—",
+                        label: "focus",
+                        theme: theme
+                    )
+                }
                 MostBlockedColumn(
                     tokens: analytics.topBlockedApps(limit: 3),
                     theme: theme,
@@ -1191,13 +1181,13 @@ struct RecentTriggersSection: View {
 
 struct AccentGlow: View {
     let theme: Theme
-    let dark: Bool
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Ellipse()
             .fill(
                 RadialGradient(
-                    colors: [theme.accent.opacity(dark ? 0.20 : 0.14), .clear],
+                    colors: [theme.accent.opacity(colorScheme == .dark ? 0.20 : 0.14), .clear],
                     center: .top,
                     startRadius: 0,
                     endRadius: 320
@@ -1205,6 +1195,80 @@ struct AccentGlow: View {
             )
             .frame(height: 360)
             .offset(y: -120)
+            .allowsHitTesting(false)
+    }
+}
+
+// MARK: - Focus mode
+
+/// Live status pill shown under the mascot while a manual focus hold is
+/// active. Ticks the elapsed time once a second and is itself a tap target
+/// to release the hold.
+struct FocusPill: View {
+    let startedAt: Date?
+    let theme: Theme
+    var onTap: () -> Void = {}
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            HStack(spacing: 6) {
+                Image(systemName: "scope")
+                    .font(.system(size: 11, weight: .bold))
+                Text("Focus mode")
+                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
+                    .tracking(1)
+                Text("·").opacity(0.6)
+                Text(elapsed(now: context.date))
+                    .font(.system(size: 12, weight: .bold, design: .monospaced))
+                    .monospacedDigit()
+                Text("· tap to release")
+                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                    .opacity(0.85)
+            }
+            .foregroundStyle(theme.onAccent)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(Capsule().fill(theme.accent))
+        }
+        .contentShape(Capsule())
+        .onTapGesture { onTap() }
+        .accessibilityLabel("Focus mode active. Double tap to release.")
+    }
+
+    private func elapsed(now: Date) -> String {
+        guard let startedAt else { return "0:00" }
+        let total = max(0, Int(now.timeIntervalSince(startedAt)))
+        let m = total / 60
+        let s = total % 60
+        if m >= 60 {
+            return String(format: "%d:%02d:%02d", m / 60, m % 60, s)
+        }
+        return String(format: "%d:%02d", m, s)
+    }
+}
+
+/// Soft pulsing accent glow placed behind the mascot while focused.
+/// Purely decorative — never eats taps.
+struct FocusHalo: View {
+    let color: Color
+    @State private var pulse = false
+
+    var body: some View {
+        Circle()
+            .fill(
+                RadialGradient(
+                    colors: [color.opacity(0.45), color.opacity(0.0)],
+                    center: .center,
+                    startRadius: 2,
+                    endRadius: 110
+                )
+            )
+            .frame(width: 220, height: 220)
+            .scaleEffect(pulse ? 1.08 : 0.92)
+            .opacity(pulse ? 0.9 : 0.55)
+            .blur(radius: 8)
+            .animation(.easeInOut(duration: 1.8).repeatForever(autoreverses: true), value: pulse)
+            .onAppear { pulse = true }
             .allowsHitTesting(false)
     }
 }
