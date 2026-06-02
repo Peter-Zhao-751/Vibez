@@ -5,6 +5,7 @@ import {getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getMessaging, BatchResponse} from "firebase-admin/messaging";
 import * as logger from "firebase-functions/logger";
 import {clampDuration, buildApnsPayload, APNS_HEADERS} from "./scheduling.js";
+import {onTaskDispatched} from "firebase-functions/tasks";
 
 initializeApp();
 setGlobalOptions({maxInstances: 10});
@@ -283,5 +284,52 @@ export const notify = onRequest(
     res.status(200).json({
       total: apnsTokens.length, success, failure, errors, web: hasWeb,
     });
+  }
+);
+
+/**
+ * Cloud Tasks target. Fires at a block's expiry + buffer and sends a
+ * per-session `shield:off` carrying `reason:"timeout"` to one device.
+ * The NSE applies it ONLY if that session is actually due (design spec
+ * §3), so a stale or duplicate dispatch is a harmless no-op. Best-
+ * effort backup under the on-device prune.
+ */
+export const dispatchUnblock = onTaskDispatched(
+  {
+    retryConfig: {maxAttempts: 3, minBackoffSeconds: 5},
+    rateLimits: {maxConcurrentDispatches: 20},
+  },
+  async (req) => {
+    const d = (req.data ?? {}) as Record<string, unknown>;
+    const fcmToken = typeof d.fcmToken === "string" ? d.fcmToken : "";
+    if (!fcmToken) return;
+
+    const payload = buildApnsPayload({
+      title: typeof d.title === "string" ? d.title : "Vibez",
+      body: typeof d.body === "string" ? d.body : "",
+      event: typeof d.event === "string" ? d.event : undefined,
+      shield: "off",
+      session: typeof d.session === "string" ? d.session : undefined,
+      agent: typeof d.agent === "string" ? d.agent : undefined,
+      reason: "timeout",
+    });
+
+    try {
+      await getMessaging().send({
+        token: fcmToken,
+        apns: {headers: APNS_HEADERS, payload},
+      });
+      logger.info("dispatchUnblock sent", {
+        session: d.session,
+        tokenPrefix: fcmToken.slice(0, 12),
+      });
+    } catch (e) {
+      const code = (e as {code?: string})?.code;
+      logger.warn("dispatchUnblock failed", {code, session: d.session});
+      if (code === "messaging/registration-token-not-registered") {
+        await tokensDb.collection(DEVICES).doc(fcmToken).delete()
+          .catch(() => undefined);
+      }
+    }
   }
 );
