@@ -57,6 +57,10 @@ struct SettingsView: View {
 
     private func dismissSheet() {
         vibezIdFocused = false
+        // Push any block-duration edits to the server so it schedules
+        // timeout unblocks with the latest values. reregister() re-reads
+        // the durations from UserDefaults. Design spec §1.
+        Task { await registrar.reregister() }
         isPresented = false
         dismiss()
     }
