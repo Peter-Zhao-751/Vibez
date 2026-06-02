@@ -10,7 +10,7 @@
 
 Vibez connects Claude Code and Codex lifecycle events to an iOS Screen Time shield. When your agent stops, asks for permission, or needs a reply, your selected apps lock until you return.
 
-<sub>iOS Screen Time API · Claude Code plugin · Codex plugin · ntfy bridge</sub>
+<sub>iOS Screen Time API · Claude Code plugin · Codex plugin · Firebase Cloud Messaging</sub>
 
 <br><br>
 
@@ -26,25 +26,27 @@ Coding agents create a weird failure mode: the work is automated, but your atten
 
 | Agent event | Vibez plugin | iOS app |
 |---|---|---|
-| First session after install | Generates a private ntfy topic and shows the subscribe URL. | Subscribes to the same topic. |
-| Permission request or explicit notification | Sends a `needs-input` push with `shield:on`. | Records the trigger, shows the message, and applies the Screen Time shield. |
+| First session after install | Generates a private 4-word Vibez ID and prints it. | Enter the ID once in the Setup card to pair this Mac with your phone. |
+| Permission request, question, or idle prompt | Sends a `needs-input` push with `shield:on`. | Records the trigger, shows the message, and applies the Screen Time shield. |
 | Agent stops after a response | Sends a `done` push with a short assistant excerpt and `shield:on`. | Keeps selected apps blocked for the configured window. |
 | You submit the next prompt | Sends a `replied` push with `shield:off`. | Clears that session's trigger and lifts the shield when no triggers remain. |
 
-The Claude Code and Codex plugins share one topic at `~/.config/vibez/topic`, so one phone subscription can cover both agents.
+The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-id`, so a single pairing on your phone covers both agents.
 
 ## Components
 
 | Path | Status | Purpose |
 |---|---|---|
-| [`ClaudePlugin/`](ClaudePlugin/) | Working | Claude Code plugin for `SessionStart`, `Notification`, `Stop`, and `UserPromptSubmit` hooks. |
-| [`CodexPlugin/`](CodexPlugin/) | Working | Codex plugin for `SessionStart`, `PermissionRequest`, `Stop`, and `UserPromptSubmit` hooks. |
-| [`Vibez/`](Vibez/) | Local build | SwiftUI iOS app that listens to ntfy, records recent triggers, and applies Family Controls / Managed Settings shields. |
+| [`ClaudePlugin/`](ClaudePlugin/) | Working | Claude Code plugin for `SessionStart`, `Notification`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
+| [`CodexPlugin/`](CodexPlugin/) | Working | Codex plugin for `SessionStart`, `PermissionRequest`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
+| [`Vibez/`](Vibez/) | Local build | SwiftUI iOS app that receives FCM pushes, records recent triggers, and applies Family Controls / Managed Settings shields. |
+| [`Backend/`](Backend/) | Working | Firebase Cloud Functions (`registerPushToken`, `notify`, `dispatchUnblock`) that pair devices and fan out pushes via FCM. |
+| [`VibezExtension/`](VibezExtension/) | Local build | Chrome (MV3) extension that mirrors the block on desktop browsers. |
 | [`assets/`](assets/) | Working assets | Logo, glyph, icon, and README artwork. |
 
 ## Install Agent Plugins
 
-Install either plugin, or install both. They share the same ntfy topic automatically.
+Install either plugin, or install both. They pair to the same Vibez ID automatically.
 
 ### Claude Code
 
@@ -53,7 +55,7 @@ Install either plugin, or install both. They share the same ntfy topic automatic
 /plugin install vibez@plugin
 ```
 
-Then open Claude Code. The first session prints your private subscribe URL. Run `/vibez:setup` to show it again with a QR code, or `/vibez:setup test` to send a test push.
+Then open Claude Code. The first session prints your private 4-word Vibez ID. Run `/vibez:setup` to show it again, or `/vibez:setup test` to send a test push.
 
 Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md)
 
@@ -61,10 +63,10 @@ Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md)
 
 ```sh
 codex plugin marketplace add Peter-Zhao-751/Vibez
-codex plugin install vibez-codex@vibez
+codex plugin install vibez@vibez
 ```
 
-Then open Codex. The first session prints your private subscribe URL. You can later ask Codex to show your Vibez URL or send a test push.
+Then open Codex. The first session prints your private 4-word Vibez ID. You can later ask Codex to show your Vibez ID or send a test push.
 
 Full details: [`CodexPlugin/README.md`](CodexPlugin/README.md)
 
@@ -72,7 +74,7 @@ Full details: [`CodexPlugin/README.md`](CodexPlugin/README.md)
 
 The iOS app is built around Apple's `FamilyControls` and `ManagedSettings` frameworks:
 
-1. Paste or scan your ntfy subscribe URL.
+1. Enter your 4-word Vibez ID.
 2. Grant notification permission.
 3. Grant Screen Time / Family Controls permission.
 4. Pick the apps, categories, or websites to shield.
@@ -82,21 +84,20 @@ Distribution is still gated by Apple. Local device builds need a paid Apple Deve
 
 ## Configuration
 
-Both plugins read the same environment variables:
+Both plugins read the same optional environment overrides:
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `NTFY_TOPIC` | Auto-generated | Override the shared topic. Useful when you want multiple machines on one subscription. |
-| `NTFY_SERVER` | `https://ntfy.sh` | Use a self-hosted ntfy server. |
-| `NTFY_AUTH` | unset | Bearer token for protected ntfy topics. |
+| `VIBEZ_ID` | from `~/.config/vibez/vibez-id` | Force a specific Vibez ID — e.g. to drive several machines from one ID without copying the file. |
+| `VIBEZ_BACKEND_URL` | `https://us-central1-vibez-backend.cloudfunctions.net` | Point the plugins at a different Firebase deployment. |
 
-The generated topic and plugin log live in `~/.config/vibez/`.
+The generated Vibez ID and a debug log live in `~/.config/vibez/`.
 
 ## Privacy
 
-Public ntfy topics are secret-by-name. Anyone with the topic URL can publish to it and read messages from it. Vibez generates a 32-character random topic by default, but you should rotate it if it appears in a screenshot, stream, log, or shared terminal.
+Your Vibez ID is a shared secret: anyone who learns it can push notifications — and raise shields — on your phone. The four-word ID carries ~44 bits of entropy, enough to make guessing impractical, but rotate it with `/vibez:setup regenerate` if it ever appears in a screenshot, stream, log, or shared terminal.
 
-For stricter privacy, self-host ntfy and set `NTFY_SERVER` and `NTFY_AUTH`.
+The push pipeline runs on the project owner's Firebase project. The APNs auth key (`.p8`) lives in Firebase Cloud Messaging and never ships to clients.
 
 See the full [Privacy Policy](PRIVACY.md) for what data the iOS app handles and what stays on your device.
 
@@ -105,8 +106,12 @@ See the full [Privacy Policy](PRIVACY.md) for what data the iOS app handles and 
 ```text
 Vibez/
 ├── Vibez/                  iOS app (SwiftUI, Screen Time API)
+├── VibezShield/            Shield Configuration Extension (custom shield UI)
+├── VibezPushService/       Notification Service Extension (engages the shield pre-banner)
 ├── ClaudePlugin/           Claude Code plugin
 ├── CodexPlugin/            Codex plugin
+├── Backend/                Firebase Cloud Functions (push fan-out + scheduling)
+├── VibezExtension/         Chrome (MV3) browser companion
 ├── assets/                 Logos, icons, lockups, glyphs
 ├── docs/                   Design notes and implementation plans
 ├── Vibez.xcodeproj/
