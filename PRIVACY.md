@@ -1,6 +1,6 @@
 # Vibez - Privacy Policy
 
-_Last updated: June 1, 2026_
+_Last updated: June 2, 2026_
 
 Vibez is a personal focus app. You choose which of your own apps to shield, and
 Vibez blocks them during focus sessions - including, optionally, when an AI
@@ -72,5 +72,4 @@ by the "Last updated" date above.
 
 ## Contact
 
-Questions or deletion requests: **support@vibez.lol** _(replace with your real
-support email before publishing)._
+Questions or deletion requests: **pzhaoothermail@gmail.com**

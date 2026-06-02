@@ -98,6 +98,8 @@ Public ntfy topics are secret-by-name. Anyone with the topic URL can publish to 
 
 For stricter privacy, self-host ntfy and set `NTFY_SERVER` and `NTFY_AUTH`.
 
+See the full [Privacy Policy](PRIVACY.md) for what data the iOS app handles and what stays on your device.
+
 ## Repo Layout
 
 ```text

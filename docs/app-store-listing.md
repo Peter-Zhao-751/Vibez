@@ -101,8 +101,8 @@ _(Apple prepends the © automatically. Your Apple account shows "Jinhe" - use th
 matching legal name or entity.)_
 
 ## 9. URLs  **[you]**
-- **Privacy Policy URL** (required): host `docs/privacy-policy.md` publicly (GitHub
-  Pages renders Markdown) and paste the URL.
+- **Privacy Policy URL** (required): https://github.com/Peter-Zhao-751/Vibez/blob/main/PRIVACY.md
+  (GitHub renders the Markdown). Swap in a custom-domain URL if you add one later.
 - **Support URL** (required): a one-page site or public gist with a contact method.
 - **Marketing URL** (optional): leave blank or link a landing page.
 
