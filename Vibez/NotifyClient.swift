@@ -133,6 +133,14 @@ final class NotifyClient {
         _ userInfo: [AnyHashable: Any],
         wasBackgroundEngaged: Bool = false
     ) {
+        // Timeout unblocks are the server's backup layer. The NSE applies
+        // them (if due), and while we're awake the 1 Hz prune owns expiry.
+        // The host must NOT act here — resolving unconditionally would
+        // drop a session that may have been re-pinged. (Design spec §3.)
+        if (userInfo["reason"] as? String) == "timeout" {
+            log.info("acceptPushUserInfo: ignoring reason=timeout (NSE + prune own it)")
+            return
+        }
         var msg = NtfyMessage(
             id: (userInfo["id"] as? String) ?? UUID().uuidString,
             title: (userInfo["title"] as? String) ?? "Vibez",
