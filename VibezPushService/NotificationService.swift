@@ -29,6 +29,12 @@ struct PendingTrigger: Codable, Equatable {
     let sessionId: String
     let addedAt: Date
     let durationSeconds: Int
+
+    /// When this trigger's timer is up. Mirrors the host's computed
+    /// property so the NSE can decide whether a timeout unblock is due.
+    var expiresAt: Date {
+        addedAt.addingTimeInterval(TimeInterval(durationSeconds))
+    }
 }
 
 private extension ManagedSettingsStore.Name {
@@ -80,6 +86,7 @@ final class NotificationService: UNNotificationServiceExtension {
         let agent = (userInfo["agent"] as? String) ?? ""
         let title = (userInfo["title"] as? String) ?? ""
         let body = (userInfo["body"] as? String) ?? ""
+        let reason = (userInfo["reason"] as? String) ?? ""
 
         log.info("didReceive: shield=\(shield, privacy: .public) session=\(session, privacy: .public) event=\(event, privacy: .public) agent=\(agent, privacy: .public)")
 
@@ -89,7 +96,8 @@ final class NotificationService: UNNotificationServiceExtension {
             event: event,
             agent: agent,
             title: title,
-            body: body
+            body: body,
+            reason: reason
         )
 
         // Stash the original push payload so the host can replay the
@@ -101,7 +109,12 @@ final class NotificationService: UNNotificationServiceExtension {
         // request identifier so the host can dedupe replay against
         // pushes it already processed via willPresent — without a
         // stable id, every drain re-enqueues the overlay.
-        writeLastMessageToAppGroup(userInfo: userInfo, identifier: request.identifier)
+        // A timeout unblock is a backup mechanism, not a ping — never
+        // replay it as an in-app overlay / Recent-triggers row.
+        if reason != "timeout" {
+            writeLastMessageToAppGroup(
+                userInfo: userInfo, identifier: request.identifier)
+        }
 
         // Keep Notification Center tidy. Issued here, before contentHandler
         // below, because the extension can be suspended the instant that
@@ -115,7 +128,8 @@ final class NotificationService: UNNotificationServiceExtension {
         // on-activation sweep) clears the remainder.
         if notificationsOff {
             clearDeliveredNotifications(forSession: nil)
-        } else if shield == "off", !session.isEmpty, session != "nosid" {
+        } else if shield == "off", reason != "timeout",
+                  !session.isEmpty, session != "nosid" {
             clearDeliveredNotifications(forSession: session)
         }
 
@@ -189,7 +203,8 @@ final class NotificationService: UNNotificationServiceExtension {
         event: String,
         agent: String,
         title: String,
-        body: String
+        body: String,
+        reason: String
     ) {
         guard sharedDefaults != nil else {
             log.error("App Group defaults unavailable — check the application-groups entitlement")
@@ -203,20 +218,29 @@ final class NotificationService: UNNotificationServiceExtension {
         if shield == "off" {
             guard !session.isEmpty, session != "nosid" else { return }
             var triggers = loadPendingTriggers()
+            if reason == "timeout" {
+                // Backup unblock: drop ONLY if this session's timer is
+                // actually due. Not due (the timer was reset by a later
+                // ping) or already gone → no-op, so a stale/duplicate
+                // dispatch can never unblock early. Design spec §3.
+                guard let t = triggers.first(
+                          where: {$0.sessionId == session}),
+                      Date() >= t.expiresAt else {
+                    log.info("shield=off timeout \(session, privacy: .public): not due / gone — no-op")
+                    return
+                }
+            }
             let before = triggers.count
             triggers.removeAll { $0.sessionId == session }
             savePendingTriggers(triggers)
-            // (Notification Center cleanup for this reply happens up in
-            // didReceive, alongside the notifications-off sweep.)
-            // A manual focus hold (mascot tap) keeps the shield up even when
-            // no per-session triggers remain. Without this guard, a reply
-            // that lands while Vibez is suspended would lift a hold the user
-            // set by hand.
+            // A manual focus hold (mascot tap) keeps the shield up even
+            // when no per-session triggers remain — don't lift a hand-set
+            // hold that a backgrounded reply/timeout would otherwise drop.
             let focusMode = sharedDefaults?.bool(forKey: Key.focusMode) ?? false
             if triggers.isEmpty && !focusMode {
                 clearShield()
             }
-            log.info("shield=off: \(session, privacy: .public) (\(before, privacy: .public)→\(triggers.count, privacy: .public)) focus=\(focusMode, privacy: .public)")
+            log.info("shield=off: \(session, privacy: .public) (\(before, privacy: .public)→\(triggers.count, privacy: .public)) focus=\(focusMode, privacy: .public) reason=\(reason, privacy: .public)")
             return
         }
 
