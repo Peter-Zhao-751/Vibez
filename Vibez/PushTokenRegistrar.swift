@@ -131,6 +131,11 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
         }
         state = .registering
         log.info("Registering push token with Vibez ID")
+        let doneSeconds =
+            defaults.object(forKey: "vibez.blockSeconds.done") as? Int ?? 30
+        let needsSeconds =
+            defaults.object(forKey: "vibez.blockSeconds.needsInput")
+                as? Int ?? 900
         do {
             _ = try await functions
                 .httpsCallable("registerPushToken")
@@ -138,6 +143,8 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
                     "fcmToken": token,
                     "vibezId": vibezId,
                     "platform": "ios",
+                    "blockSecondsDone": doneSeconds,
+                    "blockSecondsNeedsInput": needsSeconds,
                 ])
             lastRegisteredAt = Date()
             state = .registered
