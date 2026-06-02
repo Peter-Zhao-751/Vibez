@@ -4,7 +4,14 @@ import {initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getMessaging, BatchResponse} from "firebase-admin/messaging";
 import * as logger from "firebase-functions/logger";
-import {clampDuration, buildApnsPayload, APNS_HEADERS} from "./scheduling.js";
+import {
+  clampDuration,
+  delayForEvent,
+  shouldScheduleUnblock,
+  buildApnsPayload,
+  APNS_HEADERS,
+} from "./scheduling.js";
+import {getFunctions} from "firebase-admin/functions";
 import {onTaskDispatched} from "firebase-functions/tasks";
 
 initializeApp();
@@ -150,6 +157,8 @@ export const notify = onRequest(
     // is never sent to FCM (it isn't an APNs token).
     const apnsTokens: string[] = [];
     let hasWeb = false;
+    const scheduleUnblock = shouldScheduleUnblock({shield, session, event});
+    const unblockTargets: {token: string; delaySeconds: number}[] = [];
     snapshot.forEach((doc) => {
       const token = doc.get("fcmToken");
       const platform = typeof doc.get("platform") === "string" ?
@@ -158,6 +167,16 @@ export const notify = onRequest(
         hasWeb = true;
       } else if (typeof token === "string" && token.length > 0) {
         apnsTokens.push(token);
+        if (scheduleUnblock) {
+          const durations = {
+            done: clampDuration(doc.get("blockSecondsDone"), 30),
+            needsInput: clampDuration(doc.get("blockSecondsNeedsInput"), 900),
+          };
+          unblockTargets.push({
+            token,
+            delaySeconds: delayForEvent(event, durations),
+          });
+        }
       }
     });
 
@@ -256,6 +275,34 @@ export const notify = onRequest(
         batch.delete(tokensDb.collection(DEVICES).doc(tok));
       });
       await batch.commit();
+    }
+
+    // Schedule the per-session timeout unblock (backup layer): one Cloud
+    // Task per device, each at that device's own duration + buffer. Best-
+    // effort — a failed enqueue just falls back to the on-device prune,
+    // so we never fail the /notify response on it.
+    if (scheduleUnblock && unblockTargets.length > 0) {
+      // taskQueue("dispatchUnblock") resolves the queue for the function
+      // in the default region (us-central1). If a deploy ever moves the
+      // function, use "locations/<region>/functions/dispatchUnblock".
+      const queue = getFunctions().taskQueue("dispatchUnblock");
+      await Promise.all(unblockTargets.map((t) =>
+        queue.enqueue(
+          {
+            fcmToken: t.token,
+            vibezId,
+            session,
+            event,
+            agent,
+            title,
+            body: bodyText,
+          },
+          {scheduleDelaySeconds: t.delaySeconds}
+        ).catch((err) => logger.warn("enqueue unblock failed", {
+          session,
+          err: String(err),
+        }))
+      ));
     }
 
     // Browser extension(s) registered to this Vibez ID read events from a
