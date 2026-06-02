@@ -4,6 +4,7 @@ import {initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getMessaging, BatchResponse} from "firebase-admin/messaging";
 import * as logger from "firebase-functions/logger";
+import {clampDuration} from "./scheduling.js";
 
 initializeApp();
 setGlobalOptions({maxInstances: 10});
@@ -59,14 +60,23 @@ export const registerPushToken = onCall(
       );
     }
 
+    const deviceDoc: Record<string, unknown> = {
+      fcmToken,
+      vibezId,
+      platform,
+      createdAt: FieldValue.serverTimestamp(),
+      lastSeen: FieldValue.serverTimestamp(),
+    };
+    if (data.blockSecondsDone !== undefined) {
+      deviceDoc.blockSecondsDone = clampDuration(data.blockSecondsDone, 30);
+    }
+    if (data.blockSecondsNeedsInput !== undefined) {
+      deviceDoc.blockSecondsNeedsInput =
+        clampDuration(data.blockSecondsNeedsInput, 900);
+    }
+
     await tokensDb.collection(DEVICES).doc(fcmToken).set(
-      {
-        fcmToken,
-        vibezId,
-        platform,
-        createdAt: FieldValue.serverTimestamp(),
-        lastSeen: FieldValue.serverTimestamp(),
-      },
+      deviceDoc,
       {merge: true}
     );
 
