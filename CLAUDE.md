@@ -43,11 +43,19 @@ VibezShield/                  Shield Configuration Extension. Reads ShieldState 
 Backend/                      Firebase project: vibez-backend.
   firebase.json               Cloud Functions deploy config (codebase=default).
   .firebaserc                 default project = vibez-backend.
-  functions/src/index.ts      Two functions:
-    - registerPushToken (callable, public): {fcmToken, vibezId, platform} →
-      Firestore "tokens" db, "devices" collection, doc id = fcmToken.
+  functions/src/index.ts      Three functions (pure helpers in scheduling.ts):
+    - registerPushToken (callable, public): {fcmToken, vibezId, platform,
+      blockSecondsDone?, blockSecondsNeedsInput?} → Firestore "tokens" db,
+      "devices" collection, doc id = fcmToken. The phone publishes its two
+      block durations here so /notify can time the timeout unblock.
     - notify (HTTP, public): {vibezId, title, body, event?, shield?, session?, agent?} →
       queries devices where vibezId == X, fans out via sendEachForMulticast.
+      For a block (shield≠off + has session) it also enqueues a Cloud Task per
+      device to dispatchUnblock at that device's duration + buffer.
+    - dispatchUnblock (Cloud Tasks onTaskDispatched): sends a per-session
+      shield:off carrying reason:"timeout". The NSE drops the shield only if
+      that session is actually due, so stale/duplicate dispatches no-op — the
+      server-side backup under the on-device prune (the precise primary).
 ClaudePlugin/                 Claude Code plugin source.
   scripts/setup.sh            Generates the 4-word Vibez ID, embeds the 2016-word wordlist,
                               prints instructions. /vibez:setup invokes this.
