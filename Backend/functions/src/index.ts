@@ -4,7 +4,7 @@ import {initializeApp} from "firebase-admin/app";
 import {getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getMessaging, BatchResponse} from "firebase-admin/messaging";
 import * as logger from "firebase-functions/logger";
-import {clampDuration} from "./scheduling.js";
+import {clampDuration, buildApnsPayload, APNS_HEADERS} from "./scheduling.js";
 
 initializeApp();
 setGlobalOptions({maxInstances: 10});
@@ -191,35 +191,15 @@ export const notify = onRequest(
     // pushes, even with content-available:1. Silent (apns-push-type:
     // background) pushes also do NOT invoke the NSE, which is why
     // shield:off has to ride on an alert push.
-    const isSilent = shield === "off";
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const aps: any = isSilent ?
-      {
-        "alert": {title, body: bodyText},
-        "interruption-level": "passive",
-        "content-available": 1,
-        "mutable-content": 1,
-      } :
-      {
-        "alert": {title, body: bodyText},
-        "sound": "default",
-        "content-available": 1,
-        "mutable-content": 1,
-      };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const apnsPayload: any = {aps, title, body: bodyText};
-    if (event !== undefined) apnsPayload.event = event;
-    if (shield !== undefined) apnsPayload.shield = shield;
-    if (session !== undefined) apnsPayload.session = session;
-    if (agent !== undefined) apnsPayload.agent = agent;
-    // Both flavors are alert-type now (passive is just a display hint).
-    // Priority 10 means "deliver immediately"; passive's interruption
-    // level still suppresses the banner/sound, so this doesn't wake the
-    // user — it just gets the shield down without lag.
-    const apnsHeaders: Record<string, string> = {
-      "apns-push-type": "alert",
-      "apns-priority": "10",
-    };
+    const apnsPayload = buildApnsPayload({
+      title,
+      body: bodyText,
+      event,
+      shield,
+      session,
+      agent,
+    });
+    const apnsHeaders = APNS_HEADERS;
 
     let success = 0;
     let failure = 0;
