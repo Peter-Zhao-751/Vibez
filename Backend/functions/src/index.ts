@@ -1,7 +1,7 @@
 import {setGlobalOptions} from "firebase-functions";
 import {onCall, onRequest, HttpsError} from "firebase-functions/https";
 import {initializeApp} from "firebase-admin/app";
-import {getFirestore, FieldValue} from "firebase-admin/firestore";
+import {getFirestore, FieldValue, Timestamp} from "firebase-admin/firestore";
 import {getMessaging, BatchResponse} from "firebase-admin/messaging";
 import * as logger from "firebase-functions/logger";
 
@@ -133,40 +133,68 @@ export const notify = onRequest(
       .collection(DEVICES)
       .where("vibezId", "==", vibezId)
       .get();
-    const tokens: string[] = [];
+    // Partition registered devices by platform so each delivery path only
+    // runs when it has a consumer ("nothing wasted"): APNs for iOS tokens,
+    // a Firestore event-log write for the browser extension. A web client id
+    // is never sent to FCM (it isn't an APNs token).
+    const apnsTokens: string[] = [];
+    let hasWeb = false;
     snapshot.forEach((doc) => {
       const token = doc.get("fcmToken");
-      if (typeof token === "string" && token.length > 0) {
-        tokens.push(token);
+      const platform = typeof doc.get("platform") === "string" ?
+        doc.get("platform") : "unknown";
+      if (platform === "web") {
+        hasWeb = true;
+      } else if (typeof token === "string" && token.length > 0) {
+        apnsTokens.push(token);
       }
     });
 
-    if (tokens.length === 0) {
+    if (apnsTokens.length === 0 && !hasWeb) {
       // 200, not 404 — a Mac firing into an unclaimed Vibez ID isn't an
       // error condition. The user might just not have set up their phone
-      // yet. The plugin doesn't need to log a failure for this.
-      res.status(200).json({total: 0, success: 0, failure: 0});
+      // or browser yet. The plugin doesn't need to log a failure for this.
+      res.status(200).json({total: 0, success: 0, failure: 0, web: false});
       return;
     }
 
     // Custom fields go at the top level of apns.payload (siblings of
     // aps). That's how iOS surfaces them in userInfo, matching the
-    // shape NotifyClient.acceptPushUserInfo expects.
+    // shape NotifyClient.acceptPushUserInfo and the NSE's didReceive
+    // both expect.
     //
     // Shield axis controls visibility:
-    //   shield:off (user just replied) → silent push, no banner. The
-    //     app still wakes via content-available so handleIncoming can
-    //     lift the shield, but iOS doesn't surface anything visible.
-    //   shield:on / shield:nil (agent event) → alert push, banner is
-    //     auto-displayed by iOS.
+    //   shield:off (user just replied) → alert push with
+    //     interruption-level=passive. No banner, no sound, no screen
+    //     wake — the entry slips silently into notification center —
+    //     BUT the NSE still fires (it only fires for alert-type
+    //     pushes), which is what actually drops the shield for that
+    //     session while Vibez is suspended.
+    //   shield:on / shield:nil (agent event) → standard alert push,
+    //     banner is auto-displayed after the NSE rewrites title/body.
+    //
+    // mutable-content:1 on EVERY push is what makes the Notification
+    // Service Extension (VibezPushService) run before iOS shows the
+    // banner. That extension is the only reliable way to engage (or
+    // lift) the shield while Vibez is suspended — iOS 26 stopped firing
+    // the host app's didReceiveRemoteNotification for background-delivered
+    // pushes, even with content-available:1. Silent (apns-push-type:
+    // background) pushes also do NOT invoke the NSE, which is why
+    // shield:off has to ride on an alert push.
     const isSilent = shield === "off";
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const aps: any = isSilent ?
-      {"content-available": 1} :
+      {
+        "alert": {title, body: bodyText},
+        "interruption-level": "passive",
+        "content-available": 1,
+        "mutable-content": 1,
+      } :
       {
         "alert": {title, body: bodyText},
         "sound": "default",
         "content-available": 1,
+        "mutable-content": 1,
       };
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const apnsPayload: any = {aps, title, body: bodyText};
@@ -174,17 +202,22 @@ export const notify = onRequest(
     if (shield !== undefined) apnsPayload.shield = shield;
     if (session !== undefined) apnsPayload.session = session;
     if (agent !== undefined) apnsPayload.agent = agent;
-    const apnsHeaders: Record<string, string> = isSilent ?
-      {"apns-push-type": "background", "apns-priority": "5"} :
-      {"apns-push-type": "alert", "apns-priority": "10"};
+    // Both flavors are alert-type now (passive is just a display hint).
+    // Priority 10 means "deliver immediately"; passive's interruption
+    // level still suppresses the banner/sound, so this doesn't wake the
+    // user — it just gets the shield down without lag.
+    const apnsHeaders: Record<string, string> = {
+      "apns-push-type": "alert",
+      "apns-priority": "10",
+    };
 
     let success = 0;
     let failure = 0;
     const invalidTokens: string[] = [];
     const errors: {code?: string; message?: string}[] = [];
 
-    for (let i = 0; i < tokens.length; i += MULTICAST_CHUNK) {
-      const chunk = tokens.slice(i, i + MULTICAST_CHUNK);
+    for (let i = 0; i < apnsTokens.length; i += MULTICAST_CHUNK) {
+      const chunk = apnsTokens.slice(i, i + MULTICAST_CHUNK);
       const response: BatchResponse =
         await getMessaging().sendEachForMulticast({
           tokens: chunk,
@@ -216,9 +249,10 @@ export const notify = onRequest(
     logger.info("notify fan-out", {
       vibezId,
       event,
-      total: tokens.length,
+      total: apnsTokens.length,
       success,
       failure,
+      web: hasWeb,
     });
 
     // Sweep stale tokens out of Firestore so /notify doesn't keep
@@ -233,8 +267,31 @@ export const notify = onRequest(
       await batch.commit();
     }
 
+    // Browser extension(s) registered to this Vibez ID read events from a
+    // Firestore log rather than APNs — Firestore can't wake a suspended iOS
+    // app, so the phone stays on APNs and this write is purely additive. The
+    // path is keyed by the Vibez ID (which is the shared secret); a TTL
+    // policy on `expireAt` auto-expires old events.
+    if (hasWeb) {
+      const now = Date.now();
+      const item: Record<string, unknown> = {
+        title,
+        body,
+        createdAtMs: now,
+        createdAt: FieldValue.serverTimestamp(),
+        expireAt: Timestamp.fromMillis(now + 24 * 60 * 60 * 1000),
+      };
+      if (event !== undefined) item.event = event;
+      if (shield !== undefined) item.shield = shield;
+      if (session !== undefined) item.session = session;
+      if (agent !== undefined) item.agent = agent;
+      await tokensDb
+        .collection("events").doc(vibezId)
+        .collection("items").add(item);
+    }
+
     res.status(200).json({
-      total: tokens.length, success, failure, errors,
+      total: apnsTokens.length, success, failure, errors, web: hasWeb,
     });
   }
 );

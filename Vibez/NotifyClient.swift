@@ -67,6 +67,15 @@ struct NtfyMessage: Equatable {
     /// ("cc" → Claude Code, "cx" → Codex). nil only for untagged
     /// third-party producers (e.g. a raw curl test ping).
     var agent: VibezAgent? = nil
+    /// True when this message was reconstituted from a file the NSE
+    /// wrote while the host was suspended. The NSE has already done
+    /// the model-level work (engaged the shield, persisted the
+    /// trigger, written shield-state.json) and iOS has already shown
+    /// its banner — so handleIncoming should only do the view-level
+    /// work (Recent triggers row, analytics, in-app overlay) and skip
+    /// re-engaging the shield (would reset the per-session timer) and
+    /// scheduling a local notification (would double-banner the user).
+    var wasBackgroundEngaged: Bool = false
 
     /// True while the agent is parked on a user reply. Derived from
     /// `event` rather than stored separately — `needs-input` is the
@@ -120,7 +129,10 @@ final class NotifyClient {
     ///   "agent":   "cc" | "cx"
     /// }
     /// ```
-    func acceptPushUserInfo(_ userInfo: [AnyHashable: Any]) {
+    func acceptPushUserInfo(
+        _ userInfo: [AnyHashable: Any],
+        wasBackgroundEngaged: Bool = false
+    ) {
         var msg = NtfyMessage(
             id: (userInfo["id"] as? String) ?? UUID().uuidString,
             title: (userInfo["title"] as? String) ?? "Vibez",
@@ -131,6 +143,7 @@ final class NotifyClient {
         if let shield  = userInfo["shield"]  as? String { msg.shield    = VibezShield(rawValue: shield) }
         if let session = userInfo["session"] as? String { msg.sessionId = session }
         if let agent   = userInfo["agent"]   as? String { msg.agent     = VibezAgent(rawValue: agent) }
+        msg.wasBackgroundEngaged = wasBackgroundEngaged
         // [debug] One log line per push so we can confirm parsing.
         // Enum-with-raw-value fields (event/shield/agent) decode to
         // nil when the wire string doesn't match a known case — that
@@ -140,9 +153,52 @@ final class NotifyClient {
         let agentStr = msg.agent.map { $0.rawValue } ?? "nil"
         let sessionStr = msg.sessionId ?? "nil"
         log.info(
-            "Parsed push: event=\(eventStr, privacy: .public) shield=\(shieldStr, privacy: .public) session=\(sessionStr, privacy: .public) agent=\(agentStr, privacy: .public)"
+            "Parsed push: event=\(eventStr, privacy: .public) shield=\(shieldStr, privacy: .public) session=\(sessionStr, privacy: .public) agent=\(agentStr, privacy: .public) drain=\(wasBackgroundEngaged, privacy: .public)"
         )
+
+        // Engage the shield here, NOT in ContentView.handleIncoming.
+        // When the app is in background, the view isn't observing
+        // lastMessage, so the shield-engagement path through .onChange
+        // doesn't fire until the user opens Vibez — by which point
+        // they've already had a free pass to scroll Instagram.
+        // ScreenTimeManager.applyTriggerFor is idempotent on sessionId,
+        // so foreground (where ContentView.handleIncoming also calls
+        // addTrigger) is harmless double-fire. Skip when draining the
+        // NSE-written file — the NSE already did all of this and
+        // re-running addTrigger would reset the per-session timer.
+        if !wasBackgroundEngaged {
+            ScreenTimeManager.shared.applyTriggerFor(message: msg)
+        }
+
         lastMessage = msg
+    }
+
+    /// Reads `last-message.json` (written by VibezPushService when it
+    /// handled a push in the background) and feeds it through
+    /// `acceptPushUserInfo` so the in-app overlay + Recent triggers
+    /// row + analytics catch up to what already happened in the
+    /// background. Tags the message as `wasBackgroundEngaged` so
+    /// model-level side effects (shield engagement, banner) aren't
+    /// duplicated. Removes the file after reading.
+    func drainPendingPushFromAppGroup() {
+        guard let containerURL = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        ) else { return }
+        let url = containerURL.appendingPathComponent("last-message.json")
+        guard let data = try? Data(contentsOf: url),
+              let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+
+        try? FileManager.default.removeItem(at: url)
+
+        var userInfo: [AnyHashable: Any] = [:]
+        for (key, value) in dict where key != "_writtenAt" {
+            userInfo[key] = value
+        }
+        guard !userInfo.isEmpty else { return }
+
+        log.info("drainPendingPushFromAppGroup: replaying NSE push for overlay")
+        acceptPushUserInfo(userInfo, wasBackgroundEngaged: true)
     }
 
     /// Fakes an incoming push. Used by previews / test affordances so
@@ -197,6 +253,15 @@ final class NotifyClient {
         let rawBody = msg.body.isEmpty ? "Vibez ping" : msg.body
         content.body = Self.stripMarkdown(rawBody)
         content.sound = .default
+        // Carry the session id so the Notification Service Extension can
+        // pull this banner back out of Notification Center when the user
+        // replies (shield:off — see NotificationService.clearDeliveredNotifications).
+        // Remote-push banners already carry `session` from the server
+        // payload; foreground-scheduled ones need it stamped here or they'd
+        // survive the reply.
+        if let sessionId = msg.sessionId {
+            content.userInfo["session"] = sessionId
+        }
 
         let request = UNNotificationRequest(
             identifier: msg.id,
@@ -204,6 +269,18 @@ final class NotifyClient {
             trigger: nil // deliver immediately
         )
         UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    /// Clear every Vibez entry from Notification Center. Called on
+    /// foreground when the user has notifications switched off, to mop up
+    /// the lone passive straggler the Notification Service Extension can't
+    /// remove itself: the NSE runs *before* that entry is delivered, so
+    /// only a later, guaranteed execution — the app coming to the
+    /// foreground — can drop it (see
+    /// NotificationService.clearDeliveredNotifications). App-scoped: iOS
+    /// only ever removes this app's own delivered notifications.
+    func clearAllDeliveredNotifications() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
     // MARK: - Permissions

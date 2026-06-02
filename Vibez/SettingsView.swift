@@ -43,6 +43,7 @@ struct SettingsView: View {
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
+    @AppStorage("vibez.notifyBanners") private var notifyBanners = true
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
@@ -67,6 +68,7 @@ struct SettingsView: View {
                 appsSection
                 durationSection
                 overlaySection
+                notificationsSection
                 vibezIdSection
                 ignoredConversationsSection
             }
@@ -88,9 +90,7 @@ struct SettingsView: View {
                     manager.updateSelection(draftSelection)
                 }
             }
-            .onChange(of: appearanceRaw) { _, newRaw in
-                (AppearancePref(rawValue: newRaw) ?? .system).applyToWindows()
-            }
+            .preferredColorScheme((AppearancePref(rawValue: appearanceRaw) ?? .system).colorScheme)
             .sheet(isPresented: $showAddIgnoreSheet) {
                 AddIgnoreSheet(
                     triggerStore: triggerStore,
@@ -244,6 +244,17 @@ struct SettingsView: View {
             Text("Block overlay")
         } footer: {
             Text("Order: \"Newest first\" puts the latest ping on top and reveals older blocks as you dismiss; \"Oldest first\" keeps the earliest unresolved block visible until you dismiss it. Dismiss button: when off, the only ways out are replying in Claude/Codex or letting the countdown expire.")
+        }
+    }
+
+    @ViewBuilder
+    private var notificationsSection: some View {
+        Section {
+            Toggle("Show notifications", isOn: $notifyBanners)
+        } header: {
+            Text("Notifications")
+        } footer: {
+            Text("When on, Vibez shows a banner with sound each time Claude or Codex pings you. When off, your apps still get blocked — the alert just slips silently into Notification Center, with no banner or sound.")
         }
     }
 
