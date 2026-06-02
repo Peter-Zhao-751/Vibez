@@ -1,0 +1,24 @@
+rules_version = '2';
+
+// Security rules for the non-default "tokens" database.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Browser extensions read their event log by *exact* Vibez ID — the ID
+    // is part of the path (~44 bits of entropy), so there's no way to list
+    // or enumerate across IDs. This is the same secrecy model as the public
+    // /notify endpoint. The server writes events via the Admin SDK, which
+    // bypasses these rules; clients may only read.
+    match /events/{vibezId}/items/{itemId} {
+      allow read: if true;
+      allow write: if false;
+    }
+
+    // Everything else (devices, …) is server-only. The iOS app and the
+    // extension both reach `devices` through the registerPushToken callable,
+    // never directly.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

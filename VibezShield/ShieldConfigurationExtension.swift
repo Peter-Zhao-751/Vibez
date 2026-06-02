@@ -25,14 +25,22 @@ import os
 nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSource {
 
     override func configuration(shielding application: Application) -> ShieldConfiguration {
-        makeConfiguration(name: application.localizedDisplayName)
+        // iOS calls this when the user opens a shielded app — the one
+        // moment we can attribute a block to a specific app. Tally it so
+        // the host's "most blocked" tile ranks what you actually hit.
+        if let token = application.token { AppBlockTally.recordOpen(token: token) }
+        return makeConfiguration(name: application.localizedDisplayName)
     }
 
     override func configuration(
         shielding application: Application,
         in category: ActivityCategory
     ) -> ShieldConfiguration {
-        makeConfiguration(name: application.localizedDisplayName)
+        // Same per-open attribution when the app was shielded via a
+        // category selection. Only one of the two app callbacks fires per
+        // open, so this never double-counts.
+        if let token = application.token { AppBlockTally.recordOpen(token: token) }
+        return makeConfiguration(name: application.localizedDisplayName)
     }
 
     override func configuration(shielding webDomain: WebDomain) -> ShieldConfiguration {
@@ -61,10 +69,12 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         let titleText = state.title ?? "Stay focused"
         let subtitleText = state.body ?? "Vibez is keeping you off \(displayName)."
 
-        // Icon comes from the host-rendered cache when state is fresh;
-        // a stale snapshot would mislead, so we skip the image then.
-        let icon: UIImage? = (stateRead != nil) ? loadCachedShieldImage() : nil
-        Logger.shieldExt.info("Icon: \(icon == nil ? "none" : "host-rendered")")
+        // Icon comes from the host-pre-rendered per-agent PNG. One file
+        // per agent is rendered once in ScreenTimeManager.init, so both
+        // the host and VibezPushService (NSE) can engage the shield
+        // without doing any rendering at engagement time.
+        let icon: UIImage? = loadCachedShieldImage(for: state.agent)
+        Logger.shieldExt.info("Icon: \(icon == nil ? "none" : "shield-\(state.agent.rawValue).png")")
 
         // No blur — backgroundColor is the tamed-down agent tint (warm
         // brown for Claude, cool navy for Codex).
@@ -89,11 +99,11 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         )
     }
 
-    private func loadCachedShieldImage() -> UIImage? {
+    private func loadCachedShieldImage(for agent: Agent) -> UIImage? {
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return nil }
-        let imageURL = containerURL.appendingPathComponent("shield.png")
+        let imageURL = containerURL.appendingPathComponent("shield-\(agent.rawValue).png")
         return UIImage(contentsOfFile: imageURL.path)
     }
 }

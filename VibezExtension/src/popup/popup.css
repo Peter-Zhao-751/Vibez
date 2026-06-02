@@ -1,0 +1,417 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  /* Dark fallback + no rubber-band so overscrolling the popup never
+     flashes white. App.tsx keeps these in sync with the active theme. */
+  background: #0c0d12;
+  overscroll-behavior: none;
+}
+
+body {
+  width: 380px;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.vz-root {
+  display: flex;
+  flex-direction: column;
+  min-height: 520px;
+  padding: 10px 14px 16px;
+  position: relative;
+}
+
+.vz-loading { min-height: 520px; }
+
+/* ---------------- top bar ---------------- */
+.vz-topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 4px 8px;
+}
+.vz-wordmark {
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.vz-chip-btn {
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+/* ---------------- mascot ---------------- */
+.vz-mascot-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  padding: 6px 0 10px;
+  gap: 3px;
+}
+.vz-ground {
+  width: 58%;
+  height: 1.5px;
+  border-radius: 1px;
+}
+.vz-mascot .vz-breathe {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+}
+.vz-mascot.vz-listening .vz-breathe {
+  animation: vz-breathe 2.4s ease-in-out infinite;
+}
+.vz-mascot:not(.vz-listening) .vz-breathe {
+  animation: vz-sleep 3.6s ease-in-out infinite;
+}
+@keyframes vz-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.04) translateY(-1px); }
+}
+@keyframes vz-sleep {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(0.99) translateY(1.5px); }
+}
+.vz-mascot .vz-zzz { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; }
+.vz-mascot:not(.vz-listening) .vz-zzz {
+  animation: vz-zzz 2.6s ease-in-out infinite;
+}
+@keyframes vz-zzz {
+  0% { opacity: 0; transform: translateY(0) scale(0.6); }
+  30% { opacity: 1; }
+  100% { opacity: 0; transform: translateY(-14px) scale(1.1); }
+}
+
+/* ---------------- toggle ---------------- */
+.vz-toggle-wrap {
+  display: flex;
+  justify-content: center;
+  padding: 6px 0 18px;
+}
+.vz-toggle {
+  position: relative;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.vz-toggle-track {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+}
+.vz-toggle-label {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  letter-spacing: 2.2px;
+  transition: opacity 0.3s ease;
+}
+.vz-toggle-knob {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 6px 9px rgba(0, 0, 0, 0.22);
+  transition: left 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.vz-shake { animation: vz-shake 0.45s ease; }
+@keyframes vz-shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(3px); }
+}
+
+/* ---------------- cards ---------------- */
+.vz-card {
+  border-radius: 18px;
+  padding: 12px 14px;
+  margin-bottom: 8px;
+}
+.vz-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.vz-card-title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+.vz-card-sub {
+  font-size: 11.5px;
+  line-height: 1.45;
+  margin: 6px 0 10px;
+}
+.vz-card-sub code {
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+}
+.vz-count { font-size: 11px; font-weight: 500; }
+
+/* setup + add rows */
+.vz-setup-row { display: flex; gap: 8px; margin-top: 4px; }
+.vz-input {
+  flex: 1;
+  border: none;
+  border-radius: 10px;
+  padding: 10px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  outline: none;
+  min-width: 0;
+}
+.vz-input::placeholder { opacity: 0.5; }
+.vz-save-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 0 14px;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+  cursor: pointer;
+}
+.vz-save-btn:disabled { cursor: default; }
+
+.vz-status-row { display: flex; align-items: center; gap: 6px; margin-top: 10px; }
+.vz-status-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.vz-status-label { font-family: ui-monospace, monospace; font-size: 11px; }
+.vz-retry {
+  margin-left: auto;
+  background: none;
+  border: none;
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vz-field-error { color: #e0503f; font-size: 11px; margin-top: 6px; }
+
+/* chips (blocked sites) */
+.vz-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.vz-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 9px;
+  padding: 5px 7px 5px 9px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.vz-chip-x {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0;
+}
+
+/* analytics */
+.vz-stats { display: flex; gap: 6px; margin-top: 10px; }
+.vz-stat {
+  flex: 1;
+  border: 1px solid;
+  border-radius: 12px;
+  padding: 8px 4px;
+  text-align: center;
+  min-width: 0;
+}
+.vz-stat-value {
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vz-stat-label { font-size: 10px; font-weight: 500; letter-spacing: 0.5px; margin-top: 4px; }
+
+/* recent triggers */
+.vz-recents { margin-top: 4px; }
+.vz-recents-title { font-size: 15px; font-weight: 800; margin: 6px 2px 8px; }
+.vz-recents-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.vz-recents-list::-webkit-scrollbar { width: 0; }
+.vz-empty { border-radius: 12px; padding: 14px 12px; font-size: 12px; line-height: 1.4; }
+.vz-row {
+  display: flex;
+  gap: 10px;
+  border-radius: 12px;
+  padding: 8px 10px;
+}
+.vz-row-badge {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-family: ui-monospace, monospace;
+  font-size: 10px;
+  font-weight: 800;
+}
+.vz-row-body { min-width: 0; }
+.vz-row-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vz-row-sub {
+  font-size: 11px;
+  line-height: 1.35;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.vz-row-time { font-family: ui-monospace, monospace; font-size: 10.5px; margin-top: 3px; }
+
+/* settings */
+.vz-settings-scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 52px 16px 16px;
+  z-index: 50;
+}
+.vz-settings {
+  width: 100%;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.4);
+  max-height: calc(100vh - 68px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.vz-settings::-webkit-scrollbar { width: 0; }
+
+/* setting row: label + trailing control */
+.vz-row-setting {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 12px 0;
+}
+
+/* iOS-style switch */
+.vz-switch {
+  position: relative;
+  width: 44px;
+  height: 26px;
+  border: none;
+  border-radius: 999px;
+  cursor: pointer;
+  padding: 0;
+  flex: none;
+  transition: background 0.2s ease;
+}
+.vz-switch-knob {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  transition: left 0.2s ease;
+}
+.vz-switch.on .vz-switch-knob { left: 21px; }
+
+/* block-duration slider */
+.vz-dur { margin-top: 10px; }
+.vz-dur-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 5px;
+}
+.vz-dur-val { font-family: ui-monospace, monospace; font-size: 12px; font-weight: 600; }
+.vz-range { width: 100%; height: 4px; cursor: pointer; }
+
+/* Vibez ID display + copy */
+.vz-id-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: 10px;
+  padding: 9px 10px;
+}
+.vz-id {
+  flex: 1;
+  font-family: ui-monospace, monospace;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vz-id-copy {
+  background: none;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+.vz-segment-block { margin-bottom: 10px; }
+.vz-segment-label { font-size: 11px; margin-bottom: 5px; }
+.vz-segment { display: flex; gap: 3px; border-radius: 10px; padding: 3px; }
+.vz-segment-btn {
+  flex: 1;
+  border: none;
+  border-radius: 8px;
+  padding: 7px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vz-settings-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  margin: 12px 0;
+  cursor: pointer;
+}
+.vz-settings-actions { display: flex; gap: 8px; margin-top: 6px; }
+.vz-ghost-btn {
+  flex: 1;
+  background: none;
+  border: 1px solid;
+  border-radius: 10px;
+  padding: 9px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}

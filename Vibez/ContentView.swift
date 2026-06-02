@@ -168,6 +168,10 @@ struct ContentView: View {
             manager.reloadFromAppGroup()
             notifyClient.drainPendingPushFromAppGroup()
             processIfNew(notifyClient.lastMessage)
+            // Notifications off → sweep Notification Center clear. The NSE
+            // keeps it down to a single passive straggler while we're
+            // suspended; this drops that last one now that we're running.
+            if !notifyBanners { notifyClient.clearAllDeliveredNotifications() }
         }
         .task {
             // Request notification permission early — the setup card
@@ -203,6 +207,9 @@ struct ContentView: View {
                 manager.reloadFromAppGroup()
                 notifyClient.drainPendingPushFromAppGroup()
                 processIfNew(notifyClient.lastMessage)
+                // Notifications off → drop the lone passive straggler the
+                // NSE leaves behind (it runs before that entry posts).
+                if !notifyBanners { notifyClient.clearAllDeliveredNotifications() }
             }
         }
         .onChange(of: manager.pendingTriggers) { _, newPending in

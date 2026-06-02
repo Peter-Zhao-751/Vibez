@@ -25,13 +25,13 @@ struct DailyStats: Codable, Equatable {
     var responseLengths: [Int]
     /// Count of all incoming ntfy messages today (any event, including untagged).
     var pingCount: Int
-    /// Per-app shield-activation count for today. Bumped once per
-    /// ApplicationToken in the active selection each time a shield
-    /// actually fires (i.e. trigger arrived, blocking armed, session
-    /// not ignored). Categories and web domains aren't counted —
-    /// they don't expose member apps, so a category-only blocker
-    /// shows nothing here.
-    var appBlockCounts: [ApplicationToken: Int]
+    /// Accumulated shield-armed seconds for `date`. Closed intervals only —
+    /// any in-flight interval is represented by `shieldArmedAt` and added
+    /// in at display time.
+    var focusSeconds: TimeInterval
+    /// Non-nil while the shield is currently up. Cleared on lift; the
+    /// elapsed delta is folded into `focusSeconds` at that moment.
+    var shieldArmedAt: Date?
 
     static func zero(on date: Date) -> DailyStats {
         DailyStats(
@@ -40,12 +40,13 @@ struct DailyStats: Codable, Equatable {
             responseCount: 0,
             responseLengths: [],
             pingCount: 0,
-            appBlockCounts: [:]
+            focusSeconds: 0,
+            shieldArmedAt: nil
         )
     }
 
     private enum CodingKeys: String, CodingKey {
-        case date, conversationIds, responseCount, responseLengths, pingCount, appBlockCounts
+        case date, conversationIds, responseCount, responseLengths, pingCount, focusSeconds, shieldArmedAt
     }
 
     init(
@@ -54,14 +55,16 @@ struct DailyStats: Codable, Equatable {
         responseCount: Int,
         responseLengths: [Int],
         pingCount: Int,
-        appBlockCounts: [ApplicationToken: Int]
+        focusSeconds: TimeInterval = 0,
+        shieldArmedAt: Date? = nil
     ) {
         self.date = date
         self.conversationIds = conversationIds
         self.responseCount = responseCount
         self.responseLengths = responseLengths
         self.pingCount = pingCount
-        self.appBlockCounts = appBlockCounts
+        self.focusSeconds = focusSeconds
+        self.shieldArmedAt = shieldArmedAt
     }
 
     init(from decoder: Decoder) throws {
@@ -71,14 +74,28 @@ struct DailyStats: Codable, Equatable {
         responseCount = try c.decode(Int.self, forKey: .responseCount)
         responseLengths = try c.decode([Int].self, forKey: .responseLengths)
         pingCount = try c.decode(Int.self, forKey: .pingCount)
-        // Back-compat: older persisted DailyStats predates this field.
-        appBlockCounts = try c.decodeIfPresent([ApplicationToken: Int].self, forKey: .appBlockCounts) ?? [:]
+        // Back-compat: older persisted DailyStats predates these fields.
+        focusSeconds = try c.decodeIfPresent(TimeInterval.self, forKey: .focusSeconds) ?? 0
+        shieldArmedAt = try c.decodeIfPresent(Date.self, forKey: .shieldArmedAt)
     }
+}
+
+/// Host-side mirror of VibezShield's `AppBlockTally` (separate target, same
+/// JSON shape, default `JSONEncoder`/`JSONDecoder`). The shield extension
+/// owns writes; `AnalyticsTracker` only reads and ranks.
+private struct AppBlockTally: Codable {
+    var date: Date
+    var counts: [ApplicationToken: Int]
 }
 
 @MainActor
 @Observable
 final class AnalyticsTracker {
+    /// Shared instance backing ScreenTimeManager's focus-time edges and
+    /// ContentView's default analytics state. Previews still inject
+    /// their own via the standard initializer.
+    static let shared = AnalyticsTracker()
+
     private(set) var stats: DailyStats
 
     private let defaults: UserDefaults
@@ -107,14 +124,25 @@ final class AnalyticsTracker {
         save()
     }
 
-    /// Bump per-app block counts. Call once per shield activation
-    /// with the active `FamilyActivitySelection.applicationTokens`.
-    func recordShieldActivation(applicationTokens: Set<ApplicationToken>) {
-        guard !applicationTokens.isEmpty else { return }
+    /// Edge: shield just went up. Idempotent — repeated calls without a
+    /// matching `noteShieldLifted` are no-ops, so callers (applyShield)
+    /// don't need to track transitions themselves.
+    func noteShieldArmed() {
         rollIfNeeded()
-        for token in applicationTokens {
-            stats.appBlockCounts[token, default: 0] += 1
-        }
+        guard stats.shieldArmedAt == nil else { return }
+        stats.shieldArmedAt = Date()
+        save()
+    }
+
+    /// Edge: shield just came down. Folds the in-flight interval into
+    /// `focusSeconds` and clears the marker. Idempotent when not armed.
+    func noteShieldLifted() {
+        rollIfNeeded()
+        guard let armedAt = stats.shieldArmedAt else { return }
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let from = max(armedAt, startOfDay)
+        stats.focusSeconds += Date().timeIntervalSince(from)
+        stats.shieldArmedAt = nil
         save()
     }
 
@@ -129,14 +157,43 @@ final class AnalyticsTracker {
         return Double(sum) / Double(stats.responseLengths.count)
     }
 
-    /// Today's top-N most-blocked apps, ordered by descending count.
-    /// Tie-broken by hash so the ordering is stable within a session.
+    /// Total seconds the shield has been up so far today, including any
+    /// currently-running interval. Read by AnalyticsPanel; computed at
+    /// call time so periodic UI refreshes (TimelineView) animate.
+    var focusSecondsToday: TimeInterval {
+        let startOfDay = Calendar.current.startOfDay(for: Date())
+        let stored = stats.date == startOfDay ? stats.focusSeconds : 0
+        guard let armedAt = stats.shieldArmedAt else { return stored }
+        let from = max(armedAt, startOfDay)
+        return stored + Date().timeIntervalSince(from)
+    }
+
+    /// Today's top-N most-blocked apps, ordered by descending count — the
+    /// apps you opened into the shield most. Read from the App-Group tally
+    /// the VibezShield extension writes (see `loadBlockTally`). Tie-broken
+    /// by hash so near-equal apps order stably within a session.
     func topBlockedApps(limit: Int = 3) -> [ApplicationToken] {
-        let sorted = stats.appBlockCounts.sorted { lhs, rhs in
+        let sorted = loadBlockTally().sorted { lhs, rhs in
             if lhs.value != rhs.value { return lhs.value > rhs.value }
             return lhs.key.hashValue > rhs.key.hashValue
         }
         return sorted.prefix(limit).map { $0.key }
+    }
+
+    /// Today's per-app block counts, written by the VibezShield extension
+    /// each time the user opens a shielded app. Read straight from the App
+    /// Group file on every call — it's tiny and the tile renders
+    /// infrequently. A missing file or stale day reads as empty, so the
+    /// tile resets at local midnight like the rest of the Today panel.
+    private func loadBlockTally() -> [ApplicationToken: Int] {
+        guard let url = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        )?.appendingPathComponent("app-block-tally.json"),
+              let data = try? Data(contentsOf: url),
+              let tally = try? JSONDecoder().decode(AppBlockTally.self, from: data),
+              tally.date == Calendar.current.startOfDay(for: Date())
+        else { return [:] }
+        return tally.counts
     }
 
     // MARK: - Rollover
@@ -144,7 +201,14 @@ final class AnalyticsTracker {
     private func rollIfNeeded() {
         let today = Calendar.current.startOfDay(for: Date())
         if stats.date != today {
+            // Preserve the in-flight armed marker so a shield that
+            // straddles midnight keeps counting toward the new day,
+            // starting from 00:00 of the new day rather than the
+            // original armedAt (which would inflate today's focus by
+            // however long the shield was up yesterday).
+            let carriedArmedAt: Date? = stats.shieldArmedAt != nil ? today : nil
             stats = DailyStats.zero(on: today)
+            stats.shieldArmedAt = carriedArmedAt
             save()
         }
     }

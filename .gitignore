@@ -5,6 +5,18 @@
 build/
 DerivedData/
 
+# Xcode per-user state (scheme ordering, breakpoints, window layout).
+# Lives under <user>.xcuserdatad; not shared, conventionally untracked.
+xcuserdata/
+
+# Node dependencies for the JS subprojects (Backend/functions, VibezExtension).
+# Each subproject also ignores these locally; this is a repo-wide safety net.
+node_modules/
+
+# Firebase CLI local cache + emulator/deploy debug logs.
+.firebase/
+*-debug.log
+
 # Firebase Console downloads land at the repo root by default; the
 # real copy lives at Vibez/GoogleService-Info.plist and is bundled
 # into the iOS target. Anchor to root so the bundled one is unaffected.

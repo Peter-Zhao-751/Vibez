@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Vibez",
+  "version": "0.1.0",
+  "description": "Blocks distracting websites when Claude Code or Codex finishes a task or asks for input — focus instead of doomscroll.",
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon-16.png",
+    "48": "icons/icon-48.png",
+    "128": "icons/icon-128.png"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ],
+  "permissions": ["storage", "alarms"],
+  "minimum_chrome_version": "116"
+}

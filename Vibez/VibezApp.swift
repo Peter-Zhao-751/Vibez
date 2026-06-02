@@ -109,9 +109,13 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
 
     // MARK: - Receiving remote notifications
 
-    /// Called when a remote push arrives while the app is in foreground OR
-    /// background (the latter only when `content-available: 1` is set in
-    /// the payload and `remote-notification` is in UIBackgroundModes).
+    /// Called when a remote push arrives while the app is suspended /
+    /// backgrounded (content-available wakes the app to deliver here).
+    /// Foreground alert pushes go through `willPresent` below instead —
+    /// iOS 16+ does NOT reliably call this method for foreground alert
+    /// pushes, even with content-available:1 in the payload. Gating on
+    /// applicationState != .active makes the two delegates mutually
+    /// exclusive so we don't double-process.
     func application(
         _ application: UIApplication,
         didReceiveRemoteNotification userInfo: [AnyHashable: Any],
@@ -123,24 +127,60 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         let shield = (userInfo["shield"] as? String) ?? "(no shield)"
         let session = (userInfo["session"] as? String) ?? "(no session)"
         let agent = (userInfo["agent"] as? String) ?? "(no agent)"
-        let summary = "keys=[\(keys)] title=\(title) event=\(event) shield=\(shield) session=\(session) agent=\(agent)"
-        pushLog.info("Remote push received: \(summary, privacy: .public)")
-        NotifyClient.shared.acceptPushUserInfo(userInfo)
+        let summary = "keys=[\(keys)] title=\(title) event=\(event) shield=\(shield) session=\(session) agent=\(agent) appState=\(application.applicationState.rawValue)"
+        pushLog.info("didReceiveRemoteNotification: \(summary, privacy: .public)")
 
-        // .newData tells iOS we did meaningful work — improves the chance
-        // of getting future silent pushes delivered promptly.
+        // willPresent only fires for ALERT pushes. shield:off is sent
+        // as a silent push (no aps.alert), so it has no willPresent
+        // path — didReceive is its only entry point, foreground OR
+        // background. The earlier blanket `applicationState == .active`
+        // gate was dropping foreground silent pushes entirely, which
+        // is why replying in the agent never lifted the shield while
+        // Vibez was open. Only skip when there's also an alert payload
+        // (the case willPresent actually handles).
+        let aps = userInfo["aps"] as? [String: Any]
+        let hasAlert = aps?["alert"] != nil
+        if application.applicationState == .active && hasAlert {
+            pushLog.info("didReceiveRemoteNotification: foreground alert — willPresent owns this path")
+            completionHandler(.noData)
+            return
+        }
+
+        NotifyClient.shared.acceptPushUserInfo(userInfo)
         completionHandler(.newData)
     }
 
-    // Always display incoming notifications in foreground. The server
-    // controls visibility by branching on shield value: shield:off is
-    // sent as a silent push (no banner, app still wakes to lift the
-    // shield), shield:on/nil is sent as an alert push.
+    // Foreground push entry point. iOS 16+ routes foreground alert
+    // pushes through this delegate, NOT through
+    // didReceiveRemoteNotification, regardless of content-available.
+    // So this is where we have to fish the userInfo out and feed it to
+    // NotifyClient — otherwise handleIncoming never runs, no shield, no
+    // trigger row (only the iOS auto-banner shows, which is exactly the
+    // symptom that kept coming back after the ntfy → FCM migration).
+    //
+    // We also suppress iOS's auto-banner for remote pushes (return [])
+    // so handleIncoming can apply its armed/ignored gating and raise
+    // the user-visible banner itself via scheduleLocalNotification
+    // (with markdown stripped). Local notifications (the ones the app
+    // itself raises) have no "aps" key and pass through unchanged.
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
+        var userInfo = notification.request.content.userInfo
+        if userInfo["aps"] != nil {
+            pushLog.info("willPresent: remote push, routing to NotifyClient + suppressing iOS banner")
+            // Tag the userInfo with the system's request identifier so
+            // processIfNew can dedupe this foreground delivery against
+            // a later drain of the NSE-written last-message.json — both
+            // see the same id and the overlay isn't re-enqueued every
+            // time the app comes back to foreground.
+            userInfo["id"] = notification.request.identifier
+            NotifyClient.shared.acceptPushUserInfo(userInfo)
+            completionHandler([])
+            return
+        }
         completionHandler([.banner, .sound, .list])
     }
 }

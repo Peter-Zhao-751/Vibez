@@ -102,6 +102,12 @@ struct VibezSetupCard: View {
                     .foregroundStyle(.red)
             }
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 18)
+                .fill(theme.bgPanel)
+        )
         .onAppear {
             // Seed the draft with the currently-saved ID so the user
             // can see what they entered last (and edit it if needed).
@@ -185,9 +191,10 @@ struct VibezSetupCard: View {
 #Preview("VibezSetupCard · idle") {
     VibezSetupCard(
         registrar: PushTokenRegistrar.shared,
-        theme: Theme.make(agent: .claude, dark: true)
+        theme: Theme.make(agent: .claude)
     )
     .padding()
     .background(Color.black)
+    .preferredColorScheme(.dark)
 }
 #endif

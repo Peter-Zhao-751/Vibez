@@ -58,6 +58,12 @@ enum IgnoreRule: Codable, Identifiable, Equatable {
 @MainActor
 @Observable
 final class IgnoreStore {
+    /// Singleton so ScreenTimeManager.applyTriggerFor (called from the
+    /// background push path) can read ignore rules without going through
+    /// a view's @State. ContentView defaults to this same instance;
+    /// previews still inject their own via the explicit init parameter.
+    static let shared = IgnoreStore()
+
     private(set) var rules: [IgnoreRule] = []
 
     private let defaults: UserDefaults

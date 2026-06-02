@@ -12,7 +12,6 @@ import SwiftUI
 struct BlockedOverlay: View {
     let agent: Agent
     let theme: Theme
-    let dark: Bool
     var message: NtfyMessage?
     /// Source of truth for the visible countdown. Reads from
     /// `ScreenTimeManager.pendingTriggers[sid].expiresAt` so the timer
@@ -35,6 +34,7 @@ struct BlockedOverlay: View {
     /// expected to pop this overlay off the queue.
     let onExpire: () -> Void
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var fired = false
 
     private func formatRemaining(_ seconds: Int) -> String {
@@ -73,10 +73,10 @@ struct BlockedOverlay: View {
 
     var body: some View {
         ZStack(alignment: .top) {
-            (dark ? Color(hex: 0x0c0d12) : Color(hex: 0xfbf8f4))
+            theme.bg
                 .overlay(
                     RadialGradient(
-                        colors: [gradientColor.opacity(dark ? 0.28 : 0.20), .clear],
+                        colors: [gradientColor.opacity(colorScheme == .dark ? 0.28 : 0.20), .clear],
                         center: UnitPoint(x: 0.5, y: 0.30),
                         startRadius: 0,
                         endRadius: 520
@@ -189,7 +189,7 @@ struct BlockedOverlay: View {
                             .overlay(
                                 Capsule()
                                     .strokeBorder(
-                                        theme.fgMute.opacity(dark ? 0.35 : 0.30),
+                                        theme.fgMute.opacity(colorScheme == .dark ? 0.35 : 0.30),
                                         lineWidth: 1.2
                                     )
                             )
@@ -230,8 +230,7 @@ private func previewMessage(
 #Preview("Needs input · 14:32 · dark") {
     BlockedOverlay(
         agent: .claude,
-        theme: Theme.make(agent: .claude, dark: true),
-        dark: true,
+        theme: Theme.make(agent: .claude),
         message: previewMessage(),
         expiresAt: Date().addingTimeInterval(14 * 60 + 32),
         stackDepth: 1,
@@ -244,8 +243,7 @@ private func previewMessage(
 #Preview("Done · 28s · light") {
     BlockedOverlay(
         agent: .claude,
-        theme: Theme.make(agent: .claude, dark: false),
-        dark: false,
+        theme: Theme.make(agent: .claude),
         message: previewMessage(
             title: "Refactor blocking panel",
             body: "Wrapped the panel in a lazy stack and trimmed the unused gradient. Tests pass.",
@@ -262,8 +260,7 @@ private func previewMessage(
 #Preview("Stack of 3 · dark") {
     BlockedOverlay(
         agent: .claude,
-        theme: Theme.make(agent: .claude, dark: true),
-        dark: true,
+        theme: Theme.make(agent: .claude),
         message: previewMessage(
             title: "Investigate WebSocket disconnects",
             body: "Reconnect logic is dropping the second frame on iOS 17 — want me to add a retry guard?"
@@ -279,8 +276,7 @@ private func previewMessage(
 #Preview("Codex · needs input · dark") {
     BlockedOverlay(
         agent: .codex,
-        theme: Theme.make(agent: .codex, dark: true),
-        dark: true,
+        theme: Theme.make(agent: .codex),
         message: previewMessage(
             title: "Wire up SSE handler",
             body: "Need confirmation before I rip out the polling fallback.",
@@ -297,8 +293,7 @@ private func previewMessage(
 #Preview("No dismiss · forced wait · dark") {
     BlockedOverlay(
         agent: .claude,
-        theme: Theme.make(agent: .claude, dark: true),
-        dark: true,
+        theme: Theme.make(agent: .claude),
         message: previewMessage(
             title: "Ship the Q4 changelog",
             body: "Want me to bundle the design-system entries under a single section, or keep them split out?"
@@ -315,8 +310,7 @@ private func previewMessage(
 #Preview("Untagged ping · no countdown · light") {
     BlockedOverlay(
         agent: .claude,
-        theme: Theme.make(agent: .claude, dark: false),
-        dark: false,
+        theme: Theme.make(agent: .claude),
         message: previewMessage(
             title: "Vibez",
             body: "Test push from a curl ping — no Vibez control tags.",
