@@ -9,6 +9,8 @@ const PILL_W = 240;
 const PILL_H = 120;
 const KNOB = 104;
 const PAD = 8;
+// Locked-tap shake length; matches the .vz-shake CSS animation duration.
+const SHAKE_DURATION_MS = 460;
 
 interface BigToggleProps {
   enabled: boolean;
@@ -35,7 +37,7 @@ export function BigToggle({
   const click = () => {
     if (!interactive) {
       setShaking(true);
-      setTimeout(() => setShaking(false), 460);
+      setTimeout(() => setShaking(false), SHAKE_DURATION_MS);
       onLockedTap?.();
       return;
     }

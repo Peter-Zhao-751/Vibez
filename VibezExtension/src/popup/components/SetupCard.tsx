@@ -3,6 +3,7 @@
 
 import { useState } from "react";
 import type { Theme } from "../../theme";
+import { STATUS_REGISTERING, STATUS_PAIRED, STATUS_ERROR, STATUS_IDLE } from "../../theme";
 import type { RegistrationState } from "../../types";
 import { VIBEZ_ID_PATTERN } from "../../config";
 
@@ -92,12 +93,12 @@ export function SetupCard({ theme, vibezId, registration, onSave, onRetry }: Set
 function statusFor(reg: RegistrationState, vibezId: string): { color: string; label: string } {
   switch (reg.phase) {
     case "registering":
-      return { color: "#e0a32e", label: "registering…" };
+      return { color: STATUS_REGISTERING, label: "registering…" };
     case "registered":
-      return { color: "#3fbf5f", label: "paired" };
+      return { color: STATUS_PAIRED, label: "paired" };
     case "error":
-      return { color: "#e0503f", label: `error: ${(reg.error ?? "").slice(0, 60)}` };
+      return { color: STATUS_ERROR, label: `error: ${(reg.error ?? "").slice(0, 60)}` };
     default:
-      return { color: "#8a8a8a", label: vibezId ? "waiting…" : "no Vibez ID yet" };
+      return { color: STATUS_IDLE, label: vibezId ? "waiting…" : "no Vibez ID yet" };
   }
 }

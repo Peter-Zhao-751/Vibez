@@ -13,11 +13,16 @@ export interface Ack {
   error?: string;
 }
 
+/// Normalize an unknown thrown value to a human-readable string.
+export function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
 export async function sendToBackground(msg: RuntimeMessage): Promise<Ack> {
   try {
     const res = (await chrome.runtime.sendMessage(msg)) as Ack | undefined;
     return res ?? { ok: true };
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : String(e) };
+    return { ok: false, error: errorMessage(e) };
   }
 }

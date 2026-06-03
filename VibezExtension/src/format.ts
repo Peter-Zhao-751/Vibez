@@ -23,3 +23,11 @@ export function formatRemaining(seconds: number): string {
   const s = seconds % 60;
   return `${m}:${String(s).padStart(2, "0")}`;
 }
+
+/// Short status label for a lifecycle event, used as a prefix in the
+/// Recent Triggers rows and the blocking overlay.
+export const EVENT_LABEL: Record<string, string> = {
+  done: "Done",
+  "needs-input": "Needs you",
+  replied: "Replied",
+};

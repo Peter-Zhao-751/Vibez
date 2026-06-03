@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { makeTheme } from "../theme";
+import { makeTheme, STATUS_ERROR } from "../theme";
 import { DURATION_STOPS } from "../config";
 import { formatDuration } from "../format";
 import type {
@@ -234,7 +234,7 @@ function SettingsPanel({
             Test overlay
           </button>
           {paired && (
-            <button className="vz-ghost-btn" style={{ borderColor: `${theme.fgMute}59`, color: "#e0503f" }} onClick={onUnpair}>
+            <button className="vz-ghost-btn" style={{ borderColor: `${theme.fgMute}59`, color: STATUS_ERROR }} onClick={onUnpair}>
               Unpair
             </button>
           )}

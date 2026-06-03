@@ -4,13 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { AgentTheme, OverlayInfo } from "../types";
 import { type Theme, withAlpha } from "../theme";
 import { Mascot } from "../popup/components/Mascot";
-import { formatRemaining } from "../format";
-
-const EVENT_LABEL: Record<string, string> = {
-  done: "Done",
-  "needs-input": "Needs you",
-  replied: "Replied",
-};
+import { formatRemaining, EVENT_LABEL } from "../format";
 
 interface OverlayProps {
   theme: Theme;

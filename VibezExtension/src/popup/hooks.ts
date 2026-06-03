@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getState, onStateChanged } from "../storage";
 import type { StoredState } from "../types";
+import { getSystemDark } from "../theme";
 
 /// Live view of chrome.storage.local, kept in sync with the background SW.
 export function useStoredState(): StoredState | null {
@@ -20,9 +21,7 @@ export function useStoredState(): StoredState | null {
 }
 
 export function useSystemDark(): boolean {
-  const [dark, setDark] = useState(
-    () => globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true,
-  );
+  const [dark, setDark] = useState(() => getSystemDark());
   useEffect(() => {
     const mq = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
     if (!mq) return;

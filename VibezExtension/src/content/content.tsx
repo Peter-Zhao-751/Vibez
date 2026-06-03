@@ -6,7 +6,7 @@
 import { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { getState, onStateChanged } from "../storage";
-import { makeTheme } from "../theme";
+import { makeTheme, getSystemDark, agentThemeFor } from "../theme";
 import { matchedDomain } from "../sites";
 import { sendToBackground } from "../messaging";
 import type { AgentTheme, StoredState } from "../types";
@@ -17,7 +17,7 @@ const HOST_ID = "vibez-overlay-host";
 
 function resolveDark(state: StoredState): boolean {
   if (state.settings.appearance === "system") {
-    return globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
+    return getSystemDark();
   }
   return state.settings.appearance === "dark";
 }
@@ -67,8 +67,7 @@ function ContentApp() {
   if (!show || !state) return null;
   const latest = state.blockState.latest!;
   const dark = resolveDark(state);
-  const agent: AgentTheme =
-    latest.agent === "cx" ? "codex" : latest.agent === "cc" ? "claude" : state.settings.agent;
+  const agent: AgentTheme = agentThemeFor(latest.agent, state.settings.agent);
   const theme = makeTheme(agent, dark);
 
   return (

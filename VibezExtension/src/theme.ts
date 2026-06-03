@@ -27,6 +27,13 @@ export const CLAUDE_DEEP = "#b85a36";
 export const CODEX_BLUE = "#8c9ce8";
 export const CODEX_DEEP = "#5d6fbc";
 
+/// Registration status indicator colors — the setup-card status dot and
+/// the Unpair action share these.
+export const STATUS_REGISTERING = "#e0a32e"; // amber
+export const STATUS_PAIRED = "#3fbf5f"; // green
+export const STATUS_ERROR = "#e0503f"; // red
+export const STATUS_IDLE = "#8a8a8a"; // gray
+
 function hexToRgb(hex: string): [number, number, number] {
   const h = hex.replace("#", "");
   return [
@@ -120,4 +127,10 @@ export function agentThemeFor(
   if (agent === "cc") return "claude";
   if (agent === "cx") return "codex";
   return fallback;
+}
+
+/// True when the OS is in dark mode. Defaults to dark when matchMedia is
+/// unavailable (e.g. a service-worker context).
+export function getSystemDark(): boolean {
+  return globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? true;
 }

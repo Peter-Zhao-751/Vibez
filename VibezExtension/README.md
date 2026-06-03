@@ -46,8 +46,9 @@ unpacked** → select `VibezExtension/dist`.
 
 ## Pair it
 
-1. On your Mac, run `/vibez:setup` in Claude Code or Codex to get your 4-word
-   Vibez ID (the same ID the phone uses — both agents share it).
+1. On your Mac, get your 4-word Vibez ID: run `/vibez:setup` in Claude Code, or
+   ask Codex for it (the `vibez-setup` skill). Both agents share the same ID —
+   the same one the phone uses.
 2. Click the Vibez toolbar icon, type the Vibez ID into the setup card, **Save**.
    The status dot turns green ("paired") once the backend accepts it.
 3. Flip the big toggle **ON**. Edit the blocked-site list as you like.

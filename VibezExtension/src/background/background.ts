@@ -12,6 +12,7 @@
 
 import { getState, patchState, onStateChanged, DEFAULTS } from "../storage";
 import { KEEPALIVE_ALARM, KEEPALIVE_PERIOD_MIN } from "../config";
+import { errorMessage } from "../messaging";
 import { listenEvents, callRegister } from "./firestore";
 import {
   durationSecondsFor,
@@ -36,6 +37,10 @@ const MAX_PROCESSED = 200;
 const MAX_RECENTS = 50;
 // Synthetic session key for the "Test overlay" preview (see previewBlock).
 const PREVIEW_KEY = "__preview__";
+// "Test overlay" preview length (see previewBlock).
+const PREVIEW_DURATION_MS = 30_000;
+// Nudge the expiry alarm just past the block's end so it has truly lapsed.
+const EXPIRY_ALARM_JITTER_MS = 250;
 
 let unsub: (() => void) | null = null;
 let listeningFor: string | null = null;
@@ -81,7 +86,7 @@ async function maybeRegister(): Promise<void> {
     await patchState({
       registration: {
         phase: "error",
-        error: e instanceof Error ? e.message : String(e),
+        error: errorMessage(e),
       },
     });
   }
@@ -207,7 +212,7 @@ async function commitBlock(
 function scheduleExpiry(sessions: PendingSessions): void {
   const soon = soonestExpiry(sessions);
   chrome.alarms.clear(EXPIRY_ALARM);
-  if (soon) chrome.alarms.create(EXPIRY_ALARM, { when: soon + 250 });
+  if (soon) chrome.alarms.create(EXPIRY_ALARM, { when: soon + EXPIRY_ALARM_JITTER_MS });
 }
 
 // ------------------------------------------------------------- commands ----
@@ -239,7 +244,7 @@ async function previewBlock(): Promise<void> {
   const state = await getState();
   const sessions = {
     ...prune(state.blockState.sessions, now),
-    [PREVIEW_KEY]: now + 30_000,
+    [PREVIEW_KEY]: now + PREVIEW_DURATION_MS,
   };
   await commitBlock(state, sessions, state.analytics);
 }
@@ -329,7 +334,7 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       }
       sendResponse({ ok: true });
     } catch (e) {
-      sendResponse({ ok: false, error: e instanceof Error ? e.message : String(e) });
+      sendResponse({ ok: false, error: errorMessage(e) });
     }
   })();
   return true; // async sendResponse

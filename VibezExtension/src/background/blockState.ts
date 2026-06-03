@@ -18,26 +18,22 @@ export function durationSecondsFor(event: VibezEvent | null, s: Settings): numbe
 
 /// Stable key for a session. Untagged events (no/`nosid` session) get a
 /// synthetic per-event key so they still occupy the pending map.
+function makeSessionKey(session: string | null | undefined, id: string): string {
+  return session && session !== "nosid" ? session : `untagged:${id}`;
+}
+
 export function sessionKeyFor(doc: VibezEventDoc): string {
-  return doc.session && doc.session !== "nosid"
-    ? doc.session
-    : `untagged:${doc.id}`;
+  return makeSessionKey(doc.session, doc.id);
 }
 
 export function triggerKey(t: TriggerRecord): string {
-  return t.sessionId && t.sessionId !== "nosid"
-    ? t.sessionId
-    : `untagged:${t.id}`;
+  return makeSessionKey(t.sessionId, t.id);
 }
 
 export function prune(sessions: PendingSessions, now = Date.now()): PendingSessions {
   const out: PendingSessions = {};
   for (const [k, exp] of Object.entries(sessions)) if (exp > now) out[k] = exp;
   return out;
-}
-
-export function isActive(sessions: PendingSessions, now = Date.now()): boolean {
-  return Object.values(sessions).some((exp) => exp > now);
 }
 
 export function soonestExpiry(sessions: PendingSessions): number | null {

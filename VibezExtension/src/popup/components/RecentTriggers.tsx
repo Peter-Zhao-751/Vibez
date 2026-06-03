@@ -3,14 +3,8 @@
 import type { Theme } from "../../theme";
 import type { TriggerRecord } from "../../types";
 import { CLAUDE_ORANGE, CODEX_BLUE } from "../../theme";
-import { relativeTime } from "../../format";
+import { relativeTime, EVENT_LABEL } from "../../format";
 import { useNow } from "../hooks";
-
-const EVENT_LABEL: Record<string, string> = {
-  done: "Done",
-  "needs-input": "Needs you",
-  replied: "Replied",
-};
 
 export function RecentTriggers({ theme, triggers }: { theme: Theme; triggers: TriggerRecord[] }) {
   const now = useNow(30_000);
