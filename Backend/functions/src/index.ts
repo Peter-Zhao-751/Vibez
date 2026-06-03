@@ -28,6 +28,10 @@ const DEVICES = "devices";
 // chunk and accumulate. Vibez is personal-scale; defensive ceiling.
 const MULTICAST_CHUNK = 500;
 
+// Defensive floor for the fcmToken length — rejects obviously empty or
+// garbage tokens. Real FCM registration tokens are 150+ chars.
+const MIN_FCM_TOKEN_LENGTH = 20;
+
 // 4 hyphen-separated words, each 3-5 lowercase ASCII letters. Generated
 // by the plugin's setup.sh and typed into the iOS Vibez app.
 const VIBEZ_ID_PATTERN = /^[a-z]{3,5}(-[a-z]{3,5}){3}$/;
@@ -55,7 +59,10 @@ export const registerPushToken = onCall(
     const platform =
       typeof data.platform === "string" ? data.platform : "unknown";
 
-    if (typeof fcmToken !== "string" || fcmToken.length < 20) {
+    if (
+      typeof fcmToken !== "string" ||
+      fcmToken.length < MIN_FCM_TOKEN_LENGTH
+    ) {
       throw new HttpsError(
         "invalid-argument",
         "fcmToken must be a non-empty string"
@@ -314,7 +321,7 @@ export const notify = onRequest(
       const now = Date.now();
       const item: Record<string, unknown> = {
         title,
-        body,
+        body: bodyText,
         createdAtMs: now,
         createdAt: FieldValue.serverTimestamp(),
         expireAt: Timestamp.fromMillis(now + 24 * 60 * 60 * 1000),

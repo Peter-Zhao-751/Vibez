@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
 // Pure, side-effect-free helpers for the timeout-unblock backup layer.
 // No firebase imports here, so they unit-test without the admin SDK.
 
@@ -63,16 +62,8 @@ export const APNS_HEADERS: Record<string, string> = {
   "apns-priority": "10",
 };
 
-/**
- * Build the apns.payload for a Vibez push. `shield:"off"` → passive
- * (silent) alert; otherwise a standard alert with sound. Custom fields
- * sit at the top level (siblings of `aps`) so iOS surfaces them in
- * userInfo, matching what NotifyClient + the NSE parse.
- * @param {object} f Push fields: title, body, event, shield, session,
- *   agent, reason.
- * @return {any} The apns.payload object (aps + top-level custom fields).
- */
-export function buildApnsPayload(f: {
+/** The fields a Vibez push carries — shared by /notify and dispatchUnblock. */
+export interface VibezPushFields {
   title: string;
   body: string;
   event?: string;
@@ -80,9 +71,45 @@ export function buildApnsPayload(f: {
   session?: string;
   agent?: string;
   reason?: string;
-}): any {
+}
+
+/** The `aps` dictionary of an APNs alert payload. */
+interface ApsDictionary {
+  "alert": {title: string; body: string};
+  "sound"?: string;
+  "interruption-level"?: string;
+  "content-available": number;
+  "mutable-content": number;
+}
+
+/**
+ * apns.payload: the `aps` dictionary plus Vibez's custom fields, which
+ * sit at the top level (siblings of `aps`) so iOS surfaces them in
+ * userInfo. The optional fields mirror VibezPushFields.
+ */
+export interface VibezApnsPayload {
+  aps: ApsDictionary;
+  title: string;
+  body: string;
+  event?: string;
+  shield?: string;
+  session?: string;
+  agent?: string;
+  reason?: string;
+}
+
+/**
+ * Build the apns.payload for a Vibez push. `shield:"off"` → passive
+ * (silent) alert; otherwise a standard alert with sound. Custom fields
+ * sit at the top level (siblings of `aps`) so iOS surfaces them in
+ * userInfo, matching what NotifyClient + the NSE parse.
+ * @param {VibezPushFields} f Push fields: title, body, event, shield,
+ *   session, agent, reason.
+ * @return {VibezApnsPayload} The apns.payload (aps + top-level fields).
+ */
+export function buildApnsPayload(f: VibezPushFields): VibezApnsPayload {
   const isSilent = f.shield === "off";
-  const aps: any = isSilent ?
+  const aps: ApsDictionary = isSilent ?
     {
       "alert": {title: f.title, body: f.body},
       "interruption-level": "passive",
@@ -95,7 +122,7 @@ export function buildApnsPayload(f: {
       "content-available": 1,
       "mutable-content": 1,
     };
-  const payload: any = {aps, title: f.title, body: f.body};
+  const payload: VibezApnsPayload = {aps, title: f.title, body: f.body};
   if (f.event !== undefined) payload.event = f.event;
   if (f.shield !== undefined) payload.shield = f.shield;
   if (f.session !== undefined) payload.session = f.session;
