@@ -130,6 +130,10 @@ final class ScreenTimeManager {
     /// `.standard` for the host's own state; mirror to App Group below
     /// so VibezPushService can still read what it needs.
     private let defaults = UserDefaults.standard
+    // The App Group container is guaranteed present on a provisioned build
+    // (the application-groups entitlement is required), so this is
+    // effectively never nil. Call sites optional-chain it rather than
+    // force-unwrap so a misconfiguration fails safe (no-op) over a crash.
     private let sharedDefaults = UserDefaults(suiteName: "group.vibezlol.Vibez")
 
     @ObservationIgnored private var tickTask: Task<Void, Never>?
@@ -296,7 +300,7 @@ final class ScreenTimeManager {
     /// has turned Vibez off.
     func addTrigger(sessionId: String, durationSeconds: Int) {
         guard armed else { return }
-        guard !sessionId.isEmpty, sessionId != "nosid" else { return }
+        guard sessionId.isUsableSessionId else { return }
         let duration = max(1, durationSeconds)
         pendingTriggers[sessionId] = PendingTrigger(
             sessionId: sessionId,
@@ -310,7 +314,7 @@ final class ScreenTimeManager {
     /// Removes a single trigger by sessionId. Same code path is used by:
     /// reply (shield:off push), Dismiss button, and timer expiry.
     func resolveTrigger(sessionId: String) {
-        guard !sessionId.isEmpty, sessionId != "nosid" else { return }
+        guard sessionId.isUsableSessionId else { return }
         guard pendingTriggers.removeValue(forKey: sessionId) != nil else { return }
         persistPendingTriggers()
         recomputeBlocking()
@@ -702,7 +706,7 @@ final class ScreenTimeManager {
         shieldLog.info("applyTriggerFor: shield=\(shieldStr, privacy: .public) armed=\(self.armed, privacy: .public) session=\(sidStr, privacy: .public) selection=\(self.selection.applicationTokens.count, privacy: .public) apps")
 
         if message.shield == .off,
-           let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+           let sid = message.sessionId, sid.isUsableSessionId {
             // Sync from App Group first — the NSE may have added this
             // session's trigger in the background and host's in-memory
             // dict hasn't picked it up yet (tick is 1Hz). Without this,
@@ -720,7 +724,7 @@ final class ScreenTimeManager {
             shieldLog.info("applyTriggerFor: disarmed → no-op")
             return
         }
-        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+        if let sid = message.sessionId, sid.isUsableSessionId {
             if IgnoreStore.shared.contains(sessionId: sid, name: message.title) {
                 shieldLog.info("applyTriggerFor: ignored session \(sid, privacy: .public)")
                 IgnoreStore.shared.refreshName(sessionId: sid, name: message.title)
@@ -834,7 +838,7 @@ final class ScreenTimeManager {
         if let arr = defaults.array(forKey: Key.pendingTriggersV1) as? [String] {
             let now = Date()
             pendingTriggers = Dictionary(uniqueKeysWithValues: arr.compactMap { sid in
-                guard !sid.isEmpty, sid != "nosid" else { return nil }
+                guard sid.isUsableSessionId else { return nil }
                 return (sid, PendingTrigger(
                     sessionId: sid,
                     addedAt: now,

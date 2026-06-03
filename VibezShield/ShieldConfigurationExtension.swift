@@ -61,8 +61,8 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
 
         // Layout, given iOS's 4 slots (icon, title, subtitle, button):
         //  - icon     : host-rendered mascot
-        //  - title    : ntfy displayTitle in fg (white on dark)
-        //  - subtitle : ntfy body (already markdown-stripped on the host)
+        //  - title    : push displayTitle in fg (white on dark)
+        //  - subtitle : push body (already markdown-stripped on the host)
         //               in fgMute (gray)
         //  - button   : "Close" in accent
         let displayName = name ?? "this app"

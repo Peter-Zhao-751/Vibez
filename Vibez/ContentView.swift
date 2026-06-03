@@ -62,7 +62,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
 
-    @State private var overlayQueue: [NtfyMessage] = []   // newest first
+    @State private var overlayQueue: [NtfyMessage] = []   // order depends on overlayOrder — see enqueueOverlay
     @State private var showSettings = false
     @State private var toggleShake = 0
     @State private var setupShake = 0
@@ -220,7 +220,7 @@ struct ContentView: View {
             // — they have no backing trigger and are removed only by
             // the Dismiss button.
             overlayQueue.removeAll { msg in
-                guard let sid = msg.sessionId, !sid.isEmpty, sid != "nosid"
+                guard let sid = msg.sessionId, sid.isUsableSessionId
                 else { return false }
                 return newPending[sid] == nil
             }
@@ -370,7 +370,7 @@ struct ContentView: View {
     /// The next-most-recent unresolved block (if any) takes its place.
     private func dismissTopOverlay() {
         guard let msg = overlayQueue.first else { return }
-        if let sid = msg.sessionId, !sid.isEmpty, sid != "nosid" {
+        if let sid = msg.sessionId, sid.isUsableSessionId {
             // Sync from App Group first — the NSE may have engaged
             // the shield for this session in the background, but
             // host's in-memory pendingTriggers is empty until the
@@ -392,7 +392,7 @@ struct ContentView: View {
     /// dot and pop.
     private func expireTopOverlay() {
         guard let msg = overlayQueue.first else { return }
-        if let sid = msg.sessionId, !sid.isEmpty, sid != "nosid" {
+        if let sid = msg.sessionId, sid.isUsableSessionId {
             triggerStore.clearNeedsReply(forSession: sid)
         }
         withAnimation(.easeInOut(duration: 0.32)) {
@@ -413,7 +413,7 @@ struct ContentView: View {
     /// messages (no session) carry no trigger by design and keep the old
     /// informational-overlay behavior.
     private func shouldEnqueueOverlay(for message: NtfyMessage) -> Bool {
-        guard let sid = message.sessionId, !sid.isEmpty, sid != "nosid" else {
+        guard let sid = message.sessionId, sid.isUsableSessionId else {
             return true
         }
         guard let trigger = manager.pendingTriggers[sid] else { return false }
@@ -428,7 +428,7 @@ struct ContentView: View {
     ///   - `.queue` (FIFO): append at the back so the oldest pending
     ///     block stays visible until dismissed.
     private func enqueueOverlay(_ message: NtfyMessage) {
-        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+        if let sid = message.sessionId, sid.isUsableSessionId {
             overlayQueue.removeAll { $0.sessionId == sid }
         }
         switch overlayOrder {
@@ -494,7 +494,7 @@ struct ContentView: View {
             recordTrigger(from: message)
 
             if let sid = message.sessionId,
-               !sid.isEmpty, sid != "nosid" {
+               sid.isUsableSessionId {
                 if ignoreStore.contains(sessionId: sid, name: message.title) {
                     handleIncomingLog.info("→ ignored, no overlay/shield")
                     // Ignored conversation — keep the row in Recent
@@ -828,7 +828,7 @@ private let previewClaudeTitles: [(String, String)] = [
 private let previewCodexTitles: [(String, String)] = [
     ("Rescue plan: stale shield", "Manager carried `shieldApplied=true` across an unblock. Reset hook proposed."),
     ("Rebuild ShieldCard renderer", "Want me to swap ImageRenderer for a UIGraphicsImageRenderer pass?"),
-    ("Diagnose ntfy reconnect storm", "Backoff was 3s flat — bumped to exponential with jitter."),
+    ("Diagnose push delivery timing", "Backoff was 3s flat — bumped to exponential with jitter."),
     ("Codex hook permission probe", "Need approval to write `~/.claude/hooks/`."),
     ("Sweep dead code in Components", "Found 4 unused helpers. Safe to delete?"),
     ("Audit MainActor isolation", "Three call sites missed `@MainActor`. Patch ready for review."),

@@ -4,7 +4,7 @@
 //
 //  Full-screen overlay shown when an agent has pinged the user.
 //  Animates in, dismisses on tap. When given a `message` it shows the
-//  ntfy text verbatim; otherwise falls back to agent-themed copy.
+//  push text verbatim; otherwise falls back to agent-themed copy.
 //
 
 import SwiftUI

@@ -47,6 +47,10 @@ final class NotificationService: UNNotificationServiceExtension {
 
     private let log = Logger(subsystem: "vibezlol.Vibez", category: "PushService")
     private let store = ManagedSettingsStore(named: .vibez)
+    // The App Group container is guaranteed present on a provisioned build
+    // (the application-groups entitlement is required), so this is
+    // effectively never nil. Call sites guard/optional-chain it rather than
+    // force-unwrap so a misconfiguration fails safe (no-op) over a crash.
     private let sharedDefaults = UserDefaults(suiteName: "group.vibezlol.Vibez")
 
     private enum Key {
@@ -211,40 +215,54 @@ final class NotificationService: UNNotificationServiceExtension {
             return
         }
 
-        // shield:off — the user just replied in the agent. Remove the
-        // matching pending trigger and, if nothing else is open, drop
-        // the OS shield. Runs regardless of `armed` (resolving stale
-        // state when the toggle is off is harmless).
         if shield == "off" {
-            guard !session.isEmpty, session != "nosid" else { return }
-            var triggers = loadPendingTriggers()
-            if reason == "timeout" {
-                // Backup unblock: drop ONLY if this session's timer is
-                // actually due. Not due (the timer was reset by a later
-                // ping) or already gone → no-op, so a stale/duplicate
-                // dispatch can never unblock early. Design spec §3.
-                guard let t = triggers.first(
-                          where: {$0.sessionId == session}),
-                      Date() >= t.expiresAt else {
-                    log.info("shield=off timeout \(session, privacy: .public): not due / gone — no-op")
-                    return
-                }
-            }
-            let before = triggers.count
-            triggers.removeAll { $0.sessionId == session }
-            savePendingTriggers(triggers)
-            // A manual focus hold (mascot tap) keeps the shield up even
-            // when no per-session triggers remain — don't lift a hand-set
-            // hold that a backgrounded reply/timeout would otherwise drop.
-            let focusMode = sharedDefaults?.bool(forKey: Key.focusMode) ?? false
-            if triggers.isEmpty && !focusMode {
-                clearShield()
-            }
-            log.info("shield=off: \(session, privacy: .public) (\(before, privacy: .public)→\(triggers.count, privacy: .public)) focus=\(focusMode, privacy: .public) reason=\(reason, privacy: .public)")
-            return
+            handleShieldOff(session: session, reason: reason)
+        } else {
+            handleShieldOn(session: session, event: event, agent: agent, title: title, body: body)
         }
+    }
 
-        // shield:on or untagged — engage if Vibez is armed.
+    /// shield:off — the user just replied in the agent. Remove the
+    /// matching pending trigger and, if nothing else is open, drop the OS
+    /// shield. Runs regardless of `armed` (resolving stale state when the
+    /// toggle is off is harmless).
+    private func handleShieldOff(session: String, reason: String) {
+        guard !session.isEmpty, session != "nosid" else { return }
+        var triggers = loadPendingTriggers()
+        if reason == "timeout" {
+            // Backup unblock: drop ONLY if this session's timer is
+            // actually due. Not due (the timer was reset by a later
+            // ping) or already gone → no-op, so a stale/duplicate
+            // dispatch can never unblock early. Design spec §3.
+            guard let t = triggers.first(
+                      where: {$0.sessionId == session}),
+                  Date() >= t.expiresAt else {
+                log.info("shield=off timeout \(session, privacy: .public): not due / gone — no-op")
+                return
+            }
+        }
+        let before = triggers.count
+        triggers.removeAll { $0.sessionId == session }
+        savePendingTriggers(triggers)
+        // A manual focus hold (mascot tap) keeps the shield up even
+        // when no per-session triggers remain — don't lift a hand-set
+        // hold that a backgrounded reply/timeout would otherwise drop.
+        let focusMode = sharedDefaults?.bool(forKey: Key.focusMode) ?? false
+        if triggers.isEmpty && !focusMode {
+            clearShield()
+        }
+        log.info("shield=off: \(session, privacy: .public) (\(before, privacy: .public)→\(triggers.count, privacy: .public)) focus=\(focusMode, privacy: .public) reason=\(reason, privacy: .public)")
+    }
+
+    /// shield:on or untagged — engage the shield if Vibez is armed,
+    /// adding (or refreshing) the per-session pending trigger.
+    private func handleShieldOn(
+        session: String,
+        event: String,
+        agent: String,
+        title: String,
+        body: String
+    ) {
         let armed = sharedDefaults?.bool(forKey: Key.armed) ?? false
         guard armed else {
             log.info("disarmed — no-op")

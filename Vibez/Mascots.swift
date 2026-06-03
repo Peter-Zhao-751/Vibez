@@ -179,23 +179,6 @@ struct ClaudeMascot: View {
     }
 }
 
-private struct ClaudeBodyShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let s = rect.width / 100
-        var p = Path()
-        // main body
-        p.addRect(CGRect(x: 8 * s, y: 8 * s, width: 84 * s, height: 56 * s))
-        // side wings
-        p.addRect(CGRect(x: -4 * s, y: 36 * s, width: 12 * s, height: 15 * s))
-        p.addRect(CGRect(x: 92 * s, y: 36 * s, width: 12 * s, height: 15 * s))
-        // 4 legs
-        for x in [18.0, 32.0, 60.0, 74.0] {
-            p.addRect(CGRect(x: x * s, y: 64 * s, width: 10 * s, height: 18 * s))
-        }
-        return p
-    }
-}
-
 private struct ClaudeEyes: View {
     let expression: Expression
     let color: Color

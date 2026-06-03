@@ -153,7 +153,7 @@ final class IgnoreStore {
     }
 
     private func isUsableSid(_ sid: String) -> Bool {
-        !sid.isEmpty && sid != "nosid"
+        sid.isUsableSessionId
     }
 
     private func load() {

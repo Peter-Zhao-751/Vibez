@@ -521,7 +521,7 @@ private struct AddIgnoreSheet: View {
         var out: [Candidate] = []
         for event in triggerStore.events {
             guard let sid = event.sessionId,
-                  !sid.isEmpty, sid != "nosid",
+                  sid.isUsableSessionId,
                   let name = event.title, !name.isEmpty,
                   seenSids.insert(sid).inserted,
                   !ignoreStore.contains(sessionId: sid, name: name)

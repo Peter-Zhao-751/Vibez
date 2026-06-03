@@ -799,7 +799,7 @@ struct TriggerRow: View {
 
     private var canIgnore: Bool {
         guard let sid = event.sessionId else { return false }
-        return !sid.isEmpty && sid != "nosid"
+        return sid.isUsableSessionId
     }
 
     var body: some View {

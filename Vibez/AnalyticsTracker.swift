@@ -114,7 +114,7 @@ final class AnalyticsTracker {
     func record(_ message: NtfyMessage) {
         rollIfNeeded()
         stats.pingCount += 1
-        if let sid = message.sessionId, !sid.isEmpty, sid != "nosid" {
+        if let sid = message.sessionId, sid.isUsableSessionId {
             stats.conversationIds.insert(sid)
         }
         if message.event == .replied {

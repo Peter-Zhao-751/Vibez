@@ -39,11 +39,10 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
     static let vibezIdPattern = #"^[a-z]{3,5}(-[a-z]{3,5}){3}$"#
 
     private(set) var state: State = .idle
+    /// Transient cache of the latest FCM registration token, so
+    /// `registerIfPossible` doesn't have to re-fetch
+    /// `Messaging.messaging().fcmToken` on every call.
     private(set) var lastToken: String?
-    /// When the most recent successful register completed. Surfaces in
-    /// the setup card so you can tell at a glance whether we actually
-    /// got through.
-    private(set) var lastRegisteredAt: Date?
 
     /// The Vibez ID the user has entered. Persisted in UserDefaults so
     /// it survives across launches. Setting it triggers a fresh
@@ -146,7 +145,6 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
                     "blockSecondsDone": doneSeconds,
                     "blockSecondsNeedsInput": needsSeconds,
                 ])
-            lastRegisteredAt = Date()
             state = .registered
             log.info("registerPushToken OK")
         } catch {
@@ -184,7 +182,6 @@ extension PushTokenRegistrar {
         r.vibezId = vibezId
         r.state = state
         r.lastToken = "preview-fcm-token"
-        r.lastRegisteredAt = Date()
         return r
     }
 }

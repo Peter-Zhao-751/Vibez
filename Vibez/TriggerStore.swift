@@ -2,7 +2,7 @@
 //  TriggerStore.swift
 //  Vibez
 //
-//  Persists the most recent agent triggers (capped at 10) to UserDefaults
+//  Persists the most recent agent triggers (capped at 100) to UserDefaults
 //  so the "Recent triggers" section keeps state across launches.
 //
 
@@ -36,7 +36,7 @@ final class TriggerStore {
     }
 
     /// Marks any TriggerEvent for the given session id as no-longer-
-    /// awaiting-reply. Called when a `_vibez:shield:off` push arrives
+    /// awaiting-reply. Called when a `shield:off` push arrives
     /// because the user just replied in that conversation. Also stamps
     /// `repliedAt` so the analytics panel can compute time-to-reply.
     func clearNeedsReply(forSession sid: String) {
