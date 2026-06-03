@@ -25,7 +25,8 @@ BACKEND_URL="${VIBEZ_BACKEND_URL:-https://us-central1-vibez-backend.cloudfunctio
 # `bash notify.sh` runs (mostly _selftest).
 SCRIPT_DIR="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}/scripts"
 
-# One-shot migration from the old claude-ntfy-named directory.
+# One-shot migration from the old claude-ntfy-named directory used by the
+# pre-0.9 Claude Code plugin. Same machine, same ID, same pairing.
 OLD_CONFIG_DIR="${HOME}/.config/claude-ntfy"
 if [ -d "${OLD_CONFIG_DIR}" ] && [ ! -d "${CONFIG_DIR}" ]; then
     mv "${OLD_CONFIG_DIR}" "${CONFIG_DIR}" 2>/dev/null || true
@@ -68,8 +69,8 @@ ensure_vibez_id() {
 }
 
 # POST a Vibez payload to the backend's /notify endpoint. Title and
-# body are required; the four trailing args are the same control axes
-# the old ntfy bridge carried as `_vibez:...` tags.
+# body are required; the four trailing args become the event / shield /
+# session / agent fields of the JSON payload (omitted when empty).
 post_vibez() {
     local title="$1"
     local body="$2"

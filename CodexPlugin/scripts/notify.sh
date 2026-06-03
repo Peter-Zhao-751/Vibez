@@ -67,8 +67,8 @@ ensure_vibez_id() {
 }
 
 # POST a Vibez payload to the backend's /notify endpoint. Title and
-# body are required; the four trailing args are the same control axes
-# the old ntfy bridge carried as `_vibez:...` tags.
+# body are required; the four trailing args become the event / shield /
+# session / agent fields of the JSON payload (omitted when empty).
 post_vibez() {
     local title="$1"
     local body="$2"

@@ -10,9 +10,9 @@
 #   test          POST a test push to the Vibez backend for this ID
 #
 # Vibez ID format: 4 hyphen-separated common English words, each 3-5
-# letters, drawn from a curated ~400-word list. ~34 bits of entropy,
-# enough to make brute-forcing impractical for the ntfy-like threat
-# model (anyone who guesses the ID can push to that phone). The Vibez
+# letters, drawn from a curated ~2000-word list. ~44 bits of entropy,
+# enough to make brute-forcing impractical for the threat model
+# (anyone who guesses the ID can push to that phone). The Vibez
 # app pairs the entered ID with its FCM token via the
 # `registerPushToken` Cloud Function on first launch.
 
@@ -185,7 +185,8 @@ yawn year yeast yell yelp yes yet yew yield yoga yogi yoke yolk you
 young your youth yummy zeal zebra zero zest zinc zip zone zoo
 '
 
-# One-shot migration from the old ntfy-era directory naming.
+# One-shot migration from the old claude-ntfy-named directory used by the
+# pre-0.9 Claude Code plugin.
 OLD_CONFIG_DIR="${HOME}/.config/claude-ntfy"
 if [ -d "${OLD_CONFIG_DIR}" ] && [ ! -d "${CONFIG_DIR}" ]; then
     mv "${OLD_CONFIG_DIR}" "${CONFIG_DIR}" 2>/dev/null || true

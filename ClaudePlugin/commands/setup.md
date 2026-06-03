@@ -1,5 +1,5 @@
 ---
-description: Show your ntfy.sh subscribe URL and QR code (also: /vibez:setup test, /vibez:setup regenerate)
+description: Show your Vibez ID for pairing the Vibez iOS app (also: /vibez:setup test, /vibez:setup regenerate)
 argument-hint: "[show|test|regenerate]"
 allowed-tools: Bash
 ---
