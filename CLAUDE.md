@@ -6,19 +6,20 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone
 
 - **Family Controls working on device.** Screen Time API integration via `FamilyControls` + `ManagedSettings` runs end-to-end against the iOS 26.4 SDK on Peter's iPhone. Toggle on → selected apps shielded; toggle off → unblocked. State survives app kill. Peter is enrolled in the paid Apple Developer Program, so the `com.apple.developer.family-controls` entitlement provisions cleanly.
 - **Firebase-backed push pipeline working end-to-end.** Mac plugin (Claude Code or Codex) POSTs lifecycle events to a Firebase Cloud Function (`/notify`); the function fans out via FCM to every device registered to the user's Vibez ID. Push lands while Vibez is suspended (the whole reason FCM replaces ntfy). The four-word Vibez ID pairs Mac → phone.
-- **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and renders a custom shield (mascot + push title/body, tinted accent background, "Close" button).
+- **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and shows a custom shield (host-rendered mascot PNG + push title/body, tinted accent background, "Close" button). The PNG is rendered on the host (`ShieldCardRenderer`), not in the extension.
 - **ntfy is gone.** WebSocket subscription, ntfy URL UI, push-vibez.py, and the topic-based plugin path are all removed. One push path: plugin → Firebase → FCM → APNs → Vibez.
 - **Next phase: Family Controls Distribution Request + App Store review.** Backend already runs on Peter's Firebase project; .p8 lives in Firebase Cloud Messaging, never ships to users.
 
 ## File map
 
 ```
-Vibez/
+Vibez/                        Main iOS app target.
   VibezApp.swift              SwiftUI @main; AppDelegate calls FirebaseApp.configure(),
                               registers for remote notifications, sets Messaging delegate,
                               forwards APN→FCM, and delivers pushes via NotifyClient.shared.
   ContentView.swift           Home screen: mascot, big toggle, VibezSetupCard, analytics,
-                              recent triggers. `setupNeeded` gates on
+                              recent triggers. Owns the overlay queue and the incoming-push
+                              handler (handleIncoming). `setupNeeded` gates on
                               `registrar.vibezId.isEmpty || registrar.state != .registered`.
   VibezSetupCard.swift        Pairing card — user types in the 4-word Vibez ID, calls
                               registrar.setVibezId(...). Replaces the old NotificationSetupCard.
@@ -29,20 +30,55 @@ Vibez/
   NotifyClient.swift          Push inbox. WebSocket is gone; class still exists because
                               AppDelegate routes incoming FCM userInfo through
                               acceptPushUserInfo → lastMessage → ContentView.handleIncoming.
-                              Owns VibezEvent / VibezShield / VibezAgent / NtfyMessage types.
+                              Owns VibezEvent / VibezShield / VibezAgent / NtfyMessage types
+                              (NtfyMessage name kept deliberately — renaming churns many files).
   ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
                               ManagedSettingsStore shield apply/remove, App Group writer.
+                              Pre-renders one shield PNG per agent into the App Group at init.
+  ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
+                              a per-agent PNG into the App Group container so VibezShield (and
+                              the NSE) can engage the shield without running ImageRenderer.
+  Components.swift            Shared design-system views (pill toggle, top bar, blocked-app
+                              card, recent-trigger row) + the TriggerEvent model.
+  BlockedOverlay.swift        Full-screen in-app overlay shown when an agent pings; live
+                              countdown bound to ScreenTimeManager.pendingTriggers.
+  SettingsView.swift          Settings sheet: app picker, block durations, re-pair the Vibez
+                              ID, appearance override.
+  Mascots.swift               Vector mascots — Claude (pixel critter) + Codex (cloud bot).
+  Theme.swift                 Color palette + agent→accent mapping.
+  AnalyticsTracker.swift      Per-day usage stats (conversations, replies, ping counts);
+                              resets at local midnight. Feeds ContentView's analytics panel.
+  TriggerStore.swift          Persists recent triggers (capped at 100) for the Recent
+                              triggers list; clears needs-reply when a shield:off push lands.
+  IgnoreStore.swift           Persists mute rules (e.g. ignore one conversation by sid) so
+                              muted sessions don't raise overlays/shields.
   Vibez.entitlements          aps-environment=development + family-controls + application-groups
+  VibezRelease.entitlements   Release variant — aps-environment=production.
   GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
-VibezShield/                  Shield Configuration Extension. Reads ShieldState from the App
-                              Group, rasterizes ShieldCard to a UIImage via ImageRenderer,
-                              slots it into ShieldConfiguration.icon. Self-contained.
-  ShieldConfigurationExtension.swift  ShieldConfigurationDataSource subclass.
-  ShieldCard.swift                    Agent enum, ShieldState reader, theme, SwiftUI view.
+VibezShield/                  Shield Configuration Extension (separate target). Reads
+                              ShieldState from the App Group and loads the host-rendered
+                              per-agent PNG from the App Group container into
+                              ShieldConfiguration.icon. Deliberately NO SwiftUI/ImageRenderer
+                              here (MainActor-isolated, traps in the extension); all rendering
+                              lives in the host's ShieldCardRenderer. Falls back to a
+                              text-only shield when the PNG is missing.
+  ShieldConfigurationExtension.swift  ShieldConfigurationDataSource subclass; per-open tally.
+  ShieldCard.swift                    Agent enum, ShieldState reader, theme constants.
   VibezShield.entitlements            family-controls + application-groups
+VibezPushService/             Notification Service Extension (separate target). Runs on every
+                              push marked mutable-content:1, BEFORE iOS shows the banner — the
+                              only reliable place to engage the shield while Vibez is suspended
+                              (the host AppDelegate isn't called when backgrounded on iOS 26).
+                              Reads selection/armed/pendingTriggers/blockSeconds from the App
+                              Group, writes via ManagedSettingsStore("vibez.shield"), and prunes
+                              per-session on a shield:off / reason:timeout push.
+  NotificationService.swift   UNNotificationServiceExtension subclass.
+  VibezPushService.entitlements  family-controls + application-groups
+  Info.plist
 Backend/                      Firebase project: vibez-backend.
   firebase.json               Cloud Functions deploy config (codebase=default).
   .firebaserc                 default project = vibez-backend.
+  firestore.tokens.rules      Security rules for the non-default "tokens" Firestore database.
   functions/src/index.ts      Three functions (pure helpers in scheduling.ts):
     - registerPushToken (callable, public): {fcmToken, vibezId, platform,
       blockSecondsDone?, blockSecondsNeedsInput?} → Firestore "tokens" db,
@@ -56,23 +92,37 @@ Backend/                      Firebase project: vibez-backend.
       shield:off carrying reason:"timeout". The NSE drops the shield only if
       that session is actually due, so stale/duplicate dispatches no-op — the
       server-side backup under the on-device prune (the precise primary).
+  functions/src/scheduling.ts Pure, unit-tested helpers (clampDuration, APNs payload build,
+                              task scheduling math). Tests in functions/test/scheduling.test.ts.
+VibezExtension/               Chrome (MV3) browser companion (TypeScript). Mirrors the iOS
+                              block on the desktop: watches the backend for this Vibez ID's
+                              block state via Firestore and overlays a block screen on
+                              configured sites. Built with build.ts → dist/ (gitignored).
+  src/background/             Service worker — Firestore listener, block state, alarms.
+  src/content/                Content script + injected block overlay.
+  src/popup/                  React popup (toggle, setup card, analytics, recent triggers).
+  src/config.ts               Shared config; mirrors VIBEZ_ID_PATTERN (see Conventions).
 ClaudePlugin/                 Claude Code plugin source.
   scripts/setup.sh            Generates the 4-word Vibez ID, embeds the 2016-word wordlist,
                               prints instructions. /vibez:setup invokes this.
   scripts/notify.sh           Hook script. POSTs lifecycle events to /notify with the
-                              user's Vibez ID. Handles session-start, stop, pre/post-tool-use
-                              (AskUserQuestion), user-prompt-submit. Falls back to setup.sh
-                              for first-run ID generation.
-  hooks/hooks.json            Registers notify.sh against the Claude Code lifecycle hooks.
-CodexPlugin/                  Codex plugin source. Parallel structure to ClaudePlugin.
+                              user's Vibez ID. Handles session-start, stop, notification,
+                              pre/post-tool-use (AskUserQuestion + tool-grant),
+                              user-prompt-submit. Falls back to setup.sh for first-run ID gen.
+  hooks/hooks.json            Registers notify.sh against 6 Claude Code lifecycle hooks.
+  commands/setup.md           /vibez:setup slash-command definition.
+CodexPlugin/                  Codex plugin source. Parallel structure to ClaudePlugin
+                              (independently distributed — the two plugins can't share files).
   scripts/setup.sh            Same Vibez ID generator as the Claude plugin (shared
                               ~/.config/vibez/vibez-id file so one ID covers both agents).
   scripts/notify.sh           Codex-flavored hook script — adds permission-request,
                               ephemeral-session detection, "cx" agent tag.
-.claude-plugin/marketplace.json  Plugin marketplace manifest.
-Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swift into
-                              Vibez/ or VibezShield/ and it auto-builds. Entitlements still
-                              need CODE_SIGN_ENTITLEMENTS wired manually.
+  skills/vibez-setup/SKILL.md Codex skill that surfaces/tests/regenerates the Vibez ID.
+.claude-plugin/marketplace.json  Claude Code plugin marketplace manifest (→ ClaudePlugin).
+.agents/plugins/marketplace.json Codex plugin marketplace manifest (→ CodexPlugin).
+Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swift into a target
+                              folder and it auto-builds. Entitlements still need
+                              CODE_SIGN_ENTITLEMENTS wired manually.
 ```
 
 ## Hard constraints (don't relitigate)
@@ -87,11 +137,12 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on — assume MainActor by default; only add `nonisolated` deliberately.
 - Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF`. Firebase project: `vibez-backend`.
 - App Group: `group.vibezlol.Vibez`. Carries the live shield context (agent, push title/body,
-  expiry, dark/light) from host to VibezShield. Key: `"shieldState"`, value is a property-list
-  dict — see `Vibez/ScreenTimeManager.swift` (`ShieldState.asDict`) and
-  `VibezShield/ShieldCard.swift` (`ShieldState.read`).
+  expiry, dark/light) plus the host-rendered shield PNGs. The `"shieldState"` plist dict schema
+  is mirrored across three sites — keep them in sync: `Vibez/ScreenTimeManager.swift`
+  (`ShieldState.asDict`, writer), `VibezShield/ShieldCard.swift` (`ShieldState.read`, reader),
+  and `VibezPushService/NotificationService.swift` (the NSE, which also engages the shield).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
-- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy. Enforced both client and server-side. Same regex constant in `PushTokenRegistrar.vibezIdPattern` and the backend's `VIBEZ_ID_PATTERN`.
+- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/index.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
 - **Firestore database is named "tokens" (non-default).** Always use `getFirestore("tokens")` on the server; the iOS app never touches Firestore directly — it goes through `registerPushToken`.
 - **All Cloud Functions are deployed with `{invoker: "public"}`.** Gen-2 functions are Cloud Run services that default to authenticated; we explicitly open them.
 
