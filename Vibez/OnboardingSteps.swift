@@ -161,8 +161,10 @@ struct OnboardingNotificationsStep: View {
                 MockSystemDialog(
                     title: "“Vibez” Would Like to Send You Notifications",
                     message: "Notifications may include alerts, sounds, and icon badges. These can be configured in Settings.",
-                    cancelLabel: "Don’t Allow",
-                    confirmLabel: "Allow",
+                    buttons: [
+                        .init(label: "Don’t Allow"),
+                        .init(label: "Allow", isConfirm: true),
+                    ],
                     denyHint: "You’ll want Allow — without it, Vibez can’t ping you when your agent needs you.",
                     onConfirm: requestPermission
                 )
@@ -208,8 +210,12 @@ struct OnboardingScreenTimeStep: View {
                 MockSystemDialog(
                     title: "“Vibez” Would Like to Access Screen Time",
                     message: "Providing “Vibez” access to Screen Time may allow it to see your activity data, restrict content, and limit the usage of apps and websites.",
-                    cancelLabel: "Don’t Allow",
-                    confirmLabel: "Continue",
+                    // Real iOS 26.4 dialog: Continue is the LEFT capsule;
+                    // Don't Allow sits right with the prominent blue fill.
+                    buttons: [
+                        .init(label: "Continue", isConfirm: true),
+                        .init(label: "Don’t Allow", prominent: true),
+                    ],
                     denyHint: "You’ll want Continue — Screen Time access is the mechanism that blocks your distracting apps.",
                     onConfirm: requestPermission
                 )
