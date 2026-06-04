@@ -44,16 +44,28 @@ struct SettingsView: View {
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
     @AppStorage("vibez.notifyBanners") private var notifyBanners = true
+    @AppStorage("vibez.showFocusHint") private var showFocusHint = true
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
     @State private var showAddIgnoreSheet = false
     @State private var vibezIdDraft: String = ""
     @State private var vibezIdError: String? = nil
+    @State private var tutorial: OnboardingState?
     @State private var copiedFeedback = false
     @FocusState private var vibezIdFocused: Bool
     @Environment(\.dismiss) private var dismiss
     @Environment(\.colorScheme) private var systemColorScheme
+
+    /// Opens the system FamilyActivityPicker seeded with the current
+    /// selection. The draft is re-created with `includeEntireCategory`
+    /// so a category pick comes back expanded into its member apps
+    /// (see `expandingCategories`). Reached from anywhere in the
+    /// "Apps to block" component.
+    private func presentPicker() {
+        draftSelection = manager.selection.expandingCategories
+        pickerPresented = true
+    }
 
     private func dismissSheet() {
         vibezIdFocused = false
@@ -75,6 +87,7 @@ struct SettingsView: View {
                 notificationsSection
                 vibezIdSection
                 ignoredConversationsSection
+                tutorialSection
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings")
@@ -86,60 +99,135 @@ struct SettingsView: View {
                 }
             }
             .familyActivityPicker(
+                title: "Select apps to block",
                 isPresented: $pickerPresented,
                 selection: $draftSelection
             )
             .onChange(of: pickerPresented) { _, presented in
                 if !presented {
-                    manager.updateSelection(draftSelection)
+                    // Persist only real edits. A cancelled/unchanged picker
+                    // still hands back the draft — which presentPicker()
+                    // re-created with includeEntireCategory — and saving
+                    // that flag flip without the picker having expanded the
+                    // pre-seeded categories would hide their icons
+                    // (displayCategoryTokens) while the shield still
+                    // blocks them.
+                    let unchanged = draftSelection.applicationTokens == manager.selection.applicationTokens
+                        && draftSelection.categoryTokens == manager.selection.categoryTokens
+                        && draftSelection.webDomainTokens == manager.selection.webDomainTokens
+                    if !unchanged {
+                        manager.updateSelection(draftSelection)
+                    }
                 }
             }
-            .preferredColorScheme((AppearancePref(rawValue: appearanceRaw) ?? .system).colorScheme)
             .sheet(isPresented: $showAddIgnoreSheet) {
                 AddIgnoreSheet(
                     triggerStore: triggerStore,
                     ignoreStore: ignoreStore
                 )
             }
+            .fullScreenCover(item: $tutorial) { s in
+                OnboardingFlow(
+                    state: s,
+                    manager: manager,
+                    registrar: registrar,
+                    onDismiss: { tutorial = nil }
+                )
+            }
         }
+        // Must sit on the sheet's content root (the NavigationStack), NOT
+        // on the inner Form. The sheet's hosting controller reads this
+        // preference at the root of its content tree once on present and
+        // again on every change; placed on an inner view it applied at
+        // present time but went stale when the Appearance picker flipped
+        // it — the rest of the app recolored, this sheet didn't.
+        .preferredColorScheme(appearanceScheme)
+    }
+
+    /// The color scheme the Appearance preference resolves to (nil =
+    /// follow system). Single source feeding the sheet's
+    /// `.preferredColorScheme`, mirroring ContentView's `appearance`.
+    private var appearanceScheme: ColorScheme? {
+        (AppearancePref(rawValue: appearanceRaw) ?? .system).colorScheme
     }
 
     // MARK: Sections
 
     @ViewBuilder
     private var appearanceSection: some View {
-        Section("Appearance") {
+        Section {
             Picker("Appearance", selection: $appearanceRaw) {
                 ForEach(AppearancePref.allCases) { pref in
                     Text(pref.label).tag(pref.rawValue)
                 }
             }
             .pickerStyle(.segmented)
+            Toggle("Show focus-mode hint", isOn: $showFocusHint)
+        } header: {
+            Text("Appearance")
+        } footer: {
+            Text("The “tap to enter focus mode” caption under the mascot on the home screen.")
+        }
+    }
+
+    /// The trailing "N selected" / "None" label + chevron. Flows as the
+    /// final item after the app icons.
+    @ViewBuilder
+    private func appsCountLabel(_ text: String) -> some View {
+        HStack(spacing: 4) {
+            Text(text)
+                .foregroundStyle(.secondary)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
         }
     }
 
     @ViewBuilder
     private var appsSection: some View {
         Section {
-            if manager.hasSelection {
-                BlockedSelectionIconGrid(selection: manager.selection)
-            }
-
+            // Whole component is one tap target. No "Pick apps" label —
+            // the app icons flow top-left and wrap, while the "N selected"
+            // count sits at the top-right with the icons flowing around it
+            // (see AppsFlowLayout). Rectangle content shape so the empty
+            // space and the gaps between icons all open the picker.
             Button {
-                draftSelection = manager.selection
-                pickerPresented = true
+                presentPicker()
             } label: {
-                HStack {
-                    Text("Pick apps")
-                        .foregroundStyle(Color.primary)
-                    Spacer()
-                    Text(manager.hasSelection ? "\(manager.selectedCount) selected" : "None")
-                        .foregroundStyle(.secondary)
-                    Image(systemName: "chevron.right")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                Group {
+                    if manager.hasSelection {
+                        AppsFlowLayout(spacing: 8, lineSpacing: 8) {
+                            ForEach(Array(manager.selection.applicationTokens), id: \.self) { token in
+                                SettingsBlockedTokenIcon { Label(token) }
+                            }
+                            // Expanded selections show member apps, not the
+                            // category icon — see displayCategoryTokens.
+                            ForEach(manager.selection.displayCategoryTokens, id: \.self) { token in
+                                SettingsBlockedTokenIcon { Label(token) }
+                            }
+                            ForEach(Array(manager.selection.webDomainTokens), id: \.self) { token in
+                                SettingsBlockedTokenIcon { Label(token) }
+                            }
+                            // MUST be last — AppsFlowLayout pins the final
+                            // subview to the top-right.
+                            appsCountLabel("\(manager.selectedCount) selected")
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    } else {
+                        HStack(spacing: 0) {
+                            Spacer(minLength: 0)
+                            appsCountLabel("None")
+                        }
+                    }
                 }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityLabel(manager.hasSelection
+                ? "Apps to block, \(manager.selectedCount) selected"
+                : "Apps to block, none selected")
+            .accessibilityHint("Opens the app picker")
+
             if manager.authState != .authorized {
                 Button {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
@@ -262,21 +350,67 @@ struct SettingsView: View {
         }
     }
 
+    @ViewBuilder
+    private var tutorialSection: some View {
+        Section {
+            Button {
+                let s = OnboardingState(manager: manager, registrar: registrar)
+                Task {
+                    // Snapshot AFTER the async status read so the step
+                    // list sees the real notification gate.
+                    await s.refreshNotificationStatus()
+                    s.begin()
+                    tutorial = s
+                }
+            } label: {
+                HStack {
+                    Label("Tutorial", systemImage: "graduationcap")
+                        .foregroundStyle(Color.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } footer: {
+            Text("Replays the setup walkthrough. Steps you've already completed are skipped — fully set up, it's a quick tour of how Vibez works plus the app version.")
+        }
+    }
+
     // MARK: Vibez ID
 
     @ViewBuilder
     private var vibezIdSection: some View {
         Section {
-            // Current ID display + copy. Shown whenever there's a paired
-            // ID — gives the user a visible anchor and a quick way to
-            // re-share the ID with their Mac if they ever need to.
-            if !registrar.vibezId.isEmpty {
-                HStack {
-                    Text(registrar.vibezId)
+            // One part: the paired ID *is* the field. Tap it to edit in
+            // place; its color is the status (green = paired, orange =
+            // registering, red = error, gray placeholder = nothing yet).
+            HStack(spacing: 12) {
+                ZStack(alignment: .leading) {
+                    if vibezIdDraft.isEmpty && !vibezIdFocused {
+                        Text("moss-pine-fox-jazz")
+                            .font(.system(.body, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .allowsHitTesting(false)
+                    }
+                    TextField("", text: $vibezIdDraft)
                         .font(.system(.body, design: .monospaced))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                    Spacer()
+                        .foregroundStyle(vibezIdFieldColor)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($vibezIdFocused)
+                        .submitLabel(.done)
+                        .onSubmit { commitVibezId() }
+                        .onChange(of: vibezIdDraft) { _, _ in
+                            if vibezIdError != nil { vibezIdError = nil }
+                        }
+                }
+
+                if vibezIdFocused && vibezIdDraftIsCommittable {
+                    Button("Save") { commitVibezId() }
+                        .font(.caption.weight(.semibold))
+                        .buttonStyle(.borderless)
+                } else if !vibezIdFocused && !registrar.vibezId.isEmpty && vibezIdDraft == registrar.vibezId {
                     Button(action: copyVibezId) {
                         Text(copiedFeedback ? "Copied" : "Copy")
                             .font(.caption.weight(.semibold))
@@ -284,53 +418,33 @@ struct SettingsView: View {
                     .buttonStyle(.borderless)
                 }
             }
-
-            // Edit field — typed in, validated on commit. Same pattern
-            // as the home-screen VibezSetupCard.
-            ZStack(alignment: .leading) {
-                if vibezIdDraft.isEmpty && !vibezIdFocused {
-                    Text("moss-pine-fox-jazz")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .allowsHitTesting(false)
+            .onAppear { vibezIdDraft = registrar.vibezId }
+            .onChange(of: vibezIdFocused) { _, focused in
+                // Blur without committing reverts to the saved ID — but a
+                // failed attempt stays visible (with its red caption) so
+                // the user can tap back in and fix it.
+                if !focused && vibezIdError == nil {
+                    vibezIdDraft = registrar.vibezId
                 }
-                TextField("", text: $vibezIdDraft)
-                    .font(.system(.body, design: .monospaced))
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .focused($vibezIdFocused)
-                    .submitLabel(.done)
-                    .onSubmit { commitVibezId() }
-                    .onChange(of: vibezIdDraft) { _, _ in
-                        if vibezIdError != nil { vibezIdError = nil }
-                    }
             }
-
-            HStack {
-                Text("Status")
-                Spacer()
-                Text(registrarStatusLabel)
-                    .foregroundStyle(registrarStatusColor)
-                    .monospaced()
-                    .font(.caption)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            .onChange(of: registrar.vibezId) { _, newId in
+                if !vibezIdFocused { vibezIdDraft = newId }
             }
 
             if let err = vibezIdError {
                 Text(err)
                     .font(.caption)
                     .foregroundStyle(.red)
-            }
-
-            if vibezIdDraftIsCommittable {
-                Button("Save Vibez ID") { commitVibezId() }
-                    .fontWeight(.semibold)
+            } else if case .error(let message) = registrar.state {
+                Text("Pairing failed: \(message)")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+                    .lineLimit(2)
             }
         } header: {
             Text("Vibez ID")
         } footer: {
-            Text("This phone listens to one Vibez ID. Run /vibez:setup (Claude Code) or the vibez-setup skill (Codex) on a Mac to see or regenerate its ID, then paste it here to re-pair.")
+            Text("This phone listens to one Vibez ID. Run /vibez:setup (Claude Code) or the vibez-setup skill (Codex) on a Mac to see or regenerate its ID, then tap the ID above to re-pair.")
         }
     }
 
@@ -340,17 +454,12 @@ struct SettingsView: View {
             && trimmed != registrar.vibezId
     }
 
-    private var registrarStatusLabel: String {
-        switch registrar.state {
-        case .idle:
-            return registrar.vibezId.isEmpty ? "not paired" : "waiting"
-        case .registering: return "registering…"
-        case .registered:  return "paired"
-        case .error(let m): return "error: \(m.prefix(40))"
-        }
-    }
-
-    private var registrarStatusColor: Color {
+    /// Neutral while editing; otherwise the registrar status — with a
+    /// red override while an uncommitted bad attempt is on screen
+    /// (the text shown isn't the paired ID, so green would lie).
+    private var vibezIdFieldColor: Color {
+        if vibezIdFocused { return .primary }
+        if vibezIdError != nil { return .red }
         switch registrar.state {
         case .registered:  return .green
         case .registering: return .orange
@@ -361,15 +470,21 @@ struct SettingsView: View {
 
     private func commitVibezId() {
         let trimmed = vibezIdDraft.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else {
+            vibezIdFocused = false
+            return
+        }
         if !PushTokenRegistrar.isValidVibezId(trimmed) {
             vibezIdError = "Format: 4 hyphenated words, each 3-5 letters."
             return
         }
         vibezIdError = nil
-        vibezIdFocused = false
+        // Set the registrar before dropping focus: the blur handler
+        // resets the draft to registrar.vibezId, which must already be
+        // the new value.
         registrar.setVibezId(trimmed)
-        vibezIdDraft = ""
+        vibezIdDraft = trimmed
+        vibezIdFocused = false
     }
 
     private func copyVibezId() {
@@ -383,39 +498,6 @@ struct SettingsView: View {
 
 // MARK: - Blocked app icons
 
-private struct BlockedSelectionIconGrid: View {
-    let selection: FamilyActivitySelection
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 34), spacing: 8, alignment: .leading)
-    ]
-
-    private var apps: [ApplicationToken] { Array(selection.applicationTokens) }
-    private var cats: [ActivityCategoryToken] { Array(selection.categoryTokens) }
-    private var webs: [WebDomainToken] { Array(selection.webDomainTokens) }
-
-    private var selectedCount: Int {
-        apps.count + cats.count + webs.count
-    }
-
-    var body: some View {
-        LazyVGrid(columns: columns, alignment: .leading, spacing: 10) {
-            ForEach(apps, id: \.self) { token in
-                SettingsBlockedTokenIcon { Label(token) }
-            }
-            ForEach(cats, id: \.self) { token in
-                SettingsBlockedTokenIcon { Label(token) }
-            }
-            ForEach(webs, id: \.self) { token in
-                SettingsBlockedTokenIcon { Label(token) }
-            }
-        }
-        .padding(.vertical, 1)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(selectedCount) selected apps")
-    }
-}
-
 private struct SettingsBlockedTokenIcon<Icon: View>: View {
     @ViewBuilder let icon: () -> Icon
 
@@ -426,10 +508,101 @@ private struct SettingsBlockedTokenIcon<Icon: View>: View {
             .dynamicTypeSize(.accessibility5)
             .scaleEffect(1.55, anchor: .center)
             .frame(width: 34, height: 34)
-            .overlay {
-                RoundedRectangle(cornerRadius: 7)
-                    .stroke(Color.secondary.opacity(0.28), lineWidth: 1)
+    }
+}
+
+// MARK: - Apps flow layout
+
+/// Lays out app icons (all subviews EXCEPT the last) flowing top-left and
+/// wrapping like text at FULL width, then pins the LAST subview — the
+/// "N selected" label — to the BOTTOM-right. The label shares the last
+/// icon row when there's room to its right; otherwise it drops to its own
+/// row beneath. Rows above are never narrowed. Icons are assumed roughly
+/// uniform height (SettingsBlockedTokenIcon pins 34×34).
+private struct AppsFlowLayout: Layout {
+    var spacing: CGFloat = 8
+    var lineSpacing: CGFloat = 8
+
+    private struct Plan {
+        var iconFrames: [CGRect] = []
+        var labelFrame: CGRect = .zero
+        var size: CGSize = .zero
+    }
+
+    private func plan(_ subviews: Subviews, width: CGFloat) -> Plan {
+        var out = Plan()
+        guard !subviews.isEmpty else { return out }
+
+        let labelIndex = subviews.count - 1
+        let labelSize = subviews[labelIndex].sizeThatFits(.unspecified)
+        let iconCount = labelIndex
+        let iconSizes = (0..<iconCount).map { subviews[$0].sizeThatFits(.unspecified) }
+        let iconRowHeight = iconSizes.map(\.height).max() ?? 0
+        let maxWidth = width.isFinite
+            ? width
+            : iconSizes.map(\.width).reduce(0, +) + labelSize.width
+                + CGFloat(iconCount + 1) * spacing
+
+        // Flow the icons at full width — rows above the label are never
+        // narrowed to make room for it.
+        var frames = [CGRect](repeating: .zero, count: iconCount)
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        for i in 0..<iconCount {
+            let size = iconSizes[i]
+            if x > 0, x + size.width > maxWidth {
+                x = 0
+                y += iconRowHeight + lineSpacing
             }
+            frames[i] = CGRect(
+                x: x, y: y + (iconRowHeight - size.height) / 2,
+                width: size.width, height: size.height
+            )
+            x += size.width + spacing
+        }
+
+        // Place the label bottom-right: on the last icon row if it fits to
+        // the right of the last icon, else on a fresh row beneath.
+        let labelX = max(0, maxWidth - labelSize.width)
+        let labelY: CGFloat
+        let totalHeight: CGFloat
+        if iconCount == 0 {
+            labelY = 0
+            totalHeight = labelSize.height
+        } else if labelSize.width <= maxWidth - x {            // x = end of last row + spacing
+            labelY = y + (iconRowHeight - labelSize.height) / 2
+            totalHeight = y + iconRowHeight
+        } else {
+            labelY = y + iconRowHeight + lineSpacing
+            totalHeight = labelY + labelSize.height
+        }
+
+        out.iconFrames = frames
+        out.labelFrame = CGRect(x: labelX, y: labelY, width: labelSize.width, height: labelSize.height)
+        out.size = CGSize(width: width.isFinite ? width : maxWidth, height: totalHeight)
+        return out
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        plan(subviews, width: proposal.width ?? .infinity).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let p = plan(subviews, width: bounds.width)
+        for (i, frame) in p.iconFrames.enumerated() {
+            subviews[i].place(
+                at: CGPoint(x: bounds.minX + frame.minX, y: bounds.minY + frame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(frame.size)
+            )
+        }
+        if let last = subviews.indices.last {
+            subviews[last].place(
+                at: CGPoint(x: bounds.minX + p.labelFrame.minX, y: bounds.minY + p.labelFrame.minY),
+                anchor: .topLeading,
+                proposal: ProposedViewSize(p.labelFrame.size)
+            )
+        }
     }
 }
 

@@ -140,6 +140,10 @@ final class ScreenTimeManager {
 
     private enum Key {
         static let selection = "vibez.selection.v1"
+        /// Companion to `selection`: PropertyListDecoder always decodes
+        /// `includeEntireCategory` as false (the flag isn't preserved by
+        /// Codable), so it's persisted separately and re-seeded on load.
+        static let selectionIncludeEntireCategory = "vibez.selection.includeEntireCategory.v1"
         /// Persists `armed`. Name preserved from the manualBlocking era
         /// to keep existing installs' toggle state across this rename.
         static let armed = "vibez.manualBlocking.v1"
@@ -193,9 +197,12 @@ final class ScreenTimeManager {
             || !selection.webDomainTokens.isEmpty
     }
 
+    /// Count of the icons the UI actually draws — matches the icon
+    /// grids, which hide a category's own icon once the selection is
+    /// expanded (its member apps are then in `applicationTokens`).
     var selectedCount: Int {
         selection.applicationTokens.count
-            + selection.categoryTokens.count
+            + selection.displayCategoryTokens.count
             + selection.webDomainTokens.count
     }
 
@@ -212,6 +219,13 @@ final class ScreenTimeManager {
             lastError = error.localizedDescription
             authState = .denied
         }
+    }
+
+    /// Re-reads the live Family Controls status. Public hook for
+    /// onboarding's scenePhase refresh — a grant made in the Settings
+    /// app doesn't update `authState` until something re-syncs it.
+    func refreshAuthorizationStatus() {
+        syncAuthState()
     }
 
     func updateSelection(_ newSelection: FamilyActivitySelection) {
@@ -423,6 +437,7 @@ final class ScreenTimeManager {
         let std = UserDefaults.standard
         let keys = [
             Key.selection,
+            Key.selectionIncludeEntireCategory,
             Key.armed,
             Key.focusMode,
             Key.focusModeStartedAt,
@@ -622,6 +637,10 @@ final class ScreenTimeManager {
             let data = try PropertyListEncoder().encode(selection)
             defaults.set(data, forKey: Key.selection)
             sharedDefaults?.set(data, forKey: Key.selection)
+            // The flag doesn't survive the encode (see Key doc) — keep
+            // it alongside so loadSelection can restore it.
+            defaults.set(selection.includeEntireCategory, forKey: Key.selectionIncludeEntireCategory)
+            sharedDefaults?.set(selection.includeEntireCategory, forKey: Key.selectionIncludeEntireCategory)
         } catch {
             lastError = "Failed to save selection: \(error.localizedDescription)"
         }
@@ -630,7 +649,15 @@ final class ScreenTimeManager {
     private func loadSelection() {
         guard let data = defaults.data(forKey: Key.selection) else { return }
         do {
-            selection = try PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
+            var decoded = try PropertyListDecoder().decode(FamilyActivitySelection.self, from: data)
+            // PropertyListDecoder always hands back includeEntireCategory
+            // == false; without restoring it, displayCategoryTokens would
+            // resurface the category icon next to its already-expanded
+            // member apps after every relaunch.
+            if defaults.bool(forKey: Key.selectionIncludeEntireCategory) {
+                decoded = decoded.expandingCategories
+            }
+            selection = decoded
         } catch {
             lastError = "Failed to load saved selection: \(error.localizedDescription)"
         }
@@ -859,6 +886,35 @@ final class ScreenTimeManager {
 
 private extension ManagedSettingsStore.Name {
     static let vibez = ManagedSettingsStore.Name("vibez.shield")
+}
+
+// MARK: - Category-expanded display
+
+extension FamilyActivitySelection {
+    /// Copy of this selection re-created with `includeEntireCategory`,
+    /// so the next picker session expands a category pick into its
+    /// member apps' tokens — that's what lets the UI show real app
+    /// icons instead of one opaque category icon. The flag is fixed at
+    /// init and NOT preserved by Codable (PropertyListDecoder always
+    /// yields false) — persistSelection stores it under a companion
+    /// key and loadSelection re-seeds it through this same copy.
+    var expandingCategories: FamilyActivitySelection {
+        guard !includeEntireCategory else { return self }
+        var expanded = FamilyActivitySelection(includeEntireCategory: true)
+        expanded.applicationTokens = applicationTokens
+        expanded.categoryTokens = categoryTokens
+        expanded.webDomainTokens = webDomainTokens
+        return expanded
+    }
+
+    /// Category tokens the UI should render as icons. An expanded
+    /// selection already carries every member app in
+    /// `applicationTokens`, so drawing the category icon too would
+    /// show duplicates; a legacy (unexpanded) selection still needs
+    /// it — the category icon is all it has.
+    var displayCategoryTokens: [ActivityCategoryToken] {
+        includeEntireCategory ? [] : Array(categoryTokens)
+    }
 }
 
 #if DEBUG

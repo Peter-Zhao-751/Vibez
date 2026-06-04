@@ -19,14 +19,38 @@ Vibez/                        Main iOS app target.
                               forwards APN→FCM, and delivers pushes via NotifyClient.shared.
   ContentView.swift           Home screen: mascot, big toggle, VibezSetupCard, analytics,
                               recent triggers. Owns the overlay queue and the incoming-push
-                              handler (handleIncoming). `setupNeeded` gates on
-                              `registrar.vibezId.isEmpty || registrar.state != .registered`.
+                              handler (handleIncoming). `setupNeeded` gates on no Vibez ID or
+                              a registration error (in-flight states stay unlocked); it also
+                              seeds the initial layout state in init so a paired cold start
+                              renders the expanded layout on frame 1 — no reflow, hint and
+                              mascot appear together. Presents OnboardingFlow as a
+                              fullScreenCover on launch while setup is incomplete; onboarding
+                              owns the permission prompts (the old auto-requesting .task is
+                              gone).
   VibezSetupCard.swift        Pairing card — user types in the 4-word Vibez ID, calls
                               registrar.setVibezId(...). Replaces the old NotificationSetupCard.
+  OnboardingState.swift       @Observable step engine for the onboarding flow. Gate is
+                              pure live state (notif status + FC auth + Vibez ID present)
+                              — no "seen onboarding" flag. Steps snapshot at begin();
+                              advance() auto-skips steps satisfied mid-flow. DEBUG launch
+                              arg -vibez.debug.fakeScreenTimeAuth YES fakes the FC gate
+                              for sim verification (FC can't be granted on a sim).
+  OnboardingFlow.swift        fullScreenCover container: forward-only transitions, progress
+                              dots, Skip, scenePhase re-check for Settings round-trips.
+                              Presented by ContentView (launch) and SettingsView (Tutorial).
+  OnboardingSteps.swift       The seven pages: welcome, notifications + Screen Time
+                              (practice-tap mock dialogs w/ denied-state remediation),
+                              agent pick, plugin install, Vibez ID pairing, how-it-works
+                              + app version.
+  MockSystemDialog.swift      Practice-tap replica of the iOS permission alert — confirm
+                              fires the real prompt; Don't Allow wiggles + hints. System
+                              look on purpose (not app theme).
   PushTokenRegistrar.swift    @Observable singleton; FCM MessagingDelegate. Holds the
                               FCM token + user's Vibez ID, persists vibezId in UserDefaults
                               under "vibez.vibezId", calls the registerPushToken Cloud
-                              Function on every fresh token OR ID change.
+                              Function on every fresh token OR ID change. The literal ID
+                              "test" is an offline escape hatch: paired locally (state
+                              .registered, toggle/shield usable), never calls the server.
   NotifyClient.swift          Push inbox. WebSocket is gone; class still exists because
                               AppDelegate routes incoming FCM userInfo through
                               acceptPushUserInfo → lastMessage → ContentView.handleIncoming.

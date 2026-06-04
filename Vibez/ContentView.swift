@@ -22,6 +22,7 @@ struct ContentView: View {
     @State private var triggerStore: TriggerStore
     @State private var ignoreStore: IgnoreStore
     @State private var analytics: AnalyticsTracker
+    @State private var onboarding: OnboardingState
 
     @MainActor
     init(
@@ -39,12 +40,26 @@ struct ContentView: View {
         // .shared for the singletons so AppDelegate / NotifyClient and
         // this view operate on the same state. Previews pass explicit
         // instances and remain isolated from prod.
-        _manager = State(initialValue: manager ?? .shared)
+        let reg = registrar ?? .shared
+        let mgr = manager ?? .shared
+        _manager = State(initialValue: mgr)
+        _onboarding = State(initialValue: OnboardingState(manager: mgr, registrar: reg))
         _notifyClient = State(initialValue: notifyClient ?? .shared)
-        _registrar = State(initialValue: registrar ?? .shared)
+        _registrar = State(initialValue: reg)
         _triggerStore = State(initialValue: triggerStore ?? TriggerStore())
         _ignoreStore = State(initialValue: ignoreStore ?? .shared)
         _analytics = State(initialValue: analytics ?? .shared)
+        // Seed the setup-presentation layout from the live pairing state
+        // so frame 1 already shows the right arrangement. Hardcoded
+        // "setup card up, layout compact" defaults forced a paired cold
+        // start through a one-frame reflow in .onAppear — the mascot
+        // snapped to center invisibly, but the hint rode its private
+        // caption animation through the move and visibly slid in from
+        // above, out of sync with the mascot.
+        let needsSetup = Self.setupNeeded(for: reg)
+        _setupCardMounted = State(initialValue: needsSetup)
+        _setupCardVisible = State(initialValue: needsSetup)
+        _unlockedLayoutExpanded = State(initialValue: !needsSetup)
     }
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
@@ -58,17 +73,33 @@ struct ContentView: View {
     /// Notification Center. Mirrored to the App Group by ScreenTimeManager
     /// so VibezPushService honors it on the background path too.
     @AppStorage("vibez.notifyBanners") private var notifyBanners = true
+    /// Whether the "tap to enter focus mode" hint shows under the mascot.
+    /// Off → the hint is removed (not just faded) and the hero keeps half
+    /// the hint's height as padding so the mascot doesn't drop all the way
+    /// onto the toggle's gap. Default on. Mirrored in SettingsView.
+    @AppStorage("vibez.showFocusHint") private var showFocusHint = true
 
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
 
     @State private var overlayQueue: [NtfyMessage] = []   // order depends on overlayOrder — see enqueueOverlay
     @State private var showSettings = false
+    /// Drives the system app picker presented straight from the mascot
+    /// tap when no apps are selected yet (instead of bouncing to
+    /// Settings). See `toggleFocusMode` / `pickAppsThenFocus`.
+    @State private var pickerPresented = false
+    @State private var draftSelection = FamilyActivitySelection()
+    /// True while the picker was opened by a focus-mode tap, so once the
+    /// user actually selects apps we engage focus mode for them rather
+    /// than making them tap the mascot a second time.
+    @State private var focusAfterPick = false
     @State private var toggleShake = 0
     @State private var setupShake = 0
-    @State private var setupCardMounted = true
-    @State private var setupCardVisible = true
-    @State private var unlockedLayoutExpanded = false
+    @State private var onboardingPresented = false
+    // Seeded in init from the pairing state — see the note there.
+    @State private var setupCardMounted: Bool
+    @State private var setupCardVisible: Bool
+    @State private var unlockedLayoutExpanded: Bool
     @State private var setupTransitionGeneration = 0
     /// Tracks which incoming push id we've already routed through
     /// handleIncoming. Needed because SwiftUI's .onChange doesn't fire
@@ -101,11 +132,24 @@ struct ContentView: View {
     }
 
     private var setupNeeded: Bool {
-        // We're set up when the user has entered a Vibez ID AND the
-        // Firebase backend has accepted it (state == .registered).
-        // Anything else — no ID, registering, error — keeps the setup
-        // card visible.
-        registrar.vibezId.isEmpty || registrar.state != .registered
+        Self.setupNeeded(for: registrar)
+    }
+
+    /// Show the setup card only when there's nothing to work with or
+    /// something actually failed: no Vibez ID yet, or the backend
+    /// rejected the registration. Transient in-flight states (waiting
+    /// for the FCM token, registering) keep the home unlocked — the
+    /// card would otherwise flash on every cold launch while the
+    /// stored ID re-registers. Static so init can seed the layout
+    /// state from the same rule before the first render.
+    private static func setupNeeded(for registrar: PushTokenRegistrar) -> Bool {
+        if registrar.vibezId.isEmpty { return true }
+        if case .error = registrar.state { return true }
+        return false
+    }
+
+    private static var isRunningInPreviews: Bool {
+        ProcessInfo.processInfo.environment["XCODE_RUNNING_FOR_PREVIEWS"] == "1"
     }
 
     /// Pick the block duration based on what kind of ping landed:
@@ -125,6 +169,11 @@ struct ContentView: View {
     var body: some View {
         ZStack(alignment: .top) {
             theme.bg
+                .ignoresSafeArea()
+
+            topGlow
+
+            ActiveBackdrop(accent: theme.accent, active: manager.armed)
                 .ignoresSafeArea()
 
             mainScreen
@@ -171,15 +220,30 @@ struct ContentView: View {
             // Notifications off → sweep Notification Center clear. The NSE
             // keeps it down to a single passive straggler while we're
             // suspended; this drops that last one now that we're running.
-            if !notifyBanners { notifyClient.clearAllDeliveredNotifications() }
+            // Banners on → still mop up stale shield:off control entries
+            // ("Replied" pings, timeout unblocks): the newest one always
+            // outlives the NSE's sweep because it files in after the NSE
+            // ran, so only a later sweep — this one — can drop it.
+            if !notifyBanners {
+                notifyClient.clearAllDeliveredNotifications()
+            } else {
+                notifyClient.clearStaleDeliveredNotifications()
+            }
         }
         .task {
-            // Request notification permission early — the setup card
-            // is still visible while iOS shows the system prompt, so
-            // the user can do both in parallel.
-            await NotifyClient.requestAuthorization()
-            if manager.authState == .notDetermined {
-                await manager.requestAuthorization()
+            // Onboarding owns the system permission prompts now — each
+            // is requested from its practice-tap step. This launch
+            // check only decides whether the flow needs to present.
+            // .task runs once per view lifetime, so this is a cold-
+            // launch gate — backgrounding doesn't re-present a skipped
+            // flow. Previews construct seeded singletons but the sim's
+            // notification status is still notDetermined; don't let the
+            // cover bury every existing home-screen preview.
+            guard !Self.isRunningInPreviews else { return }
+            await onboarding.refreshNotificationStatus()
+            if onboarding.needsOnboarding {
+                onboarding.begin()
+                onboardingPresented = true
             }
         }
         .onChange(of: setupNeeded) { _, _ in
@@ -209,7 +273,13 @@ struct ContentView: View {
                 processIfNew(notifyClient.lastMessage)
                 // Notifications off → drop the lone passive straggler the
                 // NSE leaves behind (it runs before that entry posts).
-                if !notifyBanners { notifyClient.clearAllDeliveredNotifications() }
+                // Banners on → mop up stale shield:off control entries the
+                // NSE's sweep can't reach (each files in after it ran).
+                if !notifyBanners {
+                    notifyClient.clearAllDeliveredNotifications()
+                } else {
+                    notifyClient.clearStaleDeliveredNotifications()
+                }
             }
         }
         .onChange(of: manager.pendingTriggers) { _, newPending in
@@ -235,6 +305,21 @@ struct ContentView: View {
                 ignoreStore: ignoreStore
             )
         }
+        .fullScreenCover(isPresented: $onboardingPresented) {
+            OnboardingFlow(
+                state: onboarding,
+                manager: manager,
+                registrar: registrar,
+                onDismiss: { onboardingPresented = false }
+            )
+        }
+        .familyActivityPicker(
+            isPresented: $pickerPresented,
+            selection: $draftSelection
+        )
+        .onChange(of: pickerPresented) { _, presented in
+            if !presented { handlePickerDismiss() }
+        }
     }
 
     @ViewBuilder
@@ -245,17 +330,44 @@ struct ContentView: View {
                 onOpenSettings: { showSettings = true }
             )
 
-            GeometryReader { proxy in
-                homeContent(
-                    availableHeight: proxy.size.height,
-                    availableWidth: proxy.size.width
-                )
-                .frame(width: proxy.size.width, height: proxy.size.height)
-            }
+            homeContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             Color.clear
                 .frame(height: RecentTriggersLayout.collapsedReserveHeight)
         }
+    }
+
+    /// Static top accent glow — fades in while armed. The reference's
+    /// `radial-gradient(ellipse 80% 60% at 50% 0%)` over a 360pt strip
+    /// that bleeds 120pt above the viewport.
+    private var topGlow: some View {
+        Ellipse()
+            .fill(
+                // EllipticalGradient stretches its falloff to the wide,
+                // short frame — matching the reference's anisotropic
+                // `ellipse 80% 60%` rather than a circular fade.
+                EllipticalGradient(
+                    stops: [
+                        .init(
+                            color: theme.accent.opacity(effectiveDark ? 0.18 : 0.125),
+                            location: 0
+                        ),
+                        .init(color: .clear, location: 0.7),
+                    ],
+                    center: .top
+                )
+            )
+            .frame(height: 360)
+            .padding(.horizontal, -40)
+            // Anchor to the physical screen top (not the safe area),
+            // then bleed 120pt above it — the reference's `top: -120`.
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .offset(y: -120)
+            .ignoresSafeArea()
+            .opacity(manager.armed ? 1 : 0)
+            .animation(.easeInOut(duration: 0.5), value: manager.armed)
+            .allowsHitTesting(false)
     }
 
     private var recentTriggersSheet: some View {
@@ -566,125 +678,171 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func homeContent(availableHeight: CGFloat, availableWidth: CGFloat) -> some View {
-        VStack(spacing: 0) {
-            if unlockedLayoutExpanded {
-                Spacer(minLength: 0)
-            }
+    private var homeContent: some View {
+        GeometryReader { proxy in
+            let frame = proxy.frame(in: .global)
+            // mainScreen ignores the bottom safe area, so the reserve
+            // spacer below this view ends at the physical screen bottom —
+            // our bottom edge plus the reserve is the screen height.
+            let screenHeight = frame.maxY + RecentTriggersLayout.collapsedReserveHeight
+            // Rest the toggle's center on the screen's vertical center.
+            // BigToggle keeps a constant pillH-tall layout box through the
+            // focus-banner morph, so the center holds in focus mode too.
+            let toggleCenterY = screenHeight / 2 - frame.minY
+            let topSpacer = max(
+                0,
+                toggleCenterY - BigToggle.pillH / 2 - Self.heroToggleGap - heroHeight
+            )
 
-            VStack(spacing: 1.5) {
-                MascotForAgent(
-                    agent: agent,
-                    listening: manager.armed,
-                    size: mascotSize(for: availableHeight),
-                    gap: 4,
-                    focused: manager.focusMode
-                )
-                .offset(y: mascotOffset())
-                .background {
-                    if manager.focusMode {
-                        FocusHalo(color: theme.accent)
-                    }
+            VStack(spacing: 0) {
+                if unlockedLayoutExpanded {
+                    Spacer()
+                        .frame(height: topSpacer)
                 }
 
-                // Ground line — solid, ~60% of available width, sits
-                // just under the mascot's feet so it reads as standing
-                // on the ground. Tints to the accent while focused.
-                Rectangle()
-                    .fill(manager.focusMode ? theme.accent.opacity(0.85) : theme.fgMute.opacity(0.45))
-                    .frame(width: availableWidth * 0.6, height: 1.5)
-            }
-            .frame(
-                height: mascotFrameHeight(for: availableHeight),
-                alignment: unlockedLayoutExpanded ? .center : .bottom
-            )
-            .padding(.horizontal, 10)
-            .padding(.top, unlockedLayoutExpanded ? 0 : 8)
-            .padding(.bottom, unlockedLayoutExpanded ? 0 : 18)
-            .contentShape(Rectangle())
-            .onTapGesture { toggleFocusMode() }
+                hero
+                    .padding(.top, unlockedLayoutExpanded ? 0 : 8)
 
-            focusStatusLabel
-
-            if unlockedLayoutExpanded {
-                Spacer(minLength: 0)
-            }
-
-            BigToggle(
-                enabled: Binding(
-                    get: { manager.armed && !setupNeeded },
-                    set: { manager.setArmed($0) }
-                ),
-                agent: agent,
-                theme: theme,
-                isInteractive: !registrar.vibezId.isEmpty,
-                onLockedTap: bounceToShowSetup
-            )
-            // Tight gap to the setup card so the locked toggle visually
-            // leads into "fix it here"; more breathing room when the
-            // toggle stands alone above the blocking panel below.
-            .padding(.bottom, setupCardMounted ? 14 : 32)
-            .shake(trigger: toggleShake)
-
-            if setupCardMounted {
-                VibezSetupCard(
-                    registrar: registrar,
-                    theme: theme
+                BigToggle(
+                    enabled: Binding(
+                        get: { manager.armed && !setupNeeded },
+                        set: { manager.setArmed($0) }
+                    ),
+                    theme: theme,
+                    isInteractive: !registrar.vibezId.isEmpty,
+                    focusMode: manager.focusMode,
+                    onLockedTap: bounceToShowSetup,
+                    onReleaseFocus: { toggleFocusMode() }
                 )
-                .opacity(setupCardVisible ? 1 : 0)
-                .allowsHitTesting(setupCardVisible)
-                .accessibilityHidden(!setupCardVisible)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 6)
-                .shake(trigger: setupShake, amount: 5, duration: 0.84)
-            }
+                .padding(.top, unlockedLayoutExpanded ? Self.heroToggleGap : 14)
+                .padding(.bottom, unlockedLayoutExpanded ? 0 : 14)
+                .shake(trigger: toggleShake)
 
-            AnalyticsPanel(
-                analytics: analytics,
-                theme: theme,
-                onSelectMostBlocked: { showSettings = true }
-            )
-            .padding(.horizontal, 10)
-            .padding(.bottom, unlockedLayoutExpanded ? 10 : 12)
+                if setupCardMounted {
+                    VibezSetupCard(
+                        registrar: registrar,
+                        theme: theme
+                    )
+                    .opacity(setupCardVisible ? 1 : 0)
+                    .allowsHitTesting(setupCardVisible)
+                    .accessibilityHidden(!setupCardVisible)
+                    .padding(.top, 18)
+                    .shake(trigger: setupShake, amount: 5, duration: 0.84)
+                }
 
-            if !unlockedLayoutExpanded {
                 Spacer(minLength: 0)
             }
+            .padding(.horizontal, 20)
+            .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
-    private func mascotOffset() -> CGFloat {
-        unlockedLayoutExpanded ? -(TopBarLayout.bottomPadding / 2) : 0
-    }
+    /// VStack spacing between the mascot frame and the hint. Negative:
+    /// the mascot frames carry empty space below the feet, so the hint
+    /// is pulled up into it to sit close under the mascot.
+    private static let captionGap: CGFloat = -6
+    /// Fixed hint line height so the hero's height is deterministic.
+    private static let captionHeight: CGFloat = 12
 
-    @ViewBuilder
-    private var focusStatusLabel: some View {
-        if manager.focusMode {
-            FocusPill(
-                startedAt: manager.focusModeStartedAt,
-                theme: theme,
-                onTap: { toggleFocusMode() }
+    /// Vertical air between the hero and the toggle — lifts the mascot
+    /// clear of the screen-centered toggle. The hero is bottom-anchored
+    /// against this gap, so shrinking it drops mascot + hint together.
+    private static let heroToggleGap: CGFloat = 26
+
+    /// Mascot + focus halo + the "tap to enter focus mode" hint.
+    /// Desaturated and dimmed while disarmed; tapping toggles a manual
+    /// focus hold. Mascot and hint live in the SAME stack: every move,
+    /// size change, and filter applies to both as one rigid unit. The
+    /// hint is always rendered (visibility is opacity-only), so the
+    /// stack's height never changes and the hint can't pop in late.
+    private var hero: some View {
+        VStack(spacing: showFocusHint ? Self.captionGap : 0) {
+            MascotForAgent(
+                agent: agent,
+                listening: manager.armed,
+                size: mascotSize,
+                gap: 4,
+                focused: manager.focusMode,
+                // The reference hero passes animate={false} — no body
+                // bob on the home screen; eyes still cycle.
+                animate: false
             )
-            .padding(.top, 8)
-            .transition(.opacity.combined(with: .move(edge: .top)))
-        } else if manager.armed {
-            Text("tap to lock in")
-                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                .tracking(1.5)
-                .foregroundStyle(theme.fgFaint)
-                .padding(.top, 8)
-                .transition(.opacity)
+            // The halo is decoration behind the mascot — .background so
+            // its 1.9× footprint never inflates the hero's layout.
+            .background {
+                if manager.focusMode {
+                    FocusHalo(color: theme.accent, size: mascotSize * 1.9)
+                }
+            }
+            // Hint hidden → drop the mascot by half the hint's height vs
+            // the shown layout. Shown below-mascot space is
+            // captionGap + captionHeight; removing captionHeight/2 of it
+            // lowers the mascot by that much.
+            .padding(.bottom, showFocusHint ? 0 : Self.captionGap + Self.captionHeight / 2)
+
+            if showFocusHint {
+                Text("tap to enter focus mode")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .tracking(0.8)
+                    .foregroundStyle(theme.fgMute)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .frame(height: Self.captionHeight)
+                    // Scoped form on purpose: .animation(_:value:) would
+                    // re-time EVERY animatable property of the text — the
+                    // parent-assigned position included — whenever
+                    // captionVisible flips inside a layout move (pairing
+                    // expansion), detaching the hint from the mascot. This
+                    // animates the fade and nothing else; geometry rides
+                    // the same transaction as the rest of the hero.
+                    .animation(.easeInOut(duration: 0.3)) { content in
+                        content.opacity(captionVisible ? 1 : 0)
+                    }
+                    .accessibilityHidden(!captionVisible)
+            }
         }
+        .saturation(manager.armed ? 1 : 0.12)
+        .brightness(manager.armed ? 0 : -0.08)
+        .opacity(manager.armed ? 1 : 0.7)
+        .animation(.easeInOut(duration: 0.5), value: manager.armed)
+        .contentShape(Rectangle())
+        .onTapGesture { toggleFocusMode() }
+    }
+
+    /// Hint visibility: paired (animated layout state, so show/hide
+    /// rides the same transactions that move the mascot), armed (toggle
+    /// off → invisible), and not already in focus mode.
+    private var captionVisible: Bool {
+        unlockedLayoutExpanded && manager.armed && !manager.focusMode
+    }
+
+    /// The hero's layout height — the per-agent mascot frame plus the
+    /// always-rendered hint row. Deterministic, no measurement needed.
+    private var heroHeight: CGFloat {
+        let mascotFrame: CGFloat
+        switch agent {
+        case .claude: mascotFrame = mascotSize * 0.9            // viewBox 100×90
+        case .codex:  mascotFrame = mascotSize * 130 / 110      // viewBox 110×130
+        case .both:   mascotFrame = mascotSize * 0.78 * 130 / 110
+        }
+        // Mirror the `hero` layout: with the hint, the full caption row
+        // (negative gap + caption height); without it, that same space
+        // minus half the caption height — so the mascot sits half a
+        // text-height lower when the hint is gone.
+        let belowMascot = showFocusHint
+            ? Self.captionGap + Self.captionHeight
+            : Self.captionGap + Self.captionHeight / 2
+        return mascotFrame + belowMascot
     }
 
     /// Tap the mascot to start/stop a manual focus hold. Only meaningful
-    /// while armed. With no apps selected, route to Settings so the user
-    /// can pick apps rather than engage an empty shield.
+    /// while armed. With no apps selected, open the system app picker
+    /// directly (an empty shield would block nothing) and engage focus
+    /// once the user has picked something — see `pickAppsThenFocus`.
     private func toggleFocusMode() {
         guard manager.armed else { return }
         guard manager.hasSelection else {
-            showSettings = true
+            pickAppsThenFocus()
             return
         }
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
@@ -693,32 +851,48 @@ struct ContentView: View {
         }
     }
 
-    private func mascotSize(for availableHeight: CGFloat) -> CGFloat {
+    /// Present the FamilyActivityPicker seeded with the current
+    /// selection (expanded so a category pick returns its member apps).
+    /// `focusAfterPick` flags that this was a focus-mode tap, so the
+    /// picker's dismiss handler can engage focus once apps land.
+    private func pickAppsThenFocus() {
+        draftSelection = manager.selection.expandingCategories
+        focusAfterPick = true
+        pickerPresented = true
+    }
+
+    /// Persist the picker result and, if it was opened by a focus tap
+    /// and apps are now selected, engage focus mode. Mirrors the
+    /// save-only-real-edits logic in SettingsView so a cancelled picker
+    /// doesn't flip the includeEntireCategory flag and hide icons.
+    private func handlePickerDismiss() {
+        let wantsFocus = focusAfterPick
+        focusAfterPick = false
+
+        let unchanged = draftSelection.applicationTokens == manager.selection.applicationTokens
+            && draftSelection.categoryTokens == manager.selection.categoryTokens
+            && draftSelection.webDomainTokens == manager.selection.webDomainTokens
+        if !unchanged {
+            manager.updateSelection(draftSelection)
+        }
+
+        if wantsFocus && manager.armed && manager.hasSelection && !manager.focusMode {
+            UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+                manager.setFocusMode(true)
+            }
+        }
+    }
+
+    private var mascotSize: CGFloat {
         if unlockedLayoutExpanded {
             switch agent {
-            case .claude:
-                return min(140, max(128, availableHeight * 0.22))
-            case .codex:
-                return min(130, max(120, availableHeight * 0.20))
-            case .both:
-                return min(128, max(118, availableHeight * 0.20))
+            case .claude: return 140
+            case .codex:  return 130
+            case .both:   return 128
             }
         }
         return agent == .both ? 92 : 100
-    }
-
-    private func mascotFrameHeight(for availableHeight: CGFloat) -> CGFloat {
-        if unlockedLayoutExpanded {
-            switch agent {
-            case .claude:
-                return min(180, max(158, availableHeight * 0.27))
-            case .codex:
-                return min(188, max(164, availableHeight * 0.29))
-            case .both:
-                return min(174, max(154, availableHeight * 0.27))
-            }
-        }
-        return 110
     }
 }
 
@@ -783,33 +957,6 @@ private func previewTriggerStore(events: [TriggerEvent]) -> TriggerStore {
     return store
 }
 
-/// Pre-bakes a DailyStats JSON into UserDefaults so the analytics panel
-/// shows non-zero counters without having to replay messages. The "most
-/// blocked" tile reads its per-app tally from the App Group file (written
-/// only by the shield extension on-device), so it renders the em-dash
-/// placeholder in previews.
-private func previewAnalytics(
-    pings: Int,
-    chats: Int,
-    replies: Int,
-    replyLengths: [Int] = [],
-    focusSeconds: TimeInterval = 0
-) -> AnalyticsTracker {
-    let stats = DailyStats(
-        date: Calendar.current.startOfDay(for: Date()),
-        conversationIds: Set((0..<chats).map { "preview-chat-\($0)" }),
-        responseCount: replies,
-        responseLengths: replyLengths,
-        pingCount: pings,
-        focusSeconds: focusSeconds,
-        shieldArmedAt: nil
-    )
-    if let data = try? JSONEncoder().encode(stats) {
-        UserDefaults.standard.set(data, forKey: "vibez.analytics.v1")
-    }
-    return AnalyticsTracker()
-}
-
 private let previewClaudeTitles: [(String, String)] = [
     ("Refactor blocking panel", "Wrapped the panel in a lazy stack and trimmed the unused gradient. Tests pass."),
     ("Investigate WebSocket disconnects", "Reconnect logic is dropping the second frame on iOS 17 — want me to add a retry guard?"),
@@ -845,10 +992,8 @@ private func previewContent(
     armed: Bool = true,
     focusMode: Bool = false,
     pendingTriggers: [PendingTrigger] = [],
-    events: [TriggerEvent] = [],
-    analytics: AnalyticsTracker? = nil
+    events: [TriggerEvent] = []
 ) -> some View {
-    let analytics = analytics ?? AnalyticsTracker()
     seedAppStorageDefaults(agent: agent, appearance: appearance)
     return ContentView(
         manager: ScreenTimeManager.previewManager(
@@ -863,41 +1008,37 @@ private func previewContent(
         ),
         triggerStore: previewTriggerStore(events: events),
         ignoreStore: IgnoreStore(),
-        analytics: analytics
+        analytics: AnalyticsTracker()
     )
     .preferredColorScheme(appearance == .light ? .light : .dark)
 }
 
 #Preview("Paired · ready · dark") {
     // Right after the user pastes a working Vibez ID. Setup card has
-    // animated out, toggle is interactive but still OFF. Nothing else has
-    // happened yet — no triggers, no analytics. This is the "everything
-    // is wired up and ready" empty state.
+    // animated out, toggle is interactive but still OFF; mascot is
+    // dimmed/desaturated and the bubbles are faded. This is the
+    // "everything is wired up and ready" empty state.
     previewContent(
-        armed: false,
-        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+        armed: false
     )
 }
 
 #Preview("Armed · listening · dark") {
-    // Toggle flipped ON, mascot is in its listening pose, but no pings
-    // have landed yet. Same blank Recent triggers sheet as the idle
-    // state, but the analytics panel still shows zeros — Vibez is
-    // armed, just waiting.
+    // Toggle flipped ON: bubbles drifting, top glow on, mascot in its
+    // listening pose with the "tap to enter focus mode" hint. No pings
+    // have landed yet, so the Recent triggers sheet is blank.
     previewContent(
-        armed: true,
-        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+        armed: true
     )
 }
 
 #Preview("Focus mode · dark") {
-    // Armed and holding a manual focus block: determined mascot, accent
-    // halo + ground line, and the live "Focus mode · MM:SS · tap to
-    // release" pill. No triggers — the shield is held by the tap alone.
+    // Armed and holding a manual focus block: squinting mascot with the
+    // accent halo, and the toggle morphed into the "Focus mode — tap to
+    // release" banner. No triggers — the shield is held by the tap alone.
     previewContent(
         armed: true,
-        focusMode: true,
-        analytics: previewAnalytics(pings: 0, chats: 0, replies: 0)
+        focusMode: true
     )
 }
 
@@ -939,21 +1080,14 @@ private func previewContent(
     ]
     return previewContent(
         armed: true,
-        events: events,
-        analytics: previewAnalytics(
-            pings: 28,
-            chats: 9,
-            replies: 7,
-            replyLengths: [42, 78, 110, 64, 130, 88, 92],
-            focusSeconds: 18 * 60
-        )
+        events: events
     )
 }
 
 #Preview("Busy day · Claude · dark") {
     // Everything: armed, a block in progress for one session, 12 recent
-    // triggers across the day, strong analytics. This is the "you've
-    // been pairing with Claude all afternoon" view.
+    // triggers across the day. This is the "you've been pairing with
+    // Claude all afternoon" view.
     let active = PendingTrigger(
         sessionId: "preview-active-session",
         addedAt: Date().addingTimeInterval(-90),
@@ -973,14 +1107,7 @@ private func previewContent(
     return previewContent(
         armed: true,
         pendingTriggers: [active],
-        events: events,
-        analytics: previewAnalytics(
-            pings: 64,
-            chats: 14,
-            replies: 11,
-            replyLengths: [40, 62, 110, 88, 56, 130, 74, 92, 48, 102, 80],
-            focusSeconds: 2 * 3600 + 14 * 60
-        )
+        events: events
     )
 }
 
@@ -1008,14 +1135,7 @@ private func previewContent(
         agent: .codex,
         armed: true,
         pendingTriggers: [active],
-        events: events,
-        analytics: previewAnalytics(
-            pings: 51,
-            chats: 12,
-            replies: 9,
-            replyLengths: [56, 88, 120, 72, 64, 96, 80, 110, 48],
-            focusSeconds: 1 * 3600 + 47 * 60
-        )
+        events: events
     )
 }
 

@@ -291,6 +291,25 @@ final class NotifyClient {
         UNUserNotificationCenter.current().removeAllDeliveredNotifications()
     }
 
+    /// Remove every stale shield:off control entry ("Replied" pings,
+    /// timeout unblocks) from Notification Center. Those pushes must be
+    /// alert pushes (silent pushes don't wake the NSE), so each files in
+    /// as a passive entry AFTER the NSE's own sweep ran — the newest one
+    /// always outlives it. The NSE catches the backlog on the next push;
+    /// this catches it on app activation, so nothing lingers once the
+    /// user is here. Matches on the push payload's `shield` field —
+    /// locally-scheduled banners never carry it, so they're untouched.
+    func clearStaleDeliveredNotifications() {
+        UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+            let ids = delivered
+                .filter { ($0.request.content.userInfo["shield"] as? String) == "off" }
+                .map { $0.request.identifier }
+            guard !ids.isEmpty else { return }
+            UNUserNotificationCenter.current()
+                .removeDeliveredNotifications(withIdentifiers: ids)
+        }
+    }
+
     // MARK: - Permissions
 
     static func requestAuthorization() async {
@@ -301,6 +320,16 @@ final class NotifyClient {
             // Permission denied or restricted — silent failure, the in-app
             // overlay still works.
         }
+    }
+
+    /// Current notification permission, read fresh from the system.
+    /// OnboardingState gates the notifications step on this —
+    /// requestAuthorization() above deliberately swallows the grant
+    /// result, so callers re-read the status through here after asking.
+    static func notificationAuthorizationStatus() async -> UNAuthorizationStatus {
+        await UNUserNotificationCenter.current()
+            .notificationSettings()
+            .authorizationStatus
     }
 }
 
