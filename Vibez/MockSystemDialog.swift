@@ -47,6 +47,9 @@ struct MockSystemDialog: View {
             alertCard
                 .shake(trigger: denyShake, amount: 5, duration: 0.5)
 
+            // Deny hint sits below the card; see offset note at the
+            // bottom of this view — the whole stack rides together.
+
             // Always-rendered hint row (opacity-only show) so the
             // dialog doesn't jump when the hint appears.
             Text(denyHint)
@@ -58,6 +61,11 @@ struct MockSystemDialog: View {
                 .animation(.easeInOut(duration: 0.25), value: showDenyHint)
                 .accessibilityHidden(!showDenyHint)
         }
+        // The real iOS alert centers slightly higher than this page's
+        // content zone (the headline block pushes the zone's midpoint
+        // down). Lift the replica so the real prompt lands ON it —
+        // measured against the live dialog on the 26.4 sim.
+        .offset(y: -30)
     }
 
     private var alertCard: some View {
@@ -118,14 +126,17 @@ struct MockSystemDialog: View {
     }
 
     /// Soft repeating pulse around the confirm button — the "tap me"
-    /// affordance from the approved design (option A).
+    /// affordance from the approved design (option A). Grows via an
+    /// animated uniform inset, NOT scaleEffect: scaling a wide, flat
+    /// capsule stretches the sides ~4x more than the top/bottom, which
+    /// read as a lopsided wobble.
     private var pulseRing: some View {
         Capsule()
             .stroke(
                 Color(uiColor: .systemBlue).opacity(pulsing ? 0 : 0.55),
                 lineWidth: 2
             )
-            .scaleEffect(pulsing ? 1.12 : 0.97)
+            .padding(pulsing ? -6 : 1)
             .onAppear {
                 withAnimation(
                     .easeOut(duration: 1.6).repeatForever(autoreverses: false)
