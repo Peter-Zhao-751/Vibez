@@ -14,7 +14,10 @@ push) and keep marginal cost per push near zero.
 Out of scope: App Check on `registerPushToken` (already on the App Store
 roadmap), any auth on `/notify` (a shell script has no device attestation —
 the 44-bit Vibez ID + rate limiting *is* its defense), RTDB-backed limiting
-(rejected: adds a second database product).
+(rejected: adds a second database product), Mac-side hardware/machine IDs
+(rejected: unattestable from a shell script, so spoofable by definition —
+pure privacy cost), edge WAF / Cloud Armor (the someday-tool if botnet abuse
+ever materializes; billing alert is the tripwire until then).
 
 ## Decision log
 
@@ -27,6 +30,10 @@ the 44-bit Vibez ID + rate limiting *is* its defense), RTDB-backed limiting
 | Limiter infra failure | **Fail open** (deliver push, log warn) | Peter's pushes matter more than strictness; attackers can't induce Firestore outages |
 | APNs duplication | **Remove** (aps.alert is the single copy) | ~35% of every push was the same two strings twice — ntfy-era parse-shape leftover |
 | `maxInstances` | 10 → **3** | One instance at concurrency 80 covers ~1,000 users; 3 is headroom. Caps worst-case compute bill and shrinks in-memory limiter leak from 10× to 3× |
+| Unclaimed-ID probes | **Uniform `{ok: true}` response** for every valid-format request | `{total: 0}` vs `{total: 1}` was a free claimed/unclaimed oracle (and `errors` leaked FCM strings); nothing client-side parses the body — both plugins' curl discards it (verified) |
+| Junk device docs | **FCM dry-run validation** before storing a new token | Spray-registered docs under unclaimed IDs are never swept (no notify ever targets them, so the stale-token sweep never runs); dry-run makes garbage tokens unstorable. Free |
+| Botnet-scale spray | **Global per-instance load-shed bucket** + GCP billing alert | Per-IP guards can't see a thousand IPs each under 5/sec; this caps worst-case Firestore reads at ~$10/day |
+| Mac hardware IDs | **Rejected** | A shell script can't attest — any self-reported machine ID is spoofable by definition, and it adds privacy surface pre-App-Store-review. App Check (roadmap) is the real attestation story, and only the iOS callable can have it |
 
 ## 1. Rate limiting (lazy escalation)
 
@@ -87,10 +94,19 @@ Deny responses: `429 {error: "rate limited"}` + `Retry-After: 1` header
 Random valid-format Vibez IDs bypass per-ID buckets (every ID is fresh), so
 both endpoints also run a per-instance, per-IP token bucket (capacity 20,
 refill 5/sec, same bounded-Map infrastructure; `req.ip` /
-`request.rawRequest.ip`). Bounds single-source floods and ID-spray; a real
-Mac's hooks never get near it. In-memory only — no Firestore escalation for
-IPs (cardinality too high, and `maxInstances: 3` already caps the absolute
-ceiling).
+`request.rawRequest.ip`). Bounds single-source floods and ID-spray to
+~15 req/sec fleet-wide (≈ $1/day worst case); a real Mac's hooks never get
+near it. In-memory only — no Firestore escalation for IPs (cardinality too
+high, and `maxInstances: 3` already caps the absolute ceiling).
+
+### Global load-shed bucket (in-memory only)
+
+Last-resort ceiling over **all** traffic per instance, regardless of key:
+capacity 200, refill 100/sec (≈ 300/sec fleet-wide, vs ~30/sec projected
+legit peak at 1,000 users). Only botnet-scale sprays — many IPs, each under
+the per-IP rate — can trip it; it bounds their worst-case Firestore read
+bill at roughly $10/day instead of low hundreds. Same bucket code, key
+`"global"`. Ops pair: the GCP billing alert in §7 is the human tripwire.
 
 ## 2. `/notify` request validation
 
@@ -112,6 +128,14 @@ accepted from clients — only `dispatchUnblock` sets it, internally.
 | 10 | Per-IP guard | §1 | 429 |
 | 11 | Per-ID bucket | §1 | 429 |
 
+**Response shape:** every accepted request — claimed or unclaimed ID alike —
+returns the same `200 {ok: true}`. Fan-out counts and FCM error details move
+to server logs only. The old `{total, success, failure, errors}` body was a
+claimed/unclaimed enumeration oracle and leaked FCM error strings; nothing
+client-side ever parsed it (both plugins discard the response body —
+verified). Residual timing oracle (claimed IDs do more work) accepted: 44-bit
+space + per-IP caps make enumeration impractical.
+
 Server caps (100/200) deliberately sit above plugin caps (72/160): the
 plugins' own clipping stays operative; the server is the safety net for
 non-plugin clients. Validation + clamp helpers go in a pure module
@@ -131,6 +155,13 @@ itself enforces and note it in code.
   count of `devices where vibezId == X`; **≥ 10 → `resource-exhausted`**.
   Re-registering an existing token is always allowed (update, not growth).
   `/notify`'s stale-token sweep frees slots naturally.
+- **FCM dry-run validation:** also only when the doc does not already exist —
+  validate the token with a dry-run FCM send (no delivery, free, ~50ms)
+  before storing; failure → `invalid-argument`. Closes the worst spray hole:
+  junk docs under unclaimed Vibez IDs are never targeted by `/notify`, so
+  the stale-token sweep would never reclaim them. With dry-run they can't
+  be created at all; an attacker would need real FCM tokens minted against
+  this Firebase project (App Check on the roadmap closes that too).
 - Rate limited via `register:{vibezId}` bucket + per-IP guard (§1).
 
 ## 4. Device-list cache (cost lever)
@@ -184,6 +215,9 @@ correctly (log, never block the agent). Extend `_selftest` with clamp cases.
 - `setGlobalOptions({maxInstances: 3})` (was 10).
 - Firestore TTL policy on collection group `rateLimits`, field `expireAt`,
   database `tokens` (gcloud one-liner; `events.items` TTL already exists).
+- GCP billing alert on the project (e.g. $10/month threshold) — the human
+  tripwire for botnet-scale abuse that in-process guards can only bound,
+  not block.
 
 ## 8. Testing
 
@@ -195,7 +229,9 @@ correctly (log, never block the agent). Extend `_selftest` with clamp cases.
 - **Curl matrix** against the deployed backend: 9KB body → 413; bad
   enum/session → 400; 6 rapid POSTs → five 200s + one 429 with
   `Retry-After`; valid push → 200 and lands on the phone; 11th device
-  registration → resource-exhausted.
+  registration → resource-exhausted; garbage-token registration →
+  invalid-argument (dry-run reject); claimed vs unclaimed ID →
+  byte-identical `{ok: true}` bodies.
 - **iOS**: `xcodebuild` compile against `iphonesimulator26.4`; on-device
   smoke (banner + shield card render correct title/body post-dedup — Peter
   taps through).
