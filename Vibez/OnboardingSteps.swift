@@ -78,7 +78,7 @@ struct OnboardingWelcomeStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Welcome to Vibez",
-            subtitle: "When Claude or Codex finishes a task or needs you, Vibez blocks your distracting apps — agent idle time becomes focus time.",
+            subtitle: "When Claude or Codex finishes a task or needs you, Vibez blocks your distracting apps so you don't waste any time on distractions while actually coding.",
             ctaTitle: "Get Started",
             ctaAction: onContinue
         ) {
@@ -149,12 +149,12 @@ struct OnboardingNotificationsStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Allow notifications",
-            subtitle: "Vibez pings you the moment Claude finishes or needs your input. iOS is about to show the dialog below for real — tap Allow, exactly like this."
+            subtitle: "Vibez pings you the moment Claude finishes or needs your input. iOS is about to show the dialog below for real. Tap Allow, exactly like this."
         ) {
             if state.notificationStatus == .denied {
                 OnboardingRemediation(
                     theme: theme,
-                    explanation: "Notifications are currently off for Vibez. iOS only asks once — flip them on in Settings, then come back here.",
+                    explanation: "Notifications are currently off for Vibez. iOS only asks once. Flip them on in Settings, then come back here.",
                     settingsURL: URL(string: UIApplication.openNotificationSettingsURLString)
                 )
             } else {
@@ -196,7 +196,7 @@ struct OnboardingScreenTimeStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Allow Screen Time access",
-            subtitle: "This is what lets Vibez actually shield Instagram, TikTok & co. iOS is about to show this dialog for real — tap Continue, exactly like this."
+            subtitle: "This is what lets Vibez actually shield Instagram, TikTok & co. iOS is about to show this dialog for real. Tap Continue, exactly like this."
         ) {
             if manager.authState == .denied {
                 OnboardingRemediation(
@@ -216,7 +216,7 @@ struct OnboardingScreenTimeStep: View {
                         .init(label: "Continue", isConfirm: true),
                         .init(label: "Don’t Allow", prominent: true),
                     ],
-                    denyHint: "You’ll want Continue — Screen Time access is the mechanism that blocks your distracting apps.",
+                    denyHint: "You’ll want Continue. Screen Time access is the mechanism that blocks your distracting apps.",
                     onConfirm: requestPermission
                 )
             }
@@ -318,7 +318,7 @@ struct OnboardingPluginStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Install the plugin",
-            subtitle: "On your Mac. The setup command at the end prints your 4-word Vibez ID — keep it handy for the next step.",
+            subtitle: "On your Mac. The setup command at the end prints your 4-word Vibez ID. Keep it handy for the next step.",
             ctaTitle: "I have my Vibez ID",
             ctaAction: onAdvance
         ) {
