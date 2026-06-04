@@ -61,7 +61,19 @@ final class OnboardingState: Identifiable {
         }
     }
 
-    var screenTimeAuthorized: Bool { manager.authState == .authorized }
+    var screenTimeAuthorized: Bool {
+        #if DEBUG
+        // Sim verification seam: Family Controls can never reach
+        // .authorized on a simulator (stage-2 consent needs a device
+        // passcode), which would wall off every step after Screen Time.
+        // `xcrun simctl launch ... -vibez.debug.fakeScreenTimeAuth YES`
+        // fakes the gate; NSArgumentDomain never persists.
+        if UserDefaults.standard.bool(forKey: "vibez.debug.fakeScreenTimeAuth") {
+            return true
+        }
+        #endif
+        return manager.authState == .authorized
+    }
 
     /// Empty-only on purpose: a stored ID with a registration *error*
     /// stays the home setup card's job (it has the retry affordance) —
