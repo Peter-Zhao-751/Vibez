@@ -283,10 +283,11 @@ read_conversation_title() {
     fi
 }
 
-# Read the current "last assistant text" from the transcript file.
-# Truncates to 160 chars and appends a single-char ellipsis when cut,
-# so consumers can tell the body was clipped instead of just stopping
-# mid-sentence.
+# Read the current "last assistant text" from the transcript file, in
+# full. No truncation here: last_turn_is_asking must see the entire
+# message (the question that flips done→needs-input is often past the
+# 160-char display cut), so clipping happens at the call site via
+# clip_body — mirroring the Codex plugin's stop handler.
 read_last_text() {
     local transcript="$1"
     local raw
@@ -300,8 +301,15 @@ read_last_text() {
         | tail -n 1 \
         | tr '\n' ' ')
     # Drop trailing space from the tr above.
-    raw="${raw% }"
+    printf '%s' "${raw% }"
+}
 
+# Cap a string at 160 chars for the push body, with a trailing ellipsis
+# so consumers can tell the body was clipped instead of just stopping
+# mid-sentence. Same implementation as the Codex plugin's clip_body.
+clip_body() {
+    local raw="$1"
+    raw="$(printf '%s' "${raw}" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g;s/^[[:space:]]+//;s/[[:space:]]+$//')"
     if [ "${#raw}" -gt 160 ]; then
         printf '%s…' "${raw:0:159}"
     else
@@ -440,10 +448,14 @@ case "${EVENT}" in
         if [ -z "${excerpt}" ]; then
             exit 0
         fi
+        # Classify on the full excerpt, clip only the push body — the
+        # question that flips done→needs-input is often past the
+        # 160-char display cut.
+        body="$(clip_body "${excerpt}")"
         if last_turn_is_asking "${excerpt}"; then
-            post_vibez "${convo_title}" "${excerpt}" "needs-input" "on" "${sid}" "cc"
+            post_vibez "${convo_title}" "${body}" "needs-input" "on" "${sid}" "cc"
         else
-            post_vibez "${convo_title}" "${excerpt}" "done" "on" "${sid}" "cc"
+            post_vibez "${convo_title}" "${body}" "done" "on" "${sid}" "cc"
         fi
         clear_pending "${sid}"
         ;;
@@ -636,6 +648,28 @@ case "${EVENT}" in
         check "quoted-q-only"      "Set placeholder to \"Should I commit?\" — done." 0
         check "quoted-plus-real-q" "Renamed \`foo?\`. Anything else?"                1
         check "smart-quoted-q"     "Updated to “Should I commit?” — done."           0
+
+        # Stop-path regression: classification must see the FULL assistant
+        # text. A question past the 160-char display clip was previously
+        # cut off before last_turn_is_asking ran and misread as done.
+        check_eq() {
+            local name="$1" got="$2" expected="$3"
+            if [ "${got}" = "${expected}" ]; then
+                pass=$((pass+1))
+                printf 'PASS %s\n' "$name"
+            else
+                fail=$((fail+1))
+                printf 'FAIL %s (expected=[%s] got=[%s])\n' "$name" "$expected" "$got"
+            fi
+        }
+        long_q="Some of what we're working on might be easier to explain if I can show it to you in a web browser. I can put together mockups, diagrams, comparisons, and other visuals as we go, especially for the permission screens and onboarding flow. This feature is still new and can be token-intensive. Want to try it?"
+        tmp_transcript="$(mktemp)"
+        jq -nc --arg t "${long_q}" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}' >"${tmp_transcript}"
+        check_eq "read-full-text"          "$(read_last_text "${tmp_transcript}")" "${long_q}"
+        check    "late-question-after-160" "$(read_last_text "${tmp_transcript}")" 1
+        check_eq "clip-body-caps-at-160"   "$(clip_body "${long_q}" 2>/dev/null)" "${long_q:0:159}…"
+        rm -f "${tmp_transcript}"
+
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
         ;;

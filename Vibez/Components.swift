@@ -2,8 +2,9 @@
 //  Components.swift
 //  Vibez
 //
-//  Building blocks for the main screen: WARP-style pill toggle, top bar,
-//  blocked-app card, recent-trigger row.
+//  Building blocks for the main screen: slim WARP-style pill toggle
+//  (which morphs into the focus-mode banner), top bar, blocked-app
+//  card, recent-trigger row.
 //
 
 import SwiftUI
@@ -11,159 +12,137 @@ import UIKit
 import FamilyControls
 import ManagedSettings
 
-// MARK: - BlockerKnob (waveform inside the pill toggle)
-//
-// ON  → silent: a single flat baseline.
-// OFF → noisy: three vertical bars rising and falling at different
-//       periods, like an audio meter being "chaotic" because nothing's
-//       blocking the doom-scroll yet.
-
-struct BlockerKnob: View {
-    let listening: Bool
-    let size: CGFloat
-    let stroke: Color
-
-    var body: some View {
-        if listening {
-            silentBaseline
-        } else {
-            chaoticBars
-        }
-    }
-
-    private var silentBaseline: some View {
-        Canvas { ctx, sz in
-            var path = Path()
-            path.move(to: CGPoint(x: sz.width * 0.22, y: sz.height * 0.5))
-            path.addLine(to: CGPoint(x: sz.width * 0.78, y: sz.height * 0.5))
-            ctx.stroke(
-                path,
-                with: .color(stroke),
-                style: StrokeStyle(lineWidth: sz.width * 0.04, lineCap: .round)
-            )
-        }
-        .frame(width: size, height: size)
-    }
-
-    private var chaoticBars: some View {
-        TimelineView(.animation) { context in
-            Canvas { ctx, sz in
-                let t = context.date.timeIntervalSinceReferenceDate
-                let lineWidth = sz.width * 0.05
-                // Three bars, each at a different x and oscillating with
-                // a different period so they look uncorrelated.
-                let bars: [(cx: CGFloat, period: Double, phase: Double, amp: CGFloat)] = [
-                    (cx: 0.30, period: 1.4, phase: 0.0, amp: 0.20),
-                    (cx: 0.50, period: 1.6, phase: 0.7, amp: 0.28),
-                    (cx: 0.70, period: 1.2, phase: 1.4, amp: 0.18),
-                ]
-                for bar in bars {
-                    let p = (t / bar.period + bar.phase) * 2 * .pi
-                    // |sin| keeps the amplitude in [0, 1]; scaling by
-                    // 0.5 + 0.5*|sin| makes the minimum a non-zero
-                    // resting amplitude so the bar never collapses.
-                    let amp = bar.amp * sz.height * (0.5 + 0.5 * abs(sin(p)))
-                    let x = bar.cx * sz.width
-                    let mid = sz.height * 0.5
-                    var path = Path()
-                    path.move(to: CGPoint(x: x, y: mid - amp))
-                    path.addLine(to: CGPoint(x: x, y: mid + amp))
-                    ctx.stroke(
-                        path,
-                        with: .color(stroke),
-                        style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
-                    )
-                }
-            }
-        }
-        .frame(width: size, height: size)
-    }
-}
-
 // MARK: - Big WARP-style toggle
+//
+// Slim pill with a plain white knob and an accent glow while on.
+// Locked (not paired) → dim, taps bounce. In focus mode the switch
+// morphs into the focus banner — "tap to release". One persistent
+// capsule animates its size inside a constant-height layout box, so
+// the vertical center never shifts and the pill melts into the banner
+// instead of crossfading.
 
 struct BigToggle: View {
     @Binding var enabled: Bool
-    let agent: Agent
     let theme: Theme
     let isInteractive: Bool
+    let focusMode: Bool
     var onLockedTap: () -> Void = {}
+    var onReleaseFocus: () -> Void = {}
 
-    private let pillW: CGFloat = 250
-    private let pillH: CGFloat = 132
-    private let knobSize: CGFloat = 116
+    private static let pillW: CGFloat = 168
+    /// Resting pill height — also the constant outer layout box, which
+    /// ContentView centers on the screen.
+    static let pillH: CGFloat = 66
+    private static let bannerH: CGFloat = 42
+    private static let knobSize: CGFloat = 50
+    private static let knobPad: CGFloat = 8
+
+    /// Knob slide — the reference's `cubic-bezier(.7,.1,.2,1)` over .5s.
+    static let slideAnimation = Animation.timingCurve(0.7, 0.1, 0.2, 1, duration: 0.5)
 
     var body: some View {
         Button {
-            guard isInteractive else {
-                // Notifications aren't set up yet — bounce instead of
-                // toggling so the user gets a clear "no, look down there"
-                // cue rather than a silent dead button.
+            if focusMode {
+                onReleaseFocus()
+            } else if !isInteractive {
+                // Not paired yet — bounce instead of toggling so the
+                // user gets a clear "no, look down there" cue rather
+                // than a silent dead button.
                 UIImpactFeedbackGenerator(style: .soft).impactOccurred()
                 onLockedTap()
-                return
-            }
-            withAnimation(.spring(response: 0.55, dampingFraction: 0.78)) {
+            } else {
                 enabled.toggle()
-            }
-            if (!enabled){
-                UINotificationFeedbackGenerator().notificationOccurred(.success)
-            }else{
-                UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                if (!enabled){
+                    UINotificationFeedbackGenerator().notificationOccurred(.success)
+                }else{
+                    UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+                }
             }
         } label: {
             ZStack(alignment: .leading) {
-                // Track
-                Capsule()
-                    .fill(enabled ? AnyShapeStyle(theme.pillGradient) : AnyShapeStyle(theme.bgWidget))
-//                    .shadow(color: enabled ? theme.accentDeep.opacity(0.55) : .clear,
-//                            radius: enabled ? 18 : 0, x: 0, y: 12)
-                    .frame(width: pillW, height: pillH)
-
-                // OFF / ON labels
-                ZStack {
-                    Text("OFF")
-                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
-                        .tracking(2.2)
-                        .foregroundStyle(enabled ? .clear : theme.fgFaint)
-                        .frame(maxWidth: .infinity, alignment: .trailing)
-                        .padding(.trailing, 30)
-                    Text("ON")
-                        .font(.system(size: 12, weight: .heavy, design: .monospaced))
-                        .tracking(2.2)
-                        .foregroundStyle(enabled ? .white.opacity(0.9) : .clear)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.leading, 30)
+                if focusMode {
+                    focusLabel
+                        .padding(.horizontal, 24)
+                        .transition(.opacity)
+                } else {
+                    knob
+                        .padding(.leading, knobX)
+                        .transition(.opacity)
                 }
-                .frame(width: pillW, height: pillH)
-
-                // Knob (sliding circle with waveform inside)
-                Circle()
-                    .fill(theme.knobBg)
-                    .frame(width: knobSize, height: knobSize)
-                    .shadow(color: .black.opacity(0.22), radius: 9, x: 0, y: 6)
-                    .overlay(
-                        VStack{
-                            if (isInteractive){
-                                BlockerKnob(
-                                    listening: enabled,
-                                    size: 92,
-                                    stroke: theme.fg
-                                )
-                            }
-                        }
-                    )
-                    .padding(.leading, knobX)
             }
-            .frame(width: pillW, height: pillH)
+            // The capsule's box: pill is exactly pillW×pillH; the banner
+            // hugs its label (minWidth keeps it at least pill-wide) at
+            // bannerH tall.
+            // Both dimensions animate through the morph. Leading-aligned
+            // so the knob hugs the pill's edge instead of centering.
+            .frame(minWidth: Self.pillW, alignment: .leading)
+            .frame(height: focusMode ? Self.bannerH : Self.pillH)
+            .background(track)
+            // Constant outer layout box — the morphing capsule centers
+            // inside it, so its y-mid never moves.
+            .frame(height: Self.pillH)
         }
         .buttonStyle(.plain)
         .opacity(isInteractive ? 1.0 : 0.9)
-        .accessibilityLabel(enabled ? "Disable Vibez" : "Enable Vibez")
+        .accessibilityLabel(focusMode
+            ? "Release focus mode"
+            : (enabled ? "Disable Vibez" : "Enable Vibez"))
+    }
+
+    /// Track — accent gradient + inner top highlight when on (or in
+    /// focus), sunken neutral when off. Focus is only reachable while
+    /// armed, so the fill never has to animate between gradient and
+    /// neutral during the morph.
+    private var track: some View {
+        Capsule()
+            .fill(enabled || focusMode
+                ? AnyShapeStyle(theme.pillGradient.shadow(
+                    .inner(color: .white.opacity(0.18), radius: 0.5, y: 1)))
+                : AnyShapeStyle(theme.pillOff.shadow(
+                    .inner(color: .black.opacity(0.18), radius: 3, y: 2))))
+            .shadow(
+                color: theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)),
+                radius: focusMode ? 12 : (enabled ? 14 : 7)
+            )
+            .shadow(
+                color: enabled || focusMode ? theme.accentDeep.opacity(0.667) : .clear,
+                radius: 12,
+                y: focusMode ? 10 : 12
+            )
+            // Recolors on the reference's plain .5s ease when toggled.
+            .animation(.easeInOut(duration: 0.5), value: enabled)
+    }
+
+    /// Knob — plain white, slides edge to edge.
+    private var knob: some View {
+        Circle()
+            .fill(.white)
+            .frame(width: Self.knobSize, height: Self.knobSize)
+            .shadow(color: .black.opacity(0.25), radius: 6, y: 4)
+            .overlay(Circle().strokeBorder(.black.opacity(0.04), lineWidth: 1))
+            // The slide runs on its snappier bezier.
+            .animation(Self.slideAnimation, value: enabled)
+    }
+
+    private var focusLabel: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "scope")
+                .font(.system(size: 14, weight: .bold))
+            Text("Focus mode")
+                .font(.system(size: 14, weight: .black, design: .monospaced))
+                .tracking(1.1)
+            Text("tap to release")
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                .opacity(0.85)
+                .padding(.leading, 4)
+        }
+        .foregroundStyle(theme.onAccent)
+        .lineLimit(1)
+        .fixedSize()
     }
 
     private var knobX: CGFloat {
-        enabled ? (pillW - knobSize - 8) : 8
+        enabled ? (Self.pillW - Self.knobSize - Self.knobPad) : Self.knobPad
     }
 }
 
@@ -204,7 +183,7 @@ struct VibezWordmark: View {
         Image("Wordmark")
             .resizable()
             .aspectRatio(contentMode: .fit)
-            .frame(height: 25)
+            .frame(height: 26)
             .fixedSize()
     }
 }
@@ -226,41 +205,23 @@ struct TopBar: View {
         HStack(alignment: .center) {
             VibezWordmark()
             Spacer()
-            ChipIconButton(
-                systemName: "gearshape",
-                theme: theme,
-                accessibilityLabel: "Open settings",
-                action: onOpenSettings
-            )
+            // Plain, borderless gear — no chip background.
+            Button(action: onOpenSettings) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 24, weight: .regular))
+                    .foregroundStyle(theme.fg)
+                    .frame(
+                        width: TopBarLayout.settingsButtonSize,
+                        height: TopBarLayout.settingsButtonSize
+                    )
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open settings")
         }
         .padding(.horizontal, TopBarLayout.horizontalPadding)
         .padding(.top, TopBarLayout.topPadding)
         .padding(.bottom, TopBarLayout.bottomPadding)
-    }
-}
-
-struct ChipIconButton: View {
-    let systemName: String
-    let theme: Theme
-    let accessibilityLabel: String
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            Image(systemName: systemName)
-                .font(.system(size: 14, weight: .bold))
-                .foregroundStyle(theme.fg)
-                .frame(
-                    width: TopBarLayout.settingsButtonSize,
-                    height: TopBarLayout.settingsButtonSize
-                )
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.bgChip)
-                )
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -292,7 +253,9 @@ struct BlockingPanel: View {
     let onPickMore: () -> Void
 
     private var apps: [ApplicationToken] { Array(selection.applicationTokens) }
-    private var cats: [ActivityCategoryToken] { Array(selection.categoryTokens) }
+    // Expanded selections render their member apps instead of the
+    // category icon — see displayCategoryTokens.
+    private var cats: [ActivityCategoryToken] { selection.displayCategoryTokens }
     private var webs: [WebDomainToken] { Array(selection.webDomainTokens) }
 
     private var totalCount: Int {
@@ -521,157 +484,6 @@ private struct HorizontalFadeScroll<Content: View>: View {
     }
 }
 
-// MARK: - Analytics panel
-
-/// Today-only usage summary. Reads counts straight from the
-/// `AnalyticsTracker` (resets at local midnight) and shows total shield-up
-/// time today, including any currently-running interval.
-struct AnalyticsPanel: View {
-    let analytics: AnalyticsTracker
-    let theme: Theme
-    let onSelectMostBlocked: () -> Void
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        if seconds < 60 { return "\(Int(seconds.rounded()))s" }
-        if seconds < 3600 {
-            let m = Int(seconds / 60)
-            return "\(m)m"
-        }
-        let h = Int(seconds / 3600)
-        let m = Int((seconds.truncatingRemainder(dividingBy: 3600)) / 60)
-        return m == 0 ? "\(h)h" : "\(h)h\(m)m"
-    }
-
-    var body: some View {
-        VStack(spacing: 10) {
-            HStack {
-                Text("Today")
-                    .font(.system(size: 12, weight: .bold))
-                    .tracking(0.5)
-                    .foregroundStyle(theme.fg)
-                Spacer()
-            }
-            HStack(spacing: 6) {
-                AnalyticsColumn(
-                    value: "\(analytics.conversationsToday)",
-                    label: "chats",
-                    theme: theme
-                )
-                AnalyticsColumn(
-                    value: "\(analytics.responsesToday)",
-                    label: "replies",
-                    theme: theme
-                )
-                // TimelineView nudges this column every 30s so an
-                // in-flight focus interval visibly ticks up rather than
-                // freezing until the next push lands. focusSecondsToday
-                // recomputes the running delta from Date() each render.
-                TimelineView(.periodic(from: .now, by: 30)) { _ in
-                    AnalyticsColumn(
-                        value: analytics.focusSecondsToday > 0
-                            ? formatDuration(analytics.focusSecondsToday)
-                            : "—",
-                        label: "focus",
-                        theme: theme
-                    )
-                }
-                MostBlockedColumn(
-                    tokens: analytics.topBlockedApps(limit: 3),
-                    theme: theme,
-                    onTap: onSelectMostBlocked
-                )
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .background(
-            RoundedRectangle(cornerRadius: 18)
-                .fill(theme.bgWidget)
-        )
-    }
-}
-
-private struct AnalyticsColumn: View {
-    let value: String
-    let label: String
-    let theme: Theme
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(value)
-                .font(.system(size: 28, weight: .bold, design: .rounded))
-                .foregroundStyle(theme.fg)
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(theme.fgMute)
-                .tracking(0.5)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
-        .padding(.horizontal, 4)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(theme.fgMute.opacity(0.22), lineWidth: 1)
-        )
-    }
-}
-
-/// Sibling of AnalyticsColumn for the "most blocked" tile. Renders up
-/// to three system-drawn app icons in a tight horizontal row above the
-/// label; falls back to an em-dash when nothing's been blocked yet.
-private struct MostBlockedColumn: View {
-    let tokens: [ApplicationToken]
-    let theme: Theme
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            VStack(spacing: 4) {
-                ZStack {
-                    if tokens.isEmpty {
-                        Text("—")
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
-                            .foregroundStyle(theme.fg)
-                    } else {
-                        HStack(spacing: 3) {
-                            ForEach(Array(tokens.prefix(3)), id: \.self) { token in
-                                Label(token)
-                                    .labelStyle(.iconOnly)
-                                    // Same trick we use elsewhere — Apple
-                                    // ignores `.frame` on token labels, so
-                                    // scaleEffect is the only path to a
-                                    // visible size at this tile scale.
-                                    .scaleEffect(0.9, anchor: .center)
-                                    .frame(width: 22, height: 22)
-                            }
-                        }
-                    }
-                }
-                .frame(height: 32)
-
-                Text("most blocked")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(theme.fgMute)
-                    .tracking(0.5)
-                    .lineLimit(1)
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .padding(.horizontal, 4)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(theme.fgMute.opacity(0.22), lineWidth: 1)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("Most blocked apps. Tap to add more apps to block.")
-    }
-}
-
 // MARK: - Recent triggers
 
 struct TriggerEvent: Identifiable, Codable, Equatable {
@@ -817,7 +629,7 @@ struct TriggerRow: View {
                 HStack(spacing: 5) {
                     if event.needsReply {
                         Circle()
-                            .fill(Color.yellow)
+                            .fill(Color(hex: 0xf5c518))
                             .frame(width: 6, height: 6)
                             .accessibilityLabel("Waiting for reply")
                     }
@@ -882,10 +694,10 @@ struct TriggerRow: View {
 }
 
 enum RecentTriggersLayout {
-    static let collapsedReserveHeight: CGFloat = 198
+    static let collapsedReserveHeight: CGFloat = 220
 
-    fileprivate static let collapsedHeight: CGFloat = 196
-    fileprivate static let collapsedCornerRadius: CGFloat = 48
+    fileprivate static let collapsedHeight: CGFloat = 208
+    fileprivate static let collapsedCornerRadius: CGFloat = 44
     fileprivate static let expandedCornerRadius: CGFloat = 24
     fileprivate static let headerDragHeight: CGFloat = 112
     fileprivate static let horizontalInset: CGFloat = 14
@@ -943,8 +755,8 @@ struct RecentTriggersSection: View {
                         panelShape
                             .fill(theme.bgChip)
                             .shadow(
-                                color: .black.opacity(0.22),
-                                radius: isExpanded ? 24 : 48,
+                                color: .black.opacity(0.28),
+                                radius: isExpanded ? 12 : 24,
                                 x: 0,
                                 y: -8
                             )
@@ -1177,80 +989,13 @@ struct RecentTriggersSection: View {
     }
 }
 
-// MARK: - Glow
-
-struct AccentGlow: View {
-    let theme: Theme
-    @Environment(\.colorScheme) private var colorScheme
-
-    var body: some View {
-        Ellipse()
-            .fill(
-                RadialGradient(
-                    colors: [theme.accent.opacity(colorScheme == .dark ? 0.20 : 0.14), .clear],
-                    center: .top,
-                    startRadius: 0,
-                    endRadius: 320
-                )
-            )
-            .frame(height: 360)
-            .offset(y: -120)
-            .allowsHitTesting(false)
-    }
-}
-
 // MARK: - Focus mode
-
-/// Live status pill shown under the mascot while a manual focus hold is
-/// active. Ticks the elapsed time once a second and is itself a tap target
-/// to release the hold.
-struct FocusPill: View {
-    let startedAt: Date?
-    let theme: Theme
-    var onTap: () -> Void = {}
-
-    var body: some View {
-        TimelineView(.periodic(from: .now, by: 1)) { context in
-            HStack(spacing: 6) {
-                Image(systemName: "scope")
-                    .font(.system(size: 11, weight: .bold))
-                Text("Focus mode")
-                    .font(.system(size: 12, weight: .heavy, design: .monospaced))
-                    .tracking(1)
-                Text("·").opacity(0.6)
-                Text(elapsed(now: context.date))
-                    .font(.system(size: 12, weight: .bold, design: .monospaced))
-                    .monospacedDigit()
-                Text("· tap to release")
-                    .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                    .opacity(0.85)
-            }
-            .foregroundStyle(theme.onAccent)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 7)
-            .background(Capsule().fill(theme.accent))
-        }
-        .contentShape(Capsule())
-        .onTapGesture { onTap() }
-        .accessibilityLabel("Focus mode active. Double tap to release.")
-    }
-
-    private func elapsed(now: Date) -> String {
-        guard let startedAt else { return "0:00" }
-        let total = max(0, Int(now.timeIntervalSince(startedAt)))
-        let m = total / 60
-        let s = total % 60
-        if m >= 60 {
-            return String(format: "%d:%02d:%02d", m / 60, m % 60, s)
-        }
-        return String(format: "%d:%02d", m, s)
-    }
-}
 
 /// Soft pulsing accent glow placed behind the mascot while focused.
 /// Purely decorative — never eats taps.
 struct FocusHalo: View {
     let color: Color
+    var size: CGFloat = 220
     @State private var pulse = false
 
     var body: some View {
@@ -1260,10 +1005,10 @@ struct FocusHalo: View {
                     colors: [color.opacity(0.45), color.opacity(0.0)],
                     center: .center,
                     startRadius: 2,
-                    endRadius: 110
+                    endRadius: size / 2
                 )
             )
-            .frame(width: 220, height: 220)
+            .frame(width: size, height: size)
             .scaleEffect(pulse ? 1.08 : 0.92)
             .opacity(pulse ? 0.9 : 0.55)
             .blur(radius: 8)

@@ -38,6 +38,16 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
     /// setup.sh, typed in by the user.
     static let vibezIdPattern = #"^[a-z]{3,5}(-[a-z]{3,5}){3}$"#
 
+    /// Escape hatch for local testing: entering this instead of a real
+    /// Vibez ID marks the app as paired WITHOUT ever talking to the
+    /// backend. The toggle + shield work normally (they're fully
+    /// on-device); pushes simply won't arrive. Client-only — the server
+    /// would reject it, but test mode never calls the server.
+    static let testVibezId = "test"
+
+    /// True while the saved ID is the offline test code.
+    var isTestMode: Bool { vibezId == Self.testVibezId }
+
     private(set) var state: State = .idle
     /// Transient cache of the latest FCM registration token, so
     /// `registerIfPossible` doesn't have to re-fetch
@@ -63,6 +73,11 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
         // Restore the persisted Vibez ID, if any.
         if let stored = defaults.string(forKey: Key.vibezId) {
             self.vibezId = stored
+            // Test mode has no registration to wait for (no server,
+            // no FCM dependency) — restore straight to paired.
+            if stored == Self.testVibezId {
+                self.state = .registered
+            }
         }
     }
 
@@ -94,7 +109,8 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
     }
 
     static func isValidVibezId(_ candidate: String) -> Bool {
-        candidate.range(of: vibezIdPattern, options: .regularExpression) != nil
+        candidate == testVibezId
+            || candidate.range(of: vibezIdPattern, options: .regularExpression) != nil
     }
 
     // MARK: - MessagingDelegate
@@ -116,6 +132,13 @@ final class PushTokenRegistrar: NSObject, MessagingDelegate {
     /// preconditions, and the setup card's status surfaces whichever
     /// is missing.
     private func registerIfPossible() async {
+        if vibezId == Self.testVibezId {
+            // Test mode: never touch the backend. This also swallows
+            // later FCM-token callbacks and retry taps, so no path
+            // registers the test code server-side.
+            state = .registered
+            return
+        }
         guard let token = lastToken ?? Messaging.messaging().fcmToken,
               !token.isEmpty else {
             // Wait for the next FCM delegate callback.

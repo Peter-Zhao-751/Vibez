@@ -65,17 +65,19 @@ struct MascotForAgent: View {
     let size: CGFloat
     var gap: CGFloat = 6
     var focused: Bool = false
+    /// Gates the breathe/sleep-bob body loop; eyes keep cycling.
+    var animate: Bool = true
 
     var body: some View {
         switch agent {
         case .claude:
-            ClaudeMascot(listening: listening, size: size, focused: focused)
+            ClaudeMascot(listening: listening, size: size, focused: focused, animate: animate)
         case .codex:
-            CodexMascot(listening: listening, size: size, focused: focused)
+            CodexMascot(listening: listening, size: size, focused: focused, animate: animate)
         case .both:
             HStack(alignment: .bottom, spacing: gap) {
-                ClaudeMascot(listening: listening, size: size * 0.78, focused: focused)
-                CodexMascot(listening: listening, size: size * 0.78, focused: focused)
+                ClaudeMascot(listening: listening, size: size * 0.78, focused: focused, animate: animate)
+                CodexMascot(listening: listening, size: size * 0.78, focused: focused, animate: animate)
             }
         }
     }
@@ -115,20 +117,24 @@ private struct ExpressionCycler: ViewModifier {
 
 private struct BodyBob: ViewModifier {
     let listening: Bool
+    /// `animate == false` freezes the breathe/sleep-bob loop entirely —
+    /// the reference home screen renders the hero with `animate={false}`
+    /// (only the eye-expression cycler keeps running).
+    var animate: Bool = true
     @State private var phase: Double = 0
 
     func body(content: Content) -> some View {
-        let scale: Double = listening
+        let scale: Double = !animate ? 1.0 : listening
             ? 1.0 + 0.04 * sin(phase)
             : 1.0 - 0.02 * sin(phase)
-        let yOffset: Double = listening
+        let yOffset: Double = !animate ? 0 : listening
             ? -1 * sin(phase)
             : 2 * sin(phase)
         return content
             .scaleEffect(scale, anchor: .bottom)
             .offset(y: yOffset)
-            .onAppear { startLoop() }
-            .onChange(of: listening) { _, _ in startLoop() }
+            .onAppear { if animate { startLoop() } }
+            .onChange(of: listening) { _, _ in if animate { startLoop() } }
     }
 
     private func startLoop() {
@@ -145,6 +151,7 @@ struct ClaudeMascot: View {
     let listening: Bool
     let size: CGFloat
     var focused: Bool = false
+    var animate: Bool = true
     @State private var expression: Expression = .open
 
     private let bodyColor = Theme.claudeOrange
@@ -175,7 +182,7 @@ struct ClaudeMascot: View {
         }
         .frame(width: size, height: h, alignment: .topLeading)
         .modifier(ExpressionCycler(listening: listening && !focused, expression: $expression))
-        .modifier(BodyBob(listening: listening))
+        .modifier(BodyBob(listening: listening, animate: animate))
     }
 }
 
@@ -244,6 +251,7 @@ struct CodexMascot: View {
     let listening: Bool
     let size: CGFloat
     var focused: Bool = false
+    var animate: Bool = true
     @State private var expression: Expression = .open
     @State private var cursorOn: Bool = true
 
@@ -360,7 +368,7 @@ struct CodexMascot: View {
         }
         .frame(width: w, height: h, alignment: .topLeading)
         .modifier(ExpressionCycler(listening: listening && !focused, expression: $expression))
-        .modifier(BodyBob(listening: listening))
+        .modifier(BodyBob(listening: listening, animate: animate))
         .task(id: listening) {
             if !listening { return }
             while !Task.isCancelled {

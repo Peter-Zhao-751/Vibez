@@ -33,28 +33,48 @@ struct VibezSetupCard: View {
             && trimmedDraft != registrar.vibezId
     }
 
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Text("Set up notifications")
-                .font(.system(size: 12, weight: .bold))
-                .tracking(0.5)
-                .foregroundStyle(theme.fg)
+    /// "Run /vibez:setup in Claude Code or Codex, then paste the Vibez
+    /// ID it gives you." — the command rendered in monospace fg, like
+    /// the reference card.
+    private var instructions: AttributedString {
+        var lead = AttributedString("Run ")
+        lead.foregroundColor = theme.fgMute
+        var cmd = AttributedString("/vibez:setup")
+        cmd.font = .system(size: 12, design: .monospaced)
+        cmd.foregroundColor = theme.fg
+        var tail = AttributedString(" in Claude Code or Codex, then paste the Vibez ID it gives you.")
+        tail.foregroundColor = theme.fgMute
+        return lead + cmd + tail
+    }
 
-            Text("Run /vibez:setup in Claude Code or Codex on your Mac, then enter the 4-word Vibez ID it gave you here.")
-                .font(.system(size: 11.5))
-                .foregroundStyle(theme.fgMute)
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(Color(hex: 0xf5c518))
+                    .frame(width: 8, height: 8)
+                Text("Connect Vibez")
+                    .font(.system(size: 14, weight: .bold))
+                    .foregroundStyle(theme.fg)
+            }
+            .padding(.bottom, 4)
+
+            Text(instructions)
+                .font(.system(size: 12))
+                .lineSpacing(2)
                 .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 12)
 
             HStack(spacing: 8) {
                 ZStack(alignment: .leading) {
                     if draft.isEmpty && !focused {
                         Text("moss-pine-fox-jazz")
-                            .font(.system(size: 13, design: .monospaced))
+                            .font(.system(size: 13.5, design: .monospaced))
                             .foregroundStyle(theme.fgFaint)
                             .allowsHitTesting(false)
                     }
                     TextField("", text: $draft)
-                        .font(.system(size: 13, design: .monospaced))
+                        .font(.system(size: 13.5, design: .monospaced))
                         .foregroundStyle(theme.fg)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -68,26 +88,26 @@ struct VibezSetupCard: View {
                             if fieldError != nil { fieldError = nil }
                         }
                 }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 9)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 11)
                 .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(theme.bgWidget)
+                    RoundedRectangle(cornerRadius: 11)
+                        .fill(theme.bgChip)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11)
+                        .strokeBorder(theme.hairline, lineWidth: 1)
                 )
 
                 Button(action: commit) {
-                    Text(saveBtnLabel)
-                        .font(.system(size: 11, weight: .heavy, design: .monospaced))
-                        .tracking(1.6)
-                        .foregroundStyle(saveable ? theme.onAccent : theme.fgMute)
-                        .frame(minWidth: 44)
-                        .padding(.horizontal, 14)
+                    Text(pairBtnLabel)
+                        .font(.system(size: 13.5, weight: .bold))
+                        .foregroundStyle(saveable ? theme.onAccent : theme.fgFaint)
+                        .padding(.horizontal, 16)
                         .padding(.vertical, 11)
                         .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(saveable
-                                      ? theme.saveActiveBg
-                                      : AnyShapeStyle(theme.bgWidget))
+                            RoundedRectangle(cornerRadius: 11)
+                                .fill(saveable ? theme.accent : theme.bgChip)
                         )
                 }
                 .buttonStyle(.plain)
@@ -95,18 +115,23 @@ struct VibezSetupCard: View {
             }
 
             statusRow
+                .padding(.top, 10)
 
             if let fieldError {
                 Text(fieldError)
                     .font(.system(size: 11))
                     .foregroundStyle(.red)
+                    .padding(.top, 6)
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(EdgeInsets(top: 15, leading: 16, bottom: 16, trailing: 16))
         .background(
             RoundedRectangle(cornerRadius: 18)
                 .fill(theme.bgPanel)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .strokeBorder(theme.hairline, lineWidth: 1)
         )
         .onAppear {
             // Seed the draft with the currently-saved ID so the user
@@ -117,10 +142,10 @@ struct VibezSetupCard: View {
         }
     }
 
-    private var saveBtnLabel: String {
+    private var pairBtnLabel: String {
         switch registrar.state {
         case .registering: return "..."
-        default:           return "Save"
+        default:           return "Pair"
         }
     }
 
@@ -166,7 +191,7 @@ struct VibezSetupCard: View {
         case .registering:
             return "registering…"
         case .registered:
-            return "paired"
+            return registrar.isTestMode ? "test mode (no server)" : "paired"
         case .error(let m):
             return "error: \(m.prefix(80))"
         }

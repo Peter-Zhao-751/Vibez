@@ -21,3 +21,4 @@ node_modules/
 # real copy lives at Vibez/GoogleService-Info.plist and is bundled
 # into the iOS target. Anchor to root so the bundled one is unaffected.
 /GoogleService-Info.plist
+.superpowers/

@@ -125,16 +125,22 @@ final class NotificationService: UNNotificationServiceExtension {
         // fires. Widest case first:
         //   • notifications off → pull EVERY Vibez entry on every push, so
         //     nothing piles up while the user has banners disabled.
-        //   • a reply (shield:off) → pull just that replied session's now-
-        //     stale "Needs you" / "Done" banner, leaving other sessions'.
+        //   • otherwise → pull every stale shield:off control entry
+        //     ("Replied" pings, timeout unblocks). Those have to be alert
+        //     pushes (silent pushes don't wake this extension), so each
+        //     files into Notification Center passively after its own
+        //     didReceive pass — only a LATER sweep can remove it. On a
+        //     reply, additionally pull that replied session's now-stale
+        //     "Needs you" / "Done" banner, leaving other sessions'.
         // Either way the current push isn't in the delivered list yet, so it
         // still files in passively; the next push (or the host's
         // on-activation sweep) clears the remainder.
         if notificationsOff {
-            clearDeliveredNotifications(forSession: nil)
-        } else if shield == "off", reason != "timeout",
-                  !session.isEmpty, session != "nosid" {
-            clearDeliveredNotifications(forSession: session)
+            clearAllDeliveredNotifications()
+        } else {
+            let isReply = shield == "off" && reason != "timeout"
+                && !session.isEmpty && session != "nosid"
+            clearStaleDeliveredNotifications(repliedSession: isReply ? session : nil)
         }
 
         // Pass the notification through with markdown stripped + the
@@ -359,14 +365,25 @@ final class NotificationService: UNNotificationServiceExtension {
         log.info("clearShield")
     }
 
-    /// Pull delivered notifications out of Notification Center. Pass `nil`
-    /// to clear every Vibez entry (notifications switched off); pass a
-    /// session id to clear only that conversation's banner(s) (a reply made
-    /// them stale). For the scoped case we match on the payload's own
-    /// `session` field — present on every push the server sends, and
-    /// mirrored onto locally-scheduled banners by
-    /// NotifyClient.scheduleLocalNotification — so it works regardless of
-    /// how the banner was raised, rather than relying on the system id.
+    /// Clear every Vibez entry from Notification Center (notifications
+    /// switched off). Needs no enumerate round-trip.
+    private func clearAllDeliveredNotifications() {
+        UNUserNotificationCenter.current().removeAllDeliveredNotifications()
+        log.info("cleared all delivered banners (notifications off)")
+    }
+
+    /// Pull stale delivered notifications out of Notification Center:
+    /// every shield:off control entry (a "Replied" ping or timeout
+    /// unblock — never useful to read, but unavoidable in the list: they
+    /// must be alert pushes so this extension wakes, and each lands after
+    /// its own didReceive pass ran), plus — when a reply just came in —
+    /// `repliedSession`'s now-stale "Needs you" / "Done" banner(s). Both
+    /// match on the payload's own userInfo fields, present on every push
+    /// the server sends and (for `session`) mirrored onto locally-
+    /// scheduled banners by NotifyClient.scheduleLocalNotification — so
+    /// it works regardless of how the banner was raised, rather than
+    /// relying on the system id. Local banners never carry `shield`, so
+    /// the control-entry match can't touch them.
     ///
     /// Runs synchronously: the removal must be *issued* before didReceive
     /// hands control back to iOS via contentHandler, because the extension
@@ -375,29 +392,28 @@ final class NotificationService: UNNotificationServiceExtension {
     /// thread), so the wait can't deadlock; the timeout is a belt-and-
     /// suspenders bound well inside our ~30s budget — if the local query
     /// somehow stalls we skip removal that once rather than hang to death.
-    private func clearDeliveredNotifications(forSession session: String?) {
+    private func clearStaleDeliveredNotifications(repliedSession: String?) {
         let center = UNUserNotificationCenter.current()
-        // Clearing everything needs no enumerate round-trip.
-        guard let session else {
-            center.removeAllDeliveredNotifications()
-            log.info("cleared all delivered banners (notifications off)")
-            return
-        }
         let sem = DispatchSemaphore(value: 0)
         var ids: [String] = []
         center.getDeliveredNotifications { delivered in
             ids = delivered
-                .filter { ($0.request.content.userInfo["session"] as? String) == session }
+                .filter {
+                    let info = $0.request.content.userInfo
+                    if (info["shield"] as? String) == "off" { return true }
+                    guard let repliedSession else { return false }
+                    return (info["session"] as? String) == repliedSession
+                }
                 .map { $0.request.identifier }
             sem.signal()
         }
         guard sem.wait(timeout: .now() + 5) == .success else {
-            log.warning("clearDeliveredNotifications: query timed out for \(session, privacy: .public)")
+            log.warning("clearStaleDeliveredNotifications: query timed out")
             return
         }
         guard !ids.isEmpty else { return }
         center.removeDeliveredNotifications(withIdentifiers: ids)
-        log.info("cleared \(ids.count, privacy: .public) delivered banner(s) for \(session, privacy: .public)")
+        log.info("cleared \(ids.count, privacy: .public) stale delivered banner(s), repliedSession=\(repliedSession ?? "nil", privacy: .public)")
     }
 
     private func publishShieldContext(

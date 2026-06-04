@@ -147,6 +147,11 @@ final class AnalyticsTracker {
     }
 
     // MARK: - Derived views
+    //
+    // Currently unread by the UI — the home screen's "Today" panel was
+    // dropped in the prototype-match redesign. Recording stays live (the
+    // tracker still counts every ping, reply, and focus interval) so a
+    // future stats surface can pick these up without losing history.
 
     var conversationsToday: Int { stats.conversationIds.count }
     var responsesToday: Int { stats.responseCount }
@@ -158,8 +163,8 @@ final class AnalyticsTracker {
     }
 
     /// Total seconds the shield has been up so far today, including any
-    /// currently-running interval. Read by AnalyticsPanel; computed at
-    /// call time so periodic UI refreshes (TimelineView) animate.
+    /// currently-running interval. Computed at call time so periodic UI
+    /// refreshes (e.g. a TimelineView) animate.
     var focusSecondsToday: TimeInterval {
         let startOfDay = Calendar.current.startOfDay(for: Date())
         let stored = stats.date == startOfDay ? stats.focusSeconds : 0

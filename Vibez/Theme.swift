@@ -96,8 +96,8 @@ struct Theme {
     let accent: Color
     let accentDeep: Color
     let pillGradient: LinearGradient
-    let saveActiveBg: AnyShapeStyle
-    let knobBg: Color
+    /// Track color of the big toggle when it's off.
+    let pillOff: Color
     let onAccent: Color
 
     static let claudeOrange = Color(hex: 0xdd7a52)
@@ -130,37 +130,22 @@ struct Theme {
             endPoint: .bottomTrailing
         )
 
-        // `saveActiveBg` is the full pill gradient in dark mode and a
-        // softer one in light (each stop blended halfway toward the light
-        // chip bg). Bake that split into dynamic stops so a single gradient
-        // resolves per trait — no `dark` flag threaded through callers.
-        let bgChipLight = Color(hex: 0xf1ede5)
-        let saveStops = pillStops.map { stop in
-            Color.dynamic(light: .lerp(stop, bgChipLight, t: 0.5), dark: stop)
-        }
-        let saveGradient = LinearGradient(
-            colors: saveStops,
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-
         // Every neutral resolves its own light/dark variant from the live
         // trait collection. accent/accentDeep/pillGradient are agent-only
         // (identical in both schemes), so they stay static.
         return Theme(
             bg:       .dynamic(light: Color(hex: 0xfbf8f4), dark: Color(hex: 0x0c0d12)),
-            bgPanel:  .dynamic(light: .white,               dark: Color(hex: 0x16171d)),
-            bgWidget: .dynamic(light: Color(hex: 0xe4dfd6), dark: Color(hex: 0x1f2027)),
-            bgChip:   .dynamic(light: bgChipLight,          dark: Color(hex: 0x16171d)),
+            bgPanel:  .dynamic(light: .white,               dark: Color(hex: 0x15161c)),
+            bgWidget: .dynamic(light: .white,               dark: Color(hex: 0x1c1f27)),
+            bgChip:   .dynamic(light: Color(hex: 0xf1ede5), dark: Color(hex: 0x16181f)),
             fg:       .dynamic(light: Color(hex: 0x1a0e08), dark: Color(hex: 0xf5f1ec)),
-            fgMute:   .dynamic(light: Color(hex: 0x6e655c), dark: Color(hex: 0x6f6c7a)),
+            fgMute:   .dynamic(light: Color(hex: 0x6e655c), dark: Color(hex: 0x8d8a96)),
             fgFaint:  .dynamic(light: Color(hex: 0xa8a097), dark: Color(hex: 0x56545e)),
             hairline: .dynamic(light: Color(hex: 0xece4d8), dark: Color(hex: 0x272832)),
             accent: accent,
             accentDeep: accentDeep,
             pillGradient: pillGradient,
-            saveActiveBg: AnyShapeStyle(saveGradient),
-            knobBg:   .dynamic(light: .white, dark: Color(hex: 0x0e0f14)),
+            pillOff:  .dynamic(light: Color(hex: 0xe6dfd5), dark: Color(hex: 0x1d1f27)),
             onAccent: .white
         )
     }
