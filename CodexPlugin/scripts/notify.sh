@@ -84,16 +84,18 @@ clamp_field() {
 
 # Per-session block debounce. An agent can fire several block-type
 # events for one conversation within seconds — sequential question
-# asks before the user answers the first, or a Stop landing right
-# after the user's last reply. The first shield:on of a burst blocks
-# + banners the phone; followers inside the window are pure noise
-# (the phone is already blocked, or the user literally just replied
-# at this Mac). A shield:on send is therefore SKIPPED when ANY event
-# for the same session was sent — or suppressed — within the last
-# VIBEZ_BLOCK_DEBOUNCE_SECONDS. shield:off (replies) always sends:
-# it's what unblocks the phone; it just refreshes the stamp, which
-# is what catches the trailing "done" right after the last answer.
-# Stamp files hold an epoch second; 0 disables the debounce.
+# asks before the user answers the first, or paired hooks double-
+# firing the same ask. The first shield:on of a burst blocks +
+# banners the phone; followers inside the window are pure noise
+# (the phone is already blocked). A shield:on send is therefore
+# SKIPPED when an AGENT event (shield:on, sent or suppressed) for
+# the same session landed within the last
+# VIBEZ_BLOCK_DEBOUNCE_SECONDS. shield:off (replies) is invisible
+# to the debounce in BOTH directions: it always sends (it's what
+# unblocks the phone) and it never touches the stamp — a reply must
+# not silence the ask/done that lands seconds later; that's real
+# agent activity, not a duplicate. Stamp files hold an epoch
+# second; 0 disables the debounce.
 DEBOUNCE_SECONDS="${VIBEZ_BLOCK_DEBOUNCE_SECONDS:-5}"
 case "${DEBOUNCE_SECONDS}" in
     ''|*[!0-9]*) DEBOUNCE_SECONDS=5 ;;
@@ -159,23 +161,25 @@ post_vibez() {
     fi
 
     # Same-conversation debounce: skip block-type sends fired within
-    # the window of this session's last event. Suppressed sends still
-    # refresh the stamp (rolling window), so a machine-gun burst stays
-    # silent for its whole run, not just its first few seconds.
+    # the window of this session's last AGENT event. Suppressed sends
+    # still refresh the stamp (rolling window), so a machine-gun burst
+    # stays silent for its whole run, not just its first few seconds.
     if [ "${shield}" = "on" ] && within_debounce_window "${session}"; then
         mark_event "${session}"
         log "debounced: ${title} (event=${event} session=${session})"
         return 0
     fi
 
-    # Claim the stamp BEFORE the network call, not after. Hooks run in
-    # parallel (Codex fires paired events in the same second); a stamp
-    # written only on curl success leaves a 0.5-5s hole during which a
-    # concurrent hook sees "no stamp" and double-sends. Claiming here
-    # narrows the race to the one-liner above. A failed send rolls the
-    # claim back (below) so a network blip can't leave a phantom stamp
-    # that silences the burst's next event.
-    mark_event "${session}"
+    # Claim the stamp BEFORE the network call, not after — shield:on
+    # only, since the stamp tracks agent block events exclusively.
+    # Hooks run in parallel (Codex fires paired events in the same
+    # second); a stamp written only on curl success leaves a 0.5-5s
+    # hole during which a concurrent shield:on sees "no stamp" and
+    # double-sends. Claiming here narrows the race to the one-liner
+    # above. A failed send rolls the claim back (below) so a network
+    # blip can't leave a phantom stamp that silences the burst's next
+    # event.
+    [ "${shield}" = "on" ] && mark_event "${session}" || true
 
     local payload
     payload=$(jq -nc \
@@ -199,9 +203,11 @@ post_vibez() {
         log "sent: ${title} (event=${event})"
     else
         log "send failed: ${title} (event=${event})"
-        # Roll the claim back: the phone never got this push, so the
-        # next event for the session must not be debounced against it.
-        clear_event "${session}"
+        # Roll the claim back — shield:on only (off never claimed, and
+        # clearing here would erase a legitimate agent stamp): the
+        # phone never got this push, so the next agent event for the
+        # session must not be debounced against it.
+        [ "${shield}" = "on" ] && clear_event "${session}" || true
     fi
 }
 
@@ -659,6 +665,43 @@ case "${EVENT}" in
         check_eq "debounce-nosid"       "$(dbprobe nosid)" "send"
         DEBOUNCE_SECONDS=0
         check_eq "debounce-disabled"    "$(dbprobe sess1)" "send"
+
+        # post_vibez stamp policy — only agent block events (shield:on)
+        # may touch the stamp: claim on send, refresh on suppress, roll
+        # back on failure. A user reply (shield:off) must do NONE of
+        # those — the debounce dedupes what the AGENT fires; a reply
+        # must never silence the ask/done that lands seconds later.
+        # curl is shadowed (no network), VIBEZ_ID is forced non-empty,
+        # and LOG_FILE points into the throwaway CONFIG_DIR.
+        stampprobe() {
+            if [ -f "${CONFIG_DIR}/lastevent.$1" ]; then
+                printf 'stamped'
+            else
+                printf 'clean'
+            fi
+        }
+        saved_log="${LOG_FILE}"
+        saved_id="${VIBEZ_ID}"
+        DEBOUNCE_SECONDS=5
+        LOG_FILE="${CONFIG_DIR}/testlog"
+        VIBEZ_ID="self-test-self-test"
+        curl() { return 0; }
+        post_vibez "t" "b" "replied" "off" "pvA" "cx"
+        check_eq "stamp-off-send-no-claim"     "$(stampprobe pvA)" "clean"
+        post_vibez "t" "b" "needs-input" "on" "pvA" "cx"
+        check_eq "stamp-reply-then-ask-sends"  "$(grep -c 'debounced:' "${LOG_FILE}")" "0"
+        check_eq "stamp-on-send-claims"        "$(stampprobe pvA)" "stamped"
+        post_vibez "t" "b" "done" "on" "pvA" "cx"
+        check_eq "stamp-burst-still-debounced" "$(grep -c 'debounced:' "${LOG_FILE}")" "1"
+        curl() { return 22; }
+        post_vibez "t" "b" "replied" "off" "pvA" "cx"
+        check_eq "stamp-off-fail-preserves"    "$(stampprobe pvA)" "stamped"
+        post_vibez "t" "b" "needs-input" "on" "pvB" "cx"
+        check_eq "stamp-on-fail-rolls-back"    "$(stampprobe pvB)" "clean"
+        unset -f curl
+        LOG_FILE="${saved_log}"
+        VIBEZ_ID="${saved_id}"
+
         DEBOUNCE_SECONDS="${saved_debounce}"
         rm -rf "${CONFIG_DIR}"
 
