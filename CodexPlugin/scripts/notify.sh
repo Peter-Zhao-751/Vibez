@@ -70,6 +70,9 @@ ensure_vibez_id() {
 # sites already clip for display (72/160); this is the defensive floor
 # inside post_vibez itself so no future call site can bypass clipping.
 # Server mirrors these caps (title 100 / body 200) and clamps too.
+# Note: ${#raw} counts bytes under a C locale (chars under UTF-8) — a
+# multibyte cut is possible there; the server's surrogate-safe clamp
+# is the authoritative bound either way.
 clamp_field() {
     local raw="$1" max="$2"
     if [ "${#raw}" -gt "${max}" ]; then
