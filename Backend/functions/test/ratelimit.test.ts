@@ -11,6 +11,9 @@ import {
   decideLocally,
   recordGlobalDeny,
   BoundedMap,
+  sanitizeBucketState,
+  LazyLimiter,
+  type TakeResult,
 } from "../src/ratelimit";
 
 const T0 = 1_700_000_000_000;
@@ -135,7 +138,7 @@ describe("BoundedMap", () => {
   });
 });
 
-describe("caller-loop integration (decideLocally + shared global bucket)", () => {
+describe("primitive composition (decideLocally + shared global bucket)", () => {
   it("escalates to the shared bucket and negative-caches its deny", () => {
     // Two "instances", one shared (Firestore-like) bucket state.
     let shared: BucketState | undefined;
@@ -164,5 +167,88 @@ describe("caller-loop integration (decideLocally + shared global bucket)", () =>
     }
     expect(allowed).toBe(10); // 5 local + 5 shared
     expect(denied).toBe(2);   // 11th escalates+denies, 12th negative-caches
+  });
+});
+
+describe("sanitizeBucketState", () => {
+  it("passes a valid persisted doc through (extra fields dropped)", () => {
+    expect(sanitizeBucketState({tokens: 2.5, lastRefillMs: T0, expireAt: 1}))
+      .toEqual({tokens: 2.5, lastRefillMs: T0});
+  });
+  it("coerces string-typed numerics (deliberate leniency)", () => {
+    expect(sanitizeBucketState({tokens: "5", lastRefillMs: T0}))
+      .toEqual({tokens: 5, lastRefillMs: T0});
+  });
+  it("degrades corrupt docs to undefined (fresh bucket)", () => {
+    expect(sanitizeBucketState(undefined)).toBeUndefined();
+    expect(sanitizeBucketState(null)).toBeUndefined();
+    expect(sanitizeBucketState("garbage")).toBeUndefined();
+    expect(sanitizeBucketState({})).toBeUndefined();
+    expect(sanitizeBucketState({tokens: NaN, lastRefillMs: T0}))
+      .toBeUndefined();
+    expect(sanitizeBucketState({tokens: 3})).toBeUndefined();
+  });
+});
+
+describe("LazyLimiter", () => {
+  it("serves the burst locally without consulting the global take", async () => {
+    const calls: string[] = [];
+    const limiter = new LazyLimiter(10, ID_BUCKET, async (key) => {
+      calls.push(key);
+      return {
+        allowed: true,
+        next: {tokens: 0, lastRefillMs: T0},
+        retryAfterMs: 0,
+      };
+    });
+    for (let i = 0; i < 5; i++) {
+      expect((await limiter.check("k", T0)).allowed).toBe(true);
+    }
+    expect(calls.length).toBe(0);
+  });
+
+  it("escalates when dry and negative-caches a global deny", async () => {
+    const calls: string[] = [];
+    const limiter = new LazyLimiter(10, ID_BUCKET, async (key) => {
+      calls.push(key);
+      return {
+        allowed: false,
+        next: {tokens: 0, lastRefillMs: T0},
+        retryAfterMs: 800,
+      };
+    });
+    for (let i = 0; i < 5; i++) await limiter.check("k", T0);
+    const denied = await limiter.check("k", T0);
+    expect(denied).toEqual({allowed: false, retryAfterMs: 800});
+    expect(calls.length).toBe(1);
+    // Inside the deny window: denied from memory, stub NOT re-consulted.
+    const cached = await limiter.check("k", T0 + 100);
+    expect(cached.allowed).toBe(false);
+    expect(calls.length).toBe(1);
+  });
+
+  it("fails open when the global take throws", async () => {
+    const errs: string[] = [];
+    const limiter = new LazyLimiter(
+      10, ID_BUCKET,
+      async () => {
+        throw new Error("firestore down");
+      },
+      (key) => errs.push(key));
+    for (let i = 0; i < 5; i++) await limiter.check("k", T0);
+    const verdict = await limiter.check("k", T0);
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.retryAfterMs).toBe(0);
+    expect(errs).toEqual(["k"]);
+  });
+
+  it("isolates keys (one hot key does not starve another)", async () => {
+    const limiter = new LazyLimiter(10, ID_BUCKET, async () => ({
+      allowed: false,
+      next: {tokens: 0, lastRefillMs: T0},
+      retryAfterMs: 500,
+    }));
+    for (let i = 0; i < 6; i++) await limiter.check("hot", T0);
+    expect((await limiter.check("cold", T0)).allowed).toBe(true);
   });
 });

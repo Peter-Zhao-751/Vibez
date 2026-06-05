@@ -195,3 +195,85 @@ export class BoundedMap<V> {
     this.map.delete(key);
   }
 }
+
+/**
+ * Coerce an untrusted persisted doc into a BucketState, or undefined
+ * (= treat as a fresh full bucket) when fields are missing or
+ * non-finite. A corrupted rateLimits doc must degrade to "fresh
+ * bucket" (which the next allow-write self-heals), never to a
+ * permanent deny. Number() coercion is deliberate leniency for
+ * string-typed numerics.
+ * @param {unknown} raw Raw doc data.
+ * @return {BucketState|undefined} Sanitized state, if valid.
+ */
+export function sanitizeBucketState(raw: unknown): BucketState | undefined {
+  if (typeof raw !== "object" || raw === null) return undefined;
+  const r = raw as Record<string, unknown>;
+  const tokens = Number(r.tokens);
+  const lastRefillMs = Number(r.lastRefillMs);
+  if (!Number.isFinite(tokens) || !Number.isFinite(lastRefillMs)) {
+    return undefined;
+  }
+  return {tokens, lastRefillMs};
+}
+
+/** Verdict returned by LazyLimiter.check. */
+export interface LimitVerdict {
+  allowed: boolean;
+  retryAfterMs: number;
+}
+
+/**
+ * The lazy per-key limiter: in-memory fast path, injected global
+ * take (a Firestore transaction in production) consulted only while
+ * a key is over-rate locally, negative-cache on global denies,
+ * fail-open when the injected take throws. Pure except the injected
+ * I/O — unit-tested with a stubbed globalTake.
+ */
+export class LazyLimiter {
+  private entries: BoundedMap<LimiterEntry>;
+
+  /**
+   * @param {number} maxKeys Bound for the per-key entry map.
+   * @param {BucketConfig} cfg Bucket parameters for every key.
+   * @param {function(string, number): Promise<TakeResult>} globalTake
+   *   Async token-take against shared cross-instance state.
+   * @param {function(string, unknown): void=} onError Called when
+   *   globalTake throws (the verdict fails open).
+   */
+  constructor(
+    maxKeys: number,
+    private readonly cfg: BucketConfig,
+    private readonly globalTake:
+      (key: string, nowMs: number) => Promise<TakeResult>,
+    private readonly onError?: (key: string, err: unknown) => void,
+  ) {
+    this.entries = new BoundedMap<LimiterEntry>(maxKeys);
+  }
+
+  /**
+   * Decide one request.
+   * @param {string} key Rate-limit key (e.g. "notify:<vibezId>").
+   * @param {number} nowMs Current epoch millis.
+   * @return {Promise<LimitVerdict>} The verdict.
+   */
+  async check(key: string, nowMs: number): Promise<LimitVerdict> {
+    const decision = decideLocally(this.entries.get(key), nowMs, this.cfg);
+    this.entries.set(key, decision.next);
+    if (decision.kind === "allow") return {allowed: true, retryAfterMs: 0};
+    if (decision.kind === "deny") {
+      return {allowed: false, retryAfterMs: decision.retryAfterMs};
+    }
+    try {
+      const take = await this.globalTake(key, nowMs);
+      if (!take.allowed) {
+        this.entries.set(
+          key, recordGlobalDeny(decision.next, nowMs, take.retryAfterMs));
+      }
+      return {allowed: take.allowed, retryAfterMs: take.retryAfterMs};
+    } catch (err) {
+      this.onError?.(key, err);
+      return {allowed: true, retryAfterMs: 0};
+    }
+  }
+}

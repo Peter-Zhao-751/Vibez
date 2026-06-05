@@ -24,10 +24,10 @@ import {
   IP_BUCKET,
   GLOBAL_BUCKET,
   BucketState,
-  LimiterEntry,
   BoundedMap,
-  decideLocally,
-  recordGlobalDeny,
+  LazyLimiter,
+  type TakeResult,
+  sanitizeBucketState,
   tryTake,
 } from "./ratelimit.js";
 
@@ -61,7 +61,6 @@ const LIMITER_DOC_TTL_MS = 24 * 60 * 60 * 1000;
 /** Bound for every attacker-keyed in-memory map (~5 MB worst case). */
 const MAX_TRACKED_KEYS = 50_000;
 
-const limiterEntries = new BoundedMap<LimiterEntry>(MAX_TRACKED_KEYS);
 const ipBuckets = new BoundedMap<BucketState>(MAX_TRACKED_KEYS);
 let globalBucket: BucketState | undefined;
 
@@ -82,51 +81,83 @@ function passesMemoryGuards(ip: string, nowMs: number): boolean {
 }
 
 /**
- * Lazy per-key limiter: local bucket first; Firestore transaction on
- * rateLimits/{key} only while this instance sees over-rate traffic;
- * global denies negative-cache in memory. Fails OPEN — delivery
- * matters more than strictness, and attackers can't induce Firestore
- * errors on demand.
- * @param {string} key e.g. "notify:moss-pine-fox-jazz".
+ * One token-take against the shared Firestore bucket for this key.
+ * Reads are sanitized so a corrupted doc degrades to a fresh bucket
+ * (self-heals on the next allow-write) instead of a permanent deny.
+ * @param {string} key Rate-limit key.
  * @param {number} nowMs Current epoch millis.
- * @return {Promise<{allowed: boolean, retryAfterMs: number}>} Verdict.
+ * @return {Promise<TakeResult>} The take outcome.
  */
-async function checkKeyRateLimit(
+async function takeFromSharedBucket(
   key: string, nowMs: number,
-): Promise<{allowed: boolean; retryAfterMs: number}> {
-  const decision = decideLocally(limiterEntries.get(key), nowMs, ID_BUCKET);
-  limiterEntries.set(key, decision.next);
-  if (decision.kind === "allow") return {allowed: true, retryAfterMs: 0};
-  if (decision.kind === "deny") {
-    return {allowed: false, retryAfterMs: decision.retryAfterMs};
-  }
-  try {
-    const ref = tokensDb.collection(RATE_LIMITS).doc(key);
-    const verdict = await tokensDb.runTransaction(async (tx) => {
-      const snap = await tx.get(ref);
-      const state = snap.exists ?
-        (snap.data() as unknown as BucketState) : undefined;
-      const take = tryTake(state, nowMs, ID_BUCKET);
-      if (take.allowed) {
-        tx.set(ref, {
-          tokens: take.next.tokens,
-          lastRefillMs: take.next.lastRefillMs,
-          expireAt: Timestamp.fromMillis(nowMs + LIMITER_DOC_TTL_MS),
-        });
-      }
-      return take;
-    });
-    if (!verdict.allowed) {
-      limiterEntries.set(
-        key, recordGlobalDeny(decision.next, nowMs, verdict.retryAfterMs));
+): Promise<TakeResult> {
+  const ref = tokensDb.collection(RATE_LIMITS).doc(key);
+  return tokensDb.runTransaction(async (tx) => {
+    const snap = await tx.get(ref);
+    const state = sanitizeBucketState(snap.data());
+    const take = tryTake(state, nowMs, ID_BUCKET);
+    if (take.allowed) {
+      tx.set(ref, {
+        tokens: take.next.tokens,
+        lastRefillMs: take.next.lastRefillMs,
+        expireAt: Timestamp.fromMillis(nowMs + LIMITER_DOC_TTL_MS),
+      });
     }
-    return {allowed: verdict.allowed, retryAfterMs: verdict.retryAfterMs};
-  } catch (e) {
-    logger.warn("rate limiter unavailable — failing open", {
-      key, err: String(e),
-    });
-    return {allowed: true, retryAfterMs: 0};
-  }
+    return take;
+  });
+}
+
+const keyLimiter = new LazyLimiter(
+  MAX_TRACKED_KEYS,
+  ID_BUCKET,
+  takeFromSharedBucket,
+  (key, err) => logger.warn("rate limiter unavailable — failing open", {
+    key, err: String(err),
+  }),
+);
+
+/**
+ * Real client IP for direct Cloud Functions invocations. The
+ * functions framework leaves Express "trust proxy" false, so req.ip
+ * is the internal proxy — the SAME for every caller — which would
+ * turn a per-IP bucket into a global choke point. On this topology
+ * (direct cloudfunctions.net, no external LB) the GFE appends the
+ * actual TCP peer as the LAST X-Forwarded-For entry; earlier entries
+ * are client-forgeable. Re-derive if an external LB is ever added.
+ * @param {object} req Express-style request.
+ * @return {string} Best-effort client IP.
+ */
+function clientIp(req: {
+  headers: Record<string, string | string[] | undefined>;
+  ip?: string;
+}): string {
+  const xff = req.headers["x-forwarded-for"];
+  const raw = Array.isArray(xff) ? xff[xff.length - 1] : xff;
+  const last = raw?.split(",").pop()?.trim();
+  return last || req.ip || "unknown";
+}
+
+/**
+ * Shared 429 shaping: logged layer + finite second-granular
+ * Retry-After (non-finite input clamps to 1s).
+ * @param {object} res Express-style response.
+ * @param {number} retryAfterMs Suggested wait in millis.
+ * @param {string} layer Which guard fired ("memory" | "id").
+ * @param {string} key Limited key (ip or vibezId), for the log line.
+ */
+function respondRateLimited(
+  res: {
+    set: (k: string, v: string) => unknown;
+    status: (n: number) => {json: (b: unknown) => void};
+  },
+  retryAfterMs: number,
+  layer: string,
+  key: string,
+): void {
+  const ms = Number.isFinite(retryAfterMs) ? retryAfterMs : 1000;
+  logger.info("rate limited", {layer, key});
+  res.set("Retry-After", String(Math.max(1, Math.ceil(ms / 1000))));
+  res.status(429).json({error: "rate limited"});
 }
 
 
@@ -256,17 +287,14 @@ export const notify = onRequest(
       validation.fields;
 
     const nowMs = Date.now();
-    if (!passesMemoryGuards(req.ip ?? "unknown", nowMs)) {
-      res.set("Retry-After", "1");
-      res.status(429).json({error: "rate limited"});
+    const ip = clientIp(req);
+    if (!passesMemoryGuards(ip, nowMs)) {
+      respondRateLimited(res, 1000, "memory", ip);
       return;
     }
-    const limit = await checkKeyRateLimit(`notify:${vibezId}`, nowMs);
+    const limit = await keyLimiter.check(`notify:${vibezId}`, nowMs);
     if (!limit.allowed) {
-      logger.info("notify rate limited", {vibezId});
-      res.set("Retry-After",
-        String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))));
-      res.status(429).json({error: "rate limited"});
+      respondRateLimited(res, limit.retryAfterMs, "id", vibezId);
       return;
     }
 
