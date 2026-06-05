@@ -93,8 +93,9 @@ Deny responses: `429 {error: "rate limited"}` + `Retry-After: 1` header
 
 Random valid-format Vibez IDs bypass per-ID buckets (every ID is fresh), so
 both endpoints also run a per-instance, per-IP token bucket (capacity 20,
-refill 5/sec, same bounded-Map infrastructure; `req.ip` /
-`request.rawRequest.ip`). Bounds single-source floods and ID-spray to
+refill 5/sec, same bounded-Map infrastructure; keyed on the LAST
+X-Forwarded-For entry — `req.ip` is the internal proxy, constant across
+callers, verified live). Bounds single-source floods and ID-spray to
 ~15 req/sec fleet-wide (≈ $1/day worst case); a real Mac's hooks never get
 near it. In-memory only — no Firestore escalation for IPs (cardinality too
 high, and `maxInstances: 3` already caps the absolute ceiling).
@@ -161,7 +162,12 @@ itself enforces and note it in code.
   junk docs under unclaimed Vibez IDs are never targeted by `/notify`, so
   the stale-token sweep would never reclaim them. With dry-run they can't
   be created at all; an attacker would need real FCM tokens minted against
-  this Firebase project (App Check on the roadmap closes that too).
+  this Firebase project (App Check on the roadmap closes that too). Only
+  token-invalidity codes reject; transient FCM/infra errors fail open (a
+  first pairing must not break on an FCM blip — the limiter + device cap
+  still bound junk). Web registrations are exempt — their 'token' is an
+  extension-generated id, never sent to FCM; their junk-doc bound is the
+  rate limiter + device cap instead.
 - Rate limited via `register:{vibezId}` bucket + per-IP guard (§1).
 
 ## 4. Device-list cache (cost lever)

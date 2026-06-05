@@ -122,6 +122,12 @@ Backend/                      Firebase project: vibez-backend.
       server-side backup under the on-device prune (the precise primary).
   functions/src/scheduling.ts Pure, unit-tested helpers (clampDuration, APNs payload build,
                               task scheduling math). Tests in functions/test/scheduling.test.ts.
+  functions/src/ratelimit.ts  Pure token-bucket + lazy-escalation math (LazyLimiter,
+                              BoundedMap, sanitizeBucketState); Firestore glue lives
+                              in index.ts. Tests in functions/test/ratelimit.test.ts.
+  functions/src/validation.ts Pure request validation: caps, enum whitelists, clamps;
+                              owns the server-side VIBEZ_ID_PATTERN. Tests in
+                              functions/test/validation.test.ts.
 VibezExtension/               Chrome (MV3) browser companion (TypeScript). Mirrors the iOS
                               block on the desktop: watches the backend for this Vibez ID's
                               block state via Firestore and overlays a block screen on
@@ -170,9 +176,22 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   (`ShieldState.asDict`, writer), `VibezShield/ShieldCard.swift` (`ShieldState.read`, reader),
   and `VibezPushService/NotificationService.swift` (the NSE, which also engages the shield).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
-- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/index.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
+- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
 - **Firestore database is named "tokens" (non-default).** Always use `getFirestore("tokens")` on the server; the iOS app never touches Firestore directly — it goes through `registerPushToken`.
 - **All Cloud Functions are deployed with `{invoker: "public"}`.** Gen-2 functions are Cloud Run services that default to authenticated; we explicitly open them.
+- **Backend abuse limits (design spec 2026-06-04):** `/notify` and
+  `registerPushToken` are rate limited per Vibez ID (token bucket, burst 5,
+  refill 1/sec, lazy Firestore escalation in the `rateLimits` collection,
+  24h TTL), per client IP (20-burst/5 per sec, in-memory, derived from the
+  LAST X-Forwarded-For entry — `req.ip` is the proxy), and per instance
+  (200-burst/100 per sec load-shed). Caps: title 100 / body 200 chars
+  (clamped server-side), 8 KB request, event/shield/agent whitelisted,
+  session `^[A-Za-z0-9._:-]{1,128}$`, ≤10 devices per ID, FCM dry-run
+  validates new non-web tokens (fails open on transient FCM errors).
+  `/notify` always answers `{ok: true}` — no claimed/unclaimed oracle.
+  `maxInstances: 3` caps compute. APNs payloads carry title/body ONLY in
+  `aps.alert`; the NSE App Group drain file keeps flat title/body keys and
+  `NotifyClient.acceptPushUserInfo` parses both shapes.
 
 ## Worktree workflow
 
