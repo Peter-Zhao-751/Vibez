@@ -40,7 +40,6 @@ struct MockSystemDialog: View {
 
     @State private var denyShake = 0
     @State private var showDenyHint = false
-    @State private var pulsing = false
 
     var body: some View {
         VStack(spacing: 14) {
@@ -69,7 +68,7 @@ struct MockSystemDialog: View {
     }
 
     private var alertCard: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 7) {
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
             Text(message)
@@ -81,14 +80,16 @@ struct MockSystemDialog: View {
                     buttonView(button)
                 }
             }
-            .padding(.top, 14)
+            .padding(.top, 16)
         }
         .multilineTextAlignment(.leading)
-        .padding(20)
-        .frame(width: 306)
+        .padding(.horizontal, 22)
+        .padding(.top, 24)
+        .padding(.bottom, 20)
+        .frame(width: 316)
         .background(
             .regularMaterial,
-            in: RoundedRectangle(cornerRadius: 28, style: .continuous)
+            in: RoundedRectangle(cornerRadius: 30, style: .continuous)
         )
     }
 
@@ -107,7 +108,7 @@ struct MockSystemDialog: View {
                 .foregroundStyle(
                     button.prominent ? Color.white : Color.primary
                 )
-                .frame(maxWidth: .infinity, minHeight: 40)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(
                     Capsule().fill(
                         button.prominent
@@ -126,25 +127,28 @@ struct MockSystemDialog: View {
     }
 
     /// Soft repeating pulse around the confirm button — the "tap me"
-    /// affordance from the approved design (option A). Grows via an
-    /// animated uniform inset, NOT scaleEffect: scaling a wide, flat
-    /// capsule stretches the sides ~4x more than the top/bottom, which
-    /// read as a lopsided wobble.
+    /// affordance from the approved design (option A). Driven by
+    /// TimelineView, NOT a repeatForever withAnimation: the previous
+    /// version animated layout (padding) forever, which kept the
+    /// button's subtree perpetually re-laying-out — UIKit swallowed
+    /// real touches on the moving control until an unrelated state
+    /// change (the deny shake) interrupted the animation, so Continue
+    /// only "started working" after a Don't Allow tap. A timeline
+    /// redraw is pure drawing: no transactions to leak, no layout to
+    /// animate, and the shape inset expands uniformly on every side.
     private var pulseRing: some View {
-        Capsule()
-            .stroke(
-                Color(uiColor: .systemBlue).opacity(pulsing ? 0 : 0.55),
-                lineWidth: 2
-            )
-            .padding(pulsing ? -6 : 1)
-            .onAppear {
-                withAnimation(
-                    .easeOut(duration: 1.6).repeatForever(autoreverses: false)
-                ) {
-                    pulsing = true
-                }
-            }
-            .allowsHitTesting(false)
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = t.truncatingRemainder(dividingBy: 1.6) / 1.6
+            let eased = 1 - pow(1 - phase, 2)   // easeOut
+            Capsule()
+                .inset(by: CGFloat(-1 - 7 * eased))
+                .stroke(
+                    Color(uiColor: .systemBlue).opacity(0.55 * (1 - eased)),
+                    lineWidth: 2
+                )
+        }
+        .allowsHitTesting(false)
     }
 }
 
