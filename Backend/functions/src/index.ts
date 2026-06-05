@@ -18,6 +18,9 @@ import {
   VIBEZ_ID_PATTERN,
   MAX_CONTENT_LENGTH_BYTES,
   MIN_FCM_TOKEN_LENGTH,
+  normalizePlatform,
+  MAX_FCM_TOKEN_LENGTH,
+  MAX_DEVICES_PER_VIBEZ_ID,
 } from "./validation.js";
 import {
   ID_BUCKET,
@@ -171,6 +174,9 @@ interface CachedDevice {
 }
 
 const DEVICE_CACHE_TTL_MS = 60_000;
+// Per-value: CachedDevice[] is bounded by the 10-device cap on
+// registerPushToken; worst-case per-instance footprint is
+// MAX_TRACKED_KEYS × 10 × ~200 B ≈ 100 MB before BoundedMap eviction.
 const deviceCache = new BoundedMap<{
   devices: CachedDevice[]; fetchedAtMs: number;
 }>(MAX_TRACKED_KEYS);
@@ -190,6 +196,8 @@ async function getDevices(vibezId: string): Promise<CachedDevice[]> {
   if (cached && nowMs - cached.fetchedAtMs < DEVICE_CACHE_TTL_MS) {
     return cached.devices;
   }
+  // Two concurrent misses for the same ID both query Firestore — last
+  // write wins on set(); harmless, costs one extra read at warm-up.
   const snapshot = await tokensDb
     .collection(DEVICES)
     .where("vibezId", "==", vibezId)
@@ -198,10 +206,10 @@ async function getDevices(vibezId: string): Promise<CachedDevice[]> {
   snapshot.forEach((doc) => {
     const token = doc.get("fcmToken");
     if (typeof token !== "string" || token.length === 0) return;
+    const rawPlatform = doc.get("platform");
     devices.push({
       token,
-      platform: typeof doc.get("platform") === "string" ?
-        doc.get("platform") : "unknown",
+      platform: typeof rawPlatform === "string" ? rawPlatform : "unknown",
       blockSecondsDone: doc.get("blockSecondsDone"),
       blockSecondsNeedsInput: doc.get("blockSecondsNeedsInput"),
     });
@@ -222,7 +230,9 @@ async function getDevices(vibezId: string): Promise<CachedDevice[]> {
  *
  * Open / unauthenticated by design — the Vibez ID itself is the
  * shared secret in the same way an ntfy topic name was. App Check
- * is the natural next layer when we ship.
+ * is the natural next layer when we ship. Hardened per design spec §3:
+ * token length caps, per-ID device cap, FCM dry-run validation for new
+ * non-web tokens, and the shared rate limiter.
  */
 export const registerPushToken = onCall(
   {invoker: "public"},
@@ -230,16 +240,16 @@ export const registerPushToken = onCall(
     const data = request.data ?? {};
     const fcmToken = data.fcmToken;
     const vibezId = data.vibezId;
-    const platform =
-      typeof data.platform === "string" ? data.platform : "unknown";
+    const platform = normalizePlatform(data.platform);
 
     if (
       typeof fcmToken !== "string" ||
-      fcmToken.length < MIN_FCM_TOKEN_LENGTH
+      fcmToken.length < MIN_FCM_TOKEN_LENGTH ||
+      fcmToken.length > MAX_FCM_TOKEN_LENGTH
     ) {
       throw new HttpsError(
         "invalid-argument",
-        "fcmToken must be a non-empty string"
+        "fcmToken must be a 20-512 char string"
       );
     }
     if (typeof vibezId !== "string" || !VIBEZ_ID_PATTERN.test(vibezId)) {
@@ -247,6 +257,54 @@ export const registerPushToken = onCall(
         "invalid-argument",
         "vibezId must be 4 hyphenated 3-5 letter lowercase words"
       );
+    }
+
+    // Same three-layer limiter as /notify, separate per-ID bucket.
+    const nowMs = Date.now();
+    const ip = clientIp(request.rawRequest);
+    if (!passesMemoryGuards(ip, nowMs)) {
+      throw new HttpsError("resource-exhausted", "rate limited");
+    }
+    const limit = await keyLimiter.check(`register:${vibezId}`, nowMs);
+    if (!limit.allowed) {
+      logger.info("rate limited", {layer: "id", key: vibezId});
+      throw new HttpsError("resource-exhausted", "rate limited");
+    }
+
+    const deviceRef = tokensDb.collection(DEVICES).doc(fcmToken);
+    const existing = await deviceRef.get();
+    if (!existing.exists) {
+      // New device: bound growth per ID, then prove the token is real.
+      const countSnap = await tokensDb
+        .collection(DEVICES)
+        .where("vibezId", "==", vibezId)
+        .count()
+        .get();
+      if (countSnap.data().count >= MAX_DEVICES_PER_VIBEZ_ID) {
+        throw new HttpsError(
+          "resource-exhausted",
+          "too many devices registered to this Vibez ID"
+        );
+      }
+      // Dry-run FCM send: validates the token against THIS Firebase
+      // project without delivering anything. Junk tokens can't create
+      // docs at all — spray docs under unclaimed IDs would never be
+      // swept (no /notify ever targets them). Web clients are exempt:
+      // their "token" is an extension-generated id, not an FCM token
+      // (never sent to FCM — see the /notify partitioning), so their
+      // junk-doc bound is the rate limiter + device cap instead.
+      if (platform !== "web") {
+        try {
+          await getMessaging().send({token: fcmToken, data: {v: "1"}}, true);
+        } catch (e) {
+          logger.info("dry-run token validation failed", {
+            tokenPrefix: fcmToken.slice(0, 12),
+            code: (e as {code?: string})?.code,
+          });
+          throw new HttpsError(
+            "invalid-argument", "fcmToken failed FCM validation");
+        }
+      }
     }
 
     const deviceDoc: Record<string, unknown> = {
@@ -264,10 +322,9 @@ export const registerPushToken = onCall(
         clampDuration(data.blockSecondsNeedsInput, 900);
     }
 
-    await tokensDb.collection(DEVICES).doc(fcmToken).set(
-      deviceDoc,
-      {merge: true}
-    );
+    await deviceRef.set(deviceDoc, {merge: true});
+    // This instance's cached device list for the ID is now stale.
+    deviceCache.delete(vibezId);
 
     logger.info("Registered push token", {
       platform,
@@ -470,6 +527,8 @@ export const notify = onRequest(
       await batch.commit();
       // The cached list still holds the swept tokens — drop it so the
       // next push re-queries instead of re-failing for up to 60s.
+      // (An in-flight getDevices may re-set a stale list; it self-heals
+      // on the next push and the 60s TTL caps the window.)
       deviceCache.delete(vibezId);
     }
 
