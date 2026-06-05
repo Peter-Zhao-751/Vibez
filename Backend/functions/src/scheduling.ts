@@ -85,12 +85,12 @@ interface ApsDictionary {
 /**
  * apns.payload: the `aps` dictionary plus Vibez's custom fields, which
  * sit at the top level (siblings of `aps`) so iOS surfaces them in
- * userInfo. The optional fields mirror VibezPushFields.
+ * userInfo. title/body live ONLY inside aps.alert — the NSE reads them
+ * from request.content and the host digs into aps.alert (design spec
+ * §5); duplicating them at the top level was an ntfy-era leftover.
  */
 export interface VibezApnsPayload {
   aps: ApsDictionary;
-  title: string;
-  body: string;
   event?: string;
   shield?: string;
   session?: string;
@@ -101,11 +101,11 @@ export interface VibezApnsPayload {
 /**
  * Build the apns.payload for a Vibez push. `shield:"off"` → passive
  * (silent) alert; otherwise a standard alert with sound. Custom fields
- * sit at the top level (siblings of `aps`) so iOS surfaces them in
- * userInfo, matching what NotifyClient + the NSE parse.
+ * sit at the top level (siblings of `aps`); title/body ride ONLY in
+ * aps.alert — each piece of information exactly once.
  * @param {VibezPushFields} f Push fields: title, body, event, shield,
  *   session, agent, reason.
- * @return {VibezApnsPayload} The apns.payload (aps + top-level fields).
+ * @return {VibezApnsPayload} The apns.payload (aps + custom fields).
  */
 export function buildApnsPayload(f: VibezPushFields): VibezApnsPayload {
   const isSilent = f.shield === "off";
@@ -122,7 +122,7 @@ export function buildApnsPayload(f: VibezPushFields): VibezApnsPayload {
       "content-available": 1,
       "mutable-content": 1,
     };
-  const payload: VibezApnsPayload = {aps, title: f.title, body: f.body};
+  const payload: VibezApnsPayload = {aps};
   if (f.event !== undefined) payload.event = f.event;
   if (f.shield !== undefined) payload.shield = f.shield;
   if (f.session !== undefined) payload.session = f.session;

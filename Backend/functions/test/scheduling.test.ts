@@ -81,11 +81,11 @@ describe("buildApnsPayload", () => {
     const p = buildApnsPayload({title: "T", body: "B", shield: "on"});
     expect(p.aps.sound).toBe("default");
   });
-  it("omits unset optional fields and mirrors title/body at top level", () => {
+  it("keeps title/body ONLY inside aps.alert — no top-level copy", () => {
     const p = buildApnsPayload({title: "T", body: "B"});
-    expect(p.title).toBe("T");
-    expect(p.body).toBe("B");
     expect(p.aps.alert).toEqual({title: "T", body: "B"});
+    expect("title" in p).toBe(false);
+    expect("body" in p).toBe(false);
     expect(p.event).toBeUndefined();
     expect(p.reason).toBeUndefined();
   });
