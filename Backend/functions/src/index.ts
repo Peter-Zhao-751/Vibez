@@ -13,9 +13,18 @@ import {
 } from "./scheduling.js";
 import {getFunctions} from "firebase-admin/functions";
 import {onTaskDispatched} from "firebase-functions/tasks";
+import {
+  validateNotifyBody,
+  VIBEZ_ID_PATTERN,
+  MAX_CONTENT_LENGTH_BYTES,
+  MIN_FCM_TOKEN_LENGTH,
+} from "./validation.js";
 
 initializeApp();
-setGlobalOptions({maxInstances: 10});
+// 3 instances × concurrency 80 is generous for ~1,000 users (~3.5
+// req/s average). This is the hard cap on the worst-case compute bill
+// AND the in-memory limiter leak factor (design spec §1, §7).
+setGlobalOptions({maxInstances: 3});
 
 // Vibez push state lives in a non-default Firestore database named
 // "tokens" (Standard edition), in a single collection `devices`. Each
@@ -28,13 +37,6 @@ const DEVICES = "devices";
 // chunk and accumulate. Vibez is personal-scale; defensive ceiling.
 const MULTICAST_CHUNK = 500;
 
-// Defensive floor for the fcmToken length — rejects obviously empty or
-// garbage tokens. Real FCM registration tokens are 150+ chars.
-const MIN_FCM_TOKEN_LENGTH = 20;
-
-// 4 hyphen-separated words, each 3-5 lowercase ASCII letters. Generated
-// by the plugin's setup.sh and typed into the iOS Vibez app.
-const VIBEZ_ID_PATTERN = /^[a-z]{3,5}(-[a-z]{3,5}){3}$/;
 
 /**
  * Callable: invoked by the iOS app on every fresh FCM token AND every
@@ -136,23 +138,22 @@ export const notify = onRequest(
       return;
     }
 
-    const body = (req.body ?? {}) as Record<string, unknown>;
-    const vibezId = typeof body.vibezId === "string" ? body.vibezId : "";
-    const title = typeof body.title === "string" ? body.title : "";
-    const bodyText = typeof body.body === "string" ? body.body : "";
-    const event = typeof body.event === "string" ? body.event : undefined;
-    const shield = typeof body.shield === "string" ? body.shield : undefined;
-    const session = typeof body.session === "string" ? body.session : undefined;
-    const agent = typeof body.agent === "string" ? body.agent : undefined;
+    // Cheapest checks first; Firestore is touched only after all pass
+    // (design spec §2). Content-Length bounds parse-side garbage; the
+    // framework's own JSON parser limit is the layer below this.
+    const contentLength = Number(req.headers["content-length"] ?? 0);
+    if (contentLength > MAX_CONTENT_LENGTH_BYTES) {
+      res.status(413).json({error: "payload too large"});
+      return;
+    }
 
-    if (!VIBEZ_ID_PATTERN.test(vibezId)) {
-      res.status(400).json({error: "invalid vibezId"});
+    const validation = validateNotifyBody(req.body);
+    if (!validation.ok) {
+      res.status(400).json({error: validation.error});
       return;
     }
-    if (!title || !bodyText) {
-      res.status(400).json({error: "title and body are required"});
-      return;
-    }
+    const {vibezId, title, body: bodyText, event, shield, session, agent} =
+      validation.fields;
 
     const snapshot = await tokensDb
       .collection(DEVICES)
@@ -191,7 +192,9 @@ export const notify = onRequest(
       // 200, not 404 — a Mac firing into an unclaimed Vibez ID isn't an
       // error condition. The user might just not have set up their phone
       // or browser yet. The plugin doesn't need to log a failure for this.
-      res.status(200).json({total: 0, success: 0, failure: 0, web: false});
+      // Uniform body — a claimed/unclaimed distinction here would be a
+      // free enumeration oracle (design spec §2). Counts live in logs.
+      res.status(200).json({ok: true});
       return;
     }
 
@@ -231,7 +234,6 @@ export const notify = onRequest(
     let success = 0;
     let failure = 0;
     const invalidTokens: string[] = [];
-    const errors: {code?: string; message?: string}[] = [];
 
     for (let i = 0; i < apnsTokens.length; i += MULTICAST_CHUNK) {
       const chunk = apnsTokens.slice(i, i + MULTICAST_CHUNK);
@@ -252,7 +254,6 @@ export const notify = onRequest(
             code,
             errMessage,
           });
-          errors.push({code, message: errMessage});
           if (
             code === "messaging/registration-token-not-registered" ||
             code === "messaging/invalid-argument"
@@ -335,9 +336,7 @@ export const notify = onRequest(
         .collection("items").add(item);
     }
 
-    res.status(200).json({
-      total: apnsTokens.length, success, failure, errors, web: hasWeb,
-    });
+    res.status(200).json({ok: true});
   }
 );
 
