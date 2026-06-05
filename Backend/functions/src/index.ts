@@ -160,6 +160,55 @@ function respondRateLimited(
   res.status(429).json({error: "rate limited"});
 }
 
+// ---- Device-list cache (design spec §4) ------------------------------
+
+/** A device doc, trimmed to what /notify fan-out needs. */
+interface CachedDevice {
+  token: string;
+  platform: string;
+  blockSecondsDone?: unknown;
+  blockSecondsNeedsInput?: unknown;
+}
+
+const DEVICE_CACHE_TTL_MS = 60_000;
+const deviceCache = new BoundedMap<{
+  devices: CachedDevice[]; fetchedAtMs: number;
+}>(MAX_TRACKED_KEYS);
+
+/**
+ * Devices registered to a Vibez ID, cached per instance for 60s.
+ * Empty results cache too — an unclaimed-ID spray costs ≤1 read per
+ * minute per instance instead of 1 read per request. Accepted
+ * staleness: a just-paired device or changed duration takes ≤60s to
+ * be seen by an instance with a warm entry.
+ * @param {string} vibezId The Vibez ID to look up.
+ * @return {Promise<CachedDevice[]>} Registered devices (may be empty).
+ */
+async function getDevices(vibezId: string): Promise<CachedDevice[]> {
+  const nowMs = Date.now();
+  const cached = deviceCache.get(vibezId);
+  if (cached && nowMs - cached.fetchedAtMs < DEVICE_CACHE_TTL_MS) {
+    return cached.devices;
+  }
+  const snapshot = await tokensDb
+    .collection(DEVICES)
+    .where("vibezId", "==", vibezId)
+    .get();
+  const devices: CachedDevice[] = [];
+  snapshot.forEach((doc) => {
+    const token = doc.get("fcmToken");
+    if (typeof token !== "string" || token.length === 0) return;
+    devices.push({
+      token,
+      platform: typeof doc.get("platform") === "string" ?
+        doc.get("platform") : "unknown",
+      blockSecondsDone: doc.get("blockSecondsDone"),
+      blockSecondsNeedsInput: doc.get("blockSecondsNeedsInput"),
+    });
+  });
+  deviceCache.set(vibezId, {devices, fetchedAtMs: nowMs});
+  return devices;
+}
 
 /**
  * Callable: invoked by the iOS app on every fresh FCM token AND every
@@ -298,38 +347,31 @@ export const notify = onRequest(
       return;
     }
 
-    const snapshot = await tokensDb
-      .collection(DEVICES)
-      .where("vibezId", "==", vibezId)
-      .get();
-    // Partition registered devices by platform so each delivery path only
-    // runs when it has a consumer ("nothing wasted"): APNs for iOS tokens,
-    // a Firestore event-log write for the browser extension. A web client id
-    // is never sent to FCM (it isn't an APNs token).
+    const devices = await getDevices(vibezId);
+    // Partition by platform so each delivery path only runs when it
+    // has a consumer: APNs for iOS tokens, a Firestore event-log write
+    // for the browser extension. A web client id is never sent to FCM.
     const apnsTokens: string[] = [];
     let hasWeb = false;
     const scheduleUnblock = shouldScheduleUnblock({shield, session, event});
     const unblockTargets: {token: string; delaySeconds: number}[] = [];
-    snapshot.forEach((doc) => {
-      const token = doc.get("fcmToken");
-      const platform = typeof doc.get("platform") === "string" ?
-        doc.get("platform") : "unknown";
-      if (platform === "web") {
+    for (const device of devices) {
+      if (device.platform === "web") {
         hasWeb = true;
-      } else if (typeof token === "string" && token.length > 0) {
-        apnsTokens.push(token);
+      } else {
+        apnsTokens.push(device.token);
         if (scheduleUnblock) {
           const durations = {
-            done: clampDuration(doc.get("blockSecondsDone"), 30),
-            needsInput: clampDuration(doc.get("blockSecondsNeedsInput"), 900),
+            done: clampDuration(device.blockSecondsDone, 30),
+            needsInput: clampDuration(device.blockSecondsNeedsInput, 900),
           };
           unblockTargets.push({
-            token,
+            token: device.token,
             delaySeconds: delayForEvent(event, durations),
           });
         }
       }
-    });
+    }
 
     if (apnsTokens.length === 0 && !hasWeb) {
       // 200, not 404 — a Mac firing into an unclaimed Vibez ID isn't an
@@ -426,6 +468,9 @@ export const notify = onRequest(
         batch.delete(tokensDb.collection(DEVICES).doc(tok));
       });
       await batch.commit();
+      // The cached list still holds the swept tokens — drop it so the
+      // next push re-queries instead of re-failing for up to 60s.
+      deviceCache.delete(vibezId);
     }
 
     // Schedule the per-session timeout unblock (backup layer): one Cloud
