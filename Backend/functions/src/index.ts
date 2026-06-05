@@ -19,6 +19,17 @@ import {
   MAX_CONTENT_LENGTH_BYTES,
   MIN_FCM_TOKEN_LENGTH,
 } from "./validation.js";
+import {
+  ID_BUCKET,
+  IP_BUCKET,
+  GLOBAL_BUCKET,
+  BucketState,
+  LimiterEntry,
+  BoundedMap,
+  decideLocally,
+  recordGlobalDeny,
+  tryTake,
+} from "./ratelimit.js";
 
 initializeApp();
 // 3 instances × concurrency 80 is generous for ~1,000 users (~3.5
@@ -36,6 +47,87 @@ const DEVICES = "devices";
 // FCM's sendEachForMulticast caps at 500 tokens per call. Above that we
 // chunk and accumulate. Vibez is personal-scale; defensive ceiling.
 const MULTICAST_CHUNK = 500;
+
+// ---- Rate limiting (design spec §1) ----------------------------------
+// Three layers, all in cost order: per-IP and per-instance-global are
+// in-memory only; the per-Vibez-ID bucket is lazy — in-memory fast
+// path, Firestore-coordinated only while a key is over-rate locally.
+
+const RATE_LIMITS = "rateLimits";
+
+/** Idle limiter docs self-delete via the TTL policy on expireAt. */
+const LIMITER_DOC_TTL_MS = 24 * 60 * 60 * 1000;
+
+/** Bound for every attacker-keyed in-memory map (~5 MB worst case). */
+const MAX_TRACKED_KEYS = 50_000;
+
+const limiterEntries = new BoundedMap<LimiterEntry>(MAX_TRACKED_KEYS);
+const ipBuckets = new BoundedMap<BucketState>(MAX_TRACKED_KEYS);
+let globalBucket: BucketState | undefined;
+
+/**
+ * In-memory guards shared by both endpoints: per-source-IP bucket,
+ * then the per-instance all-traffic bucket. No Firestore.
+ * @param {string} ip Caller IP ("unknown" if the runtime omits it).
+ * @param {number} nowMs Current epoch millis.
+ * @return {boolean} True when the request may proceed.
+ */
+function passesMemoryGuards(ip: string, nowMs: number): boolean {
+  const ipTake = tryTake(ipBuckets.get(ip), nowMs, IP_BUCKET);
+  ipBuckets.set(ip, ipTake.next);
+  if (!ipTake.allowed) return false;
+  const g = tryTake(globalBucket, nowMs, GLOBAL_BUCKET);
+  globalBucket = g.next;
+  return g.allowed;
+}
+
+/**
+ * Lazy per-key limiter: local bucket first; Firestore transaction on
+ * rateLimits/{key} only while this instance sees over-rate traffic;
+ * global denies negative-cache in memory. Fails OPEN — delivery
+ * matters more than strictness, and attackers can't induce Firestore
+ * errors on demand.
+ * @param {string} key e.g. "notify:moss-pine-fox-jazz".
+ * @param {number} nowMs Current epoch millis.
+ * @return {Promise<{allowed: boolean, retryAfterMs: number}>} Verdict.
+ */
+async function checkKeyRateLimit(
+  key: string, nowMs: number,
+): Promise<{allowed: boolean; retryAfterMs: number}> {
+  const decision = decideLocally(limiterEntries.get(key), nowMs, ID_BUCKET);
+  limiterEntries.set(key, decision.next);
+  if (decision.kind === "allow") return {allowed: true, retryAfterMs: 0};
+  if (decision.kind === "deny") {
+    return {allowed: false, retryAfterMs: decision.retryAfterMs};
+  }
+  try {
+    const ref = tokensDb.collection(RATE_LIMITS).doc(key);
+    const verdict = await tokensDb.runTransaction(async (tx) => {
+      const snap = await tx.get(ref);
+      const state = snap.exists ?
+        (snap.data() as unknown as BucketState) : undefined;
+      const take = tryTake(state, nowMs, ID_BUCKET);
+      if (take.allowed) {
+        tx.set(ref, {
+          tokens: take.next.tokens,
+          lastRefillMs: take.next.lastRefillMs,
+          expireAt: Timestamp.fromMillis(nowMs + LIMITER_DOC_TTL_MS),
+        });
+      }
+      return take;
+    });
+    if (!verdict.allowed) {
+      limiterEntries.set(
+        key, recordGlobalDeny(decision.next, nowMs, verdict.retryAfterMs));
+    }
+    return {allowed: verdict.allowed, retryAfterMs: verdict.retryAfterMs};
+  } catch (e) {
+    logger.warn("rate limiter unavailable — failing open", {
+      key, err: String(e),
+    });
+    return {allowed: true, retryAfterMs: 0};
+  }
+}
 
 
 /**
@@ -162,6 +254,21 @@ export const notify = onRequest(
     }
     const {vibezId, title, body: bodyText, event, shield, session, agent} =
       validation.fields;
+
+    const nowMs = Date.now();
+    if (!passesMemoryGuards(req.ip ?? "unknown", nowMs)) {
+      res.set("Retry-After", "1");
+      res.status(429).json({error: "rate limited"});
+      return;
+    }
+    const limit = await checkKeyRateLimit(`notify:${vibezId}`, nowMs);
+    if (!limit.allowed) {
+      logger.info("notify rate limited", {vibezId});
+      res.set("Retry-After",
+        String(Math.max(1, Math.ceil(limit.retryAfterMs / 1000))));
+      res.status(429).json({error: "rate limited"});
+      return;
+    }
 
     const snapshot = await tokensDb
       .collection(DEVICES)

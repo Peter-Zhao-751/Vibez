@@ -4,6 +4,8 @@ import {
   IP_BUCKET,
   GLOBAL_BUCKET,
   ESCALATION_WINDOW_MS,
+  BucketState,
+  LimiterEntry,
   refill,
   tryTake,
   decideLocally,
@@ -56,6 +58,18 @@ describe("tryTake", () => {
     for (let i = 0; i < 5; i++) s = tryTake(s, T0, ID_BUCKET).next;
     const r = tryTake(s, T0 + 1000, ID_BUCKET);
     expect(r.allowed).toBe(true);
+  });
+  it("honors non-ID configs (IP and GLOBAL refill rates)", () => {
+    // IP bucket refills 5/sec: drain 1, wait 200ms, token is back.
+    let ip = tryTake(undefined, T0, IP_BUCKET).next;
+    for (let i = 0; i < 19; i++) ip = tryTake(ip, T0, IP_BUCKET).next;
+    expect(tryTake(ip, T0, IP_BUCKET).allowed).toBe(false);
+    expect(tryTake(ip, T0 + 200, IP_BUCKET).allowed).toBe(true);
+    // GLOBAL refills 100/sec: after a full drain, 10ms restores a token.
+    let g;
+    for (let i = 0; i < 200; i++) g = tryTake(g, T0, GLOBAL_BUCKET).next;
+    expect(tryTake(g, T0, GLOBAL_BUCKET).allowed).toBe(false);
+    expect(tryTake(g, T0 + 10, GLOBAL_BUCKET).allowed).toBe(true);
   });
 });
 
@@ -118,5 +132,37 @@ describe("BoundedMap", () => {
     m.set("c", 3);
     expect(m.get("a")).toBe(9);
     expect(m.get("b")).toBeUndefined();
+  });
+});
+
+describe("caller-loop integration (decideLocally + shared global bucket)", () => {
+  it("escalates to the shared bucket and negative-caches its deny", () => {
+    // Two "instances", one shared (Firestore-like) bucket state.
+    let shared: BucketState | undefined;
+    let a: LimiterEntry | undefined;
+    let denied = 0;
+    let allowed = 0;
+    // Instance A: 12 rapid requests at T0. Locally: 5 allow, then
+    // escalate each time; shared bucket allows 5 more, then denies.
+    for (let i = 0; i < 12; i++) {
+      const d = decideLocally(a, T0, ID_BUCKET);
+      a = d.next;
+      if (d.kind === "allow") {
+        allowed++;
+      } else if (d.kind === "deny") {
+        denied++;
+      } else {
+        const take = tryTake(shared, T0, ID_BUCKET);
+        if (take.allowed) shared = take.next;
+        if (take.allowed) {
+          allowed++;
+        } else {
+          denied++;
+          a = recordGlobalDeny(a, T0, take.retryAfterMs);
+        }
+      }
+    }
+    expect(allowed).toBe(10); // 5 local + 5 shared
+    expect(denied).toBe(2);   // 11th escalates+denies, 12th negative-caches
   });
 });
