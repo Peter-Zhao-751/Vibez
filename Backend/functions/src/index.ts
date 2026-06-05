@@ -139,10 +139,18 @@ export const notify = onRequest(
     }
 
     // Cheapest checks first; Firestore is touched only after all pass
-    // (design spec §2). Content-Length bounds parse-side garbage; the
-    // framework's own JSON parser limit is the layer below this.
-    const contentLength = Number(req.headers["content-length"] ?? 0);
-    if (contentLength > MAX_CONTENT_LENGTH_BYTES) {
+    // (design spec §2). NOTE: the body is already parsed by the time
+    // this handler runs, and the functions-framework's own parser cap
+    // is ~1 GB — so this 413 is a courtesy gate for honest oversized
+    // clients, NOT the security bound. The real bounds are the field
+    // clamps below, the rate limiter, and maxInstances. A missing or
+    // unparseable Content-Length deliberately falls through to field
+    // validation.
+    const rawLength = req.headers["content-length"];
+    const contentLength = Number.parseInt(
+      Array.isArray(rawLength) ? rawLength[0] : rawLength ?? "", 10);
+    if (Number.isFinite(contentLength) &&
+        contentLength > MAX_CONTENT_LENGTH_BYTES) {
       res.status(413).json({error: "payload too large"});
       return;
     }
