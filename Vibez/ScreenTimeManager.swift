@@ -24,6 +24,7 @@
 //      `isBlocking` = `!pendingTriggers.isEmpty`. Shield follows it 1:1.
 //
 
+import Combine
 import Foundation
 import FamilyControls
 import ManagedSettings
@@ -137,6 +138,7 @@ final class ScreenTimeManager {
     private let sharedDefaults = UserDefaults(suiteName: "group.vibezlol.Vibez")
 
     @ObservationIgnored private var tickTask: Task<Void, Never>?
+    @ObservationIgnored private var authStatusTask: Task<Void, Never>?
 
     private enum Key {
         static let selection = "vibez.selection.v1"
@@ -187,6 +189,7 @@ final class ScreenTimeManager {
             clearShield(reason: "init-sync")
         }
         startTicking()
+        startObservingAuthorization()
     }
 
     // MARK: - Selection helpers
@@ -565,9 +568,33 @@ final class ScreenTimeManager {
         }
     }
 
+    /// Keeps `authState` tracking the live Family Controls status.
+    /// `authorizationStatus` is @Published and resolves asynchronously
+    /// after cold launch — it can read .notDetermined for a beat even
+    /// when access is granted (the same ambiguity OnboardingState
+    /// hardens against). init's one-shot syncAuthState() snapshots that
+    /// beat, and on a completed install nothing else ever re-read the
+    /// status (the refresh hooks only run during onboarding) — so
+    /// Settings showed "Screen Time access not granted" all session.
+    /// Re-syncing on every emission picks up the post-launch resolve
+    /// and any grant/revoke made in the Settings app while running.
+    private func startObservingAuthorization() {
+        authStatusTask?.cancel()
+        authStatusTask = Task { @MainActor [weak self] in
+            for await _ in AuthorizationCenter.shared.$authorizationStatus.values {
+                guard let self, !Task.isCancelled else { return }
+                self.syncAuthState()
+            }
+        }
+    }
+
     private func syncAuthState() {
         switch AuthorizationCenter.shared.authorizationStatus {
-        case .approved:
+        // .approvedWithDataAccess is iOS 26.4's "full data access" tier
+        // of the same grant. Before it was matched here it fell into
+        // @unknown default → .notDetermined, so a phone reporting it
+        // showed "Screen Time access not granted" in Settings forever.
+        case .approved, .approvedWithDataAccess:
             authState = .authorized
         case .denied:
             authState = .denied

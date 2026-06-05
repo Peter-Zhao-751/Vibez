@@ -257,7 +257,14 @@ struct ContentView: View {
                 return newPending[sid] == nil
             }
         }
-        .sheet(isPresented: $showSettings) {
+        .sheet(isPresented: $showSettings, onDismiss: {
+            // Push any block-duration edits to the server so it
+            // schedules timeout unblocks with the latest values;
+            // reregister() re-reads them from UserDefaults. Design
+            // spec §1. Lives here (not on the sheet's Done button)
+            // so swipe-down dismissals push edits too.
+            Task { await registrar.reregister() }
+        }) {
             SettingsView(
                 isPresented: $showSettings,
                 manager: manager,
