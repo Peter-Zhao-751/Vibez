@@ -275,6 +275,9 @@ export const registerPushToken = onCall(
     const existing = await deviceRef.get();
     if (!existing.exists) {
       // New device: bound growth per ID, then prove the token is real.
+      // The cap is best-effort under concurrency (existence + count +
+      // write are non-transactional); the register: bucket bounds the
+      // overshoot to ~burst size, which is fine for an abuse bound.
       const countSnap = await tokensDb
         .collection(DEVICES)
         .where("vibezId", "==", vibezId)
@@ -297,12 +300,23 @@ export const registerPushToken = onCall(
         try {
           await getMessaging().send({token: fcmToken, data: {v: "1"}}, true);
         } catch (e) {
+          const code = (e as {code?: string})?.code;
           logger.info("dry-run token validation failed", {
             tokenPrefix: fcmToken.slice(0, 12),
-            code: (e as {code?: string})?.code,
+            code,
           });
-          throw new HttpsError(
-            "invalid-argument", "fcmToken failed FCM validation");
+          // Reject only when FCM says the TOKEN is bad. Transient or
+          // project-level errors fail OPEN — a first pairing must not
+          // break on an FCM blip; the rate limiter + device cap still
+          // bound junk docs, and /notify's sweep reclaims dead tokens.
+          const tokenInvalid =
+            code === "messaging/registration-token-not-registered" ||
+            code === "messaging/invalid-registration-token" ||
+            code === "messaging/invalid-argument";
+          if (tokenInvalid) {
+            throw new HttpsError(
+              "invalid-argument", "fcmToken failed FCM validation");
+          }
         }
       }
     }
