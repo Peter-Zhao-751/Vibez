@@ -121,14 +121,15 @@ final class NotifyClient {
     /// {
     ///   "aps": { "alert": { "title": "...", "body": "..." },
     ///            "sound": "default" },
-    ///   "title": "...",
-    ///   "body":  "...",
     ///   "event":   "needs-input" | "done" | "replied",
     ///   "shield":  "on" | "off",
     ///   "session": "<session-id>",
     ///   "agent":   "cc" | "cx"
     /// }
     /// ```
+    /// title/body live only in aps.alert; the NSE's App Group drain
+    /// file uses flat top-level title/body keys instead (no aps), and
+    /// this parser accepts both shapes.
     func acceptPushUserInfo(
         _ userInfo: [AnyHashable: Any],
         wasBackgroundEngaged: Bool = false
@@ -141,10 +142,19 @@ final class NotifyClient {
             log.info("acceptPushUserInfo: ignoring reason=timeout (NSE + prune own it)")
             return
         }
+        // Live pushes carry title/body ONLY inside aps.alert (the
+        // backend stopped duplicating them at the top level). The flat
+        // fallback is permanent, not transitional: the NSE's
+        // last-message.json drain replays through this same parser
+        // with flat keys (and pre-dedup pushes parse the same way).
+        let alert = ((userInfo["aps"] as? [String: Any])?["alert"])
+            as? [String: Any]
         var msg = NtfyMessage(
             id: (userInfo["id"] as? String) ?? UUID().uuidString,
-            title: (userInfo["title"] as? String) ?? "Vibez",
-            body: (userInfo["body"] as? String) ?? "",
+            title: (alert?["title"] as? String)
+                ?? (userInfo["title"] as? String) ?? "Vibez",
+            body: (alert?["body"] as? String)
+                ?? (userInfo["body"] as? String) ?? "",
             receivedAt: Date()
         )
         if let event   = userInfo["event"]   as? String { msg.event     = VibezEvent(rawValue: event) }

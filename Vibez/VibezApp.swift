@@ -122,12 +122,15 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         let keys = userInfo.keys.map { String(describing: $0) }.joined(separator: ",")
-        let title = (userInfo["title"] as? String) ?? "(no title)"
+        let apsAlert = ((userInfo["aps"] as? [String: Any])?["alert"])
+            as? [String: Any]
+        let pushTitle = (apsAlert?["title"] as? String)
+            ?? (userInfo["title"] as? String) ?? "(no title)"
         let event = (userInfo["event"] as? String) ?? "(no event)"
         let shield = (userInfo["shield"] as? String) ?? "(no shield)"
         let session = (userInfo["session"] as? String) ?? "(no session)"
         let agent = (userInfo["agent"] as? String) ?? "(no agent)"
-        let summary = "keys=[\(keys)] title=\(title) event=\(event) shield=\(shield) session=\(session) agent=\(agent) appState=\(application.applicationState.rawValue)"
+        let summary = "keys=[\(keys)] title=\(pushTitle) event=\(event) shield=\(shield) session=\(session) agent=\(agent) appState=\(application.applicationState.rawValue)"
         pushLog.info("didReceiveRemoteNotification: \(summary, privacy: .public)")
 
         // willPresent only fires for ALERT pushes. shield:off is sent
