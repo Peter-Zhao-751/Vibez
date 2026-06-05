@@ -88,8 +88,12 @@ final class NotificationService: UNNotificationServiceExtension {
         let session = (userInfo["session"] as? String) ?? ""
         let event = (userInfo["event"] as? String) ?? ""
         let agent = (userInfo["agent"] as? String) ?? ""
-        let title = (userInfo["title"] as? String) ?? ""
-        let body = (userInfo["body"] as? String) ?? ""
+        // title/body ride ONLY inside aps.alert on the wire (the
+        // backend stopped duplicating them at the top level). iOS
+        // pre-populates request.content from aps.alert before this
+        // extension runs, so content IS the alert payload.
+        let title = request.content.title
+        let body = request.content.body
         let reason = (userInfo["reason"] as? String) ?? ""
 
         log.info("didReceive: shield=\(shield, privacy: .public) session=\(session, privacy: .public) event=\(event, privacy: .public) agent=\(agent, privacy: .public)")
@@ -117,7 +121,8 @@ final class NotificationService: UNNotificationServiceExtension {
         // replay it as an in-app overlay / Recent-triggers row.
         if reason != "timeout" {
             writeLastMessageToAppGroup(
-                userInfo: userInfo, identifier: request.identifier)
+                userInfo: userInfo, title: title, body: body,
+                identifier: request.identifier)
         }
 
         // Keep Notification Center tidy. Issued here, before contentHandler
@@ -171,16 +176,28 @@ final class NotificationService: UNNotificationServiceExtension {
     /// Writes the push payload to `last-message.json` in the App Group
     /// container. The host reads + deletes this on scene activation
     /// (NotifyClient.drainPendingPushFromAppGroup) to drive the
-    /// in-app overlay for background-engaged shields. Snapshots only
-    /// the top-level Vibez fields (skips the nested `aps` dict and
-    /// non-string values that wouldn't round-trip through JSON).
-    private func writeLastMessageToAppGroup(userInfo: [AnyHashable: Any], identifier: String) {
+    /// in-app overlay for background-engaged shields. Snapshots
+    /// title/body from request.content plus the top-level Vibez routing
+    /// fields (skips the nested `aps` dict and non-string values that
+    /// wouldn't round-trip through JSON).
+    private func writeLastMessageToAppGroup(
+        userInfo: [AnyHashable: Any],
+        title: String,
+        body: String,
+        identifier: String
+    ) {
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return }
 
+        // The file keeps FLAT title/body keys on purpose: it is the
+        // host drain contract (NotifyClient parses it with the same
+        // top-level fallback it uses for legacy pushes). Only the
+        // SOURCE changed — content (aps.alert) instead of userInfo.
         var dict: [String: Any] = [:]
-        for key in ["title", "body", "event", "shield", "session", "agent"] {
+        if !title.isEmpty { dict["title"] = title }
+        if !body.isEmpty { dict["body"] = body }
+        for key in ["event", "shield", "session", "agent"] {
             if let value = userInfo[key] as? String {
                 dict[key] = value
             }
