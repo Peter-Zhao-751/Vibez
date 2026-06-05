@@ -121,6 +121,21 @@ final class OnboardingState: Identifiable {
         notificationStatus = await NotifyClient.notificationAuthorizationStatus()
     }
 
+    /// Family Controls' authorizationStatus can read .notDetermined for
+    /// a beat after cold launch even when access was granted (the
+    /// daemon connection settles asynchronously). When a failing gate
+    /// might be that race, poll for up to ~2s before trusting it —
+    /// returns as soon as every gate passes.
+    func settleAndRecheck() async {
+        for _ in 0..<10 {
+            manager.refreshAuthorizationStatus()
+            if !needsOnboarding { return }
+            try? await Task.sleep(for: .milliseconds(200))
+        }
+        manager.refreshAuthorizationStatus()
+        await refreshNotificationStatus()
+    }
+
     /// Snapshot the step list for a fresh presentation and rewind.
     /// Call after refreshNotificationStatus() so the snapshot sees the
     /// real notification gate.

@@ -30,8 +30,12 @@ Vibez/                        Main iOS app target.
   VibezSetupCard.swift        Pairing card — user types in the 4-word Vibez ID, calls
                               registrar.setVibezId(...). Replaces the old NotificationSetupCard.
   OnboardingState.swift       @Observable step engine for the onboarding flow. Gate is
-                              pure live state (notif status + FC auth + Vibez ID present)
-                              — no "seen onboarding" flag. Steps snapshot at begin();
+                              live state (notif status + FC auth + Vibez ID present),
+                              hardened by "vibez.onboardingCompleted": FC's
+                              authorizationStatus can read .notDetermined for a beat
+                              after cold launch even when granted, so completed installs
+                              (and FC-only failures) settleAndRecheck() for up to ~2s
+                              before the flow presents. Steps snapshot at begin();
                               advance() auto-skips steps satisfied mid-flow. DEBUG launch
                               arg -vibez.debug.fakeScreenTimeAuth YES fakes the FC gate
                               for sim verification (FC can't be granted on a sim).

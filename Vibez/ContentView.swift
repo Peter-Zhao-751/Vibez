@@ -78,6 +78,14 @@ struct ContentView: View {
     /// the hint's height as padding so the mascot doesn't drop all the way
     /// onto the toggle's gap. Default on. Mirrored in SettingsView.
     @AppStorage("vibez.showFocusHint") private var showFocusHint = true
+    /// Set when the user finishes the walkthrough (or a launch check
+    /// finds setup already complete). A completed install never shows
+    /// onboarding off a single failing cold-launch read — Family
+    /// Controls can spuriously report .notDetermined right after
+    /// process start, which used to flash the flow at fully-set-up
+    /// users. Genuine revocations still re-present after the
+    /// settle-recheck confirms them.
+    @AppStorage("vibez.onboardingCompleted") private var onboardingCompleted = false
 
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -241,9 +249,29 @@ struct ContentView: View {
             // cover bury every existing home-screen preview.
             guard !Self.isRunningInPreviews else { return }
             await onboarding.refreshNotificationStatus()
+            guard onboarding.needsOnboarding else {
+                // Everything granted + paired — mark complete so future
+                // launches take the settled path (also self-heals
+                // installs that finished setup before the flag existed).
+                onboardingCompleted = true
+                return
+            }
+            // A failing gate at cold launch isn't always real: Family
+            // Controls can report .notDetermined for a beat even when
+            // granted. If this install already completed the tutorial,
+            // or Screen Time is the ONLY failing gate (the one
+            // unreliable read), let the status settle before trusting
+            // the failure. First runs fail multiple reliable gates and
+            // skip the wait entirely.
+            let fcOnlyFailure = onboarding.paired && onboarding.notificationsGranted
+            if onboardingCompleted || fcOnlyFailure {
+                await onboarding.settleAndRecheck()
+            }
             if onboarding.needsOnboarding {
                 onboarding.begin()
                 onboardingPresented = true
+            } else {
+                onboardingCompleted = true
             }
         }
         .onChange(of: setupNeeded) { _, _ in
@@ -312,6 +340,7 @@ struct ContentView: View {
                 registrar: registrar,
                 onDismiss: { onboardingPresented = false },
                 onFinish: {
+                    onboardingCompleted = true
                     onboardingPresented = false
                     // Completed the walkthrough (not skipped): flip the
                     // big toggle on for them, after the cover's dismiss

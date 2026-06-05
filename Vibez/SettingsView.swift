@@ -45,6 +45,7 @@ struct SettingsView: View {
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
     @AppStorage("vibez.notifyBanners") private var notifyBanners = true
     @AppStorage("vibez.showFocusHint") private var showFocusHint = true
+    @AppStorage("vibez.onboardingCompleted") private var onboardingCompleted = false
 
     @State private var pickerPresented = false
     @State private var draftSelection = FamilyActivitySelection()
@@ -132,8 +133,12 @@ struct SettingsView: View {
                     manager: manager,
                     registrar: registrar,
                     onDismiss: { tutorial = nil },
-                    // Manual replay — informational, never auto-arms.
-                    onFinish: { tutorial = nil }
+                    // Manual replay — never auto-arms, but finishing it
+                    // counts as a completed walkthrough.
+                    onFinish: {
+                        onboardingCompleted = true
+                        tutorial = nil
+                    }
                 )
             }
         }
