@@ -54,6 +54,15 @@ describe("clampText", () => {
     const exact = "x".repeat(100);
     expect(clampText(exact, 100)).toBe(exact);
   });
+  it("never splits a surrogate pair at the clamp boundary", () => {
+    // 98 x's + 😀 (2 code units) + 'y' = 101 units; a naive cut at 99
+    // would split the emoji.
+    const input = "x".repeat(98) + "😀" + "y";
+    const out = clampText(input, 100);
+    expect(out.length).toBeLessThanOrEqual(100);
+    const beforeEllipsis = out.charCodeAt(out.length - 2);
+    expect(beforeEllipsis < 0xD800 || beforeEllipsis > 0xDBFF).toBe(true);
+  });
 });
 
 describe("normalizePlatform", () => {
@@ -121,6 +130,10 @@ describe("validateNotifyBody", () => {
       expect(r.fields.body.length).toBe(MAX_BODY_CHARS);
       expect(r.fields.body.endsWith("…")).toBe(true);
     }
+  });
+  it("accepts session at exactly the 128-char limit", () => {
+    const r = validateNotifyBody({...VALID, session: "x".repeat(128)});
+    expect(r.ok).toBe(true);
   });
   it("drops unknown fields by construction", () => {
     const r = validateNotifyBody({...VALID, reason: "timeout", evil: "x"});

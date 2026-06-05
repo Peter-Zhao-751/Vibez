@@ -41,13 +41,20 @@ const PLATFORMS = new Set(["ios", "web"]);
 /**
  * Truncate to max chars with a trailing ellipsis, mirroring the
  * plugins' clip_body. Text at or under max passes through untouched.
+ * The cut never splits a surrogate pair — the result is an upper
+ * bound of max chars.
  * @param {string} raw Input text.
  * @param {number} max Maximum length in chars.
  * @return {string} Clamped text.
  */
 export function clampText(raw: string, max: number): string {
   if (raw.length <= max) return raw;
-  return raw.slice(0, max - 1) + "…";
+  // Back up one code unit if the cut would land inside a surrogate
+  // pair (astral chars like emoji are two UTF-16 units).
+  let cut = max - 1;
+  const cc = raw.charCodeAt(cut - 1);
+  if (cc >= 0xD800 && cc <= 0xDBFF) cut -= 1;
+  return raw.slice(0, cut) + "…";
 }
 
 /**
