@@ -131,7 +131,9 @@ struct SettingsView: View {
                     state: s,
                     manager: manager,
                     registrar: registrar,
-                    onDismiss: { tutorial = nil }
+                    onDismiss: { tutorial = nil },
+                    // Manual replay — informational, never auto-arms.
+                    onFinish: { tutorial = nil }
                 )
             }
         }

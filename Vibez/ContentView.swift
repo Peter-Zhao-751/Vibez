@@ -310,7 +310,21 @@ struct ContentView: View {
                 state: onboarding,
                 manager: manager,
                 registrar: registrar,
-                onDismiss: { onboardingPresented = false }
+                onDismiss: { onboardingPresented = false },
+                onFinish: {
+                    onboardingPresented = false
+                    // Completed the walkthrough (not skipped): flip the
+                    // big toggle on for them, after the cover's dismiss
+                    // animation lands so the flip is visible on-screen.
+                    // No-ops when already armed (Tutorial-after-revoke
+                    // replays through this same path).
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) {
+                        guard !manager.armed else { return }
+                        withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                            manager.setArmed(true)
+                        }
+                    }
+                }
             )
         }
         .familyActivityPicker(

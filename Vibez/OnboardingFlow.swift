@@ -15,7 +15,12 @@ struct OnboardingFlow: View {
     @Bindable var state: OnboardingState
     @Bindable var manager: ScreenTimeManager
     @Bindable var registrar: PushTokenRegistrar
+    /// Skip — bail out without finishing (flow returns next launch).
     let onDismiss: () -> Void
+    /// Done on the finish page — the only completion exit. ContentView
+    /// uses the distinction to arm the big toggle after a real
+    /// walkthrough completion (never after a Skip).
+    let onFinish: () -> Void
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
@@ -92,7 +97,7 @@ struct OnboardingFlow: View {
         case .vibezId:
             OnboardingVibezIdStep(theme: theme, registrar: registrar, onAdvance: advance)
         case .finish:
-            OnboardingFinishStep(theme: theme, agent: agent, onDone: onDismiss)
+            OnboardingFinishStep(theme: theme, agent: agent, onDone: onFinish)
         }
     }
 
@@ -120,7 +125,8 @@ struct OnboardingFlow: View {
         state: .previewState(),
         manager: ScreenTimeManager.previewManager(armed: false, authState: .notDetermined),
         registrar: PushTokenRegistrar.previewRegistrar(vibezId: "", state: .idle),
-        onDismiss: {}
+        onDismiss: {},
+        onFinish: {}
     )
     .preferredColorScheme(.dark)
 }
@@ -130,7 +136,8 @@ struct OnboardingFlow: View {
         state: .previewState(steps: [.finish]),
         manager: ScreenTimeManager.previewManager(armed: true),
         registrar: PushTokenRegistrar.previewRegistrar(),
-        onDismiss: {}
+        onDismiss: {},
+        onFinish: {}
     )
     .preferredColorScheme(.dark)
 }
