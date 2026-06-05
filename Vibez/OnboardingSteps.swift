@@ -13,9 +13,9 @@ import UIKit
 
 // MARK: - Shared page scaffolding
 
-/// Common page chrome. Content is vertically centered between the
-/// header and the CTA, which keeps each permission step's mock dialog
-/// near where the real system alert will appear (screen center).
+/// Common page chrome. Most content is centered between the header and
+/// CTA; permission replicas can opt into true screen-centering so they
+/// line up with the real system alert.
 struct OnboardingPage<Content: View>: View {
     let theme: Theme
     let headline: String
@@ -23,47 +23,61 @@ struct OnboardingPage<Content: View>: View {
     var ctaTitle: String? = nil
     var ctaEnabled: Bool = true
     var ctaAction: () -> Void = {}
+    var centerContentOnScreen = false
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 10) {
-                Text(headline)
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(theme.fg)
-                    .multilineTextAlignment(.center)
-                Text(subtitle)
-                    .font(.system(size: 14))
-                    .lineSpacing(3)
-                    .foregroundStyle(theme.fgMute)
-                    .multilineTextAlignment(.center)
-            }
-            .padding(.top, 76)   // clears the Skip button row
-            .padding(.horizontal, 32)
+        GeometryReader { proxy in
+            ZStack {
+                VStack(spacing: 0) {
+                    VStack(spacing: 10) {
+                        Text(headline)
+                            .font(.system(size: 26, weight: .bold))
+                            .foregroundStyle(theme.fg)
+                            .multilineTextAlignment(.center)
+                        Text(subtitle)
+                            .font(.system(size: 14))
+                            .lineSpacing(3)
+                            .foregroundStyle(theme.fgMute)
+                            .multilineTextAlignment(.center)
+                    }
+                    .padding(.top, 76)   // clears the Skip button row
+                    .padding(.horizontal, 32)
 
-            Spacer(minLength: 16)
+                    if centerContentOnScreen {
+                        Spacer(minLength: 0)
+                    } else {
+                        Spacer(minLength: 16)
 
-            content()
+                        content()
 
-            Spacer(minLength: 16)
+                        Spacer(minLength: 16)
+                    }
 
-            if let ctaTitle {
-                Button(action: ctaAction) {
-                    Text(ctaTitle)
-                        .font(.system(size: 16, weight: .bold))
-                        .foregroundStyle(ctaEnabled ? theme.onAccent : theme.fgFaint)
-                        .frame(maxWidth: .infinity, minHeight: 52)
-                        .background(
-                            RoundedRectangle(cornerRadius: 16)
-                                .fill(ctaEnabled ? theme.accent : theme.bgChip)
-                        )
+                    if let ctaTitle {
+                        Button(action: ctaAction) {
+                            Text(ctaTitle)
+                                .font(.system(size: 16, weight: .bold))
+                                .foregroundStyle(ctaEnabled ? theme.onAccent : theme.fgFaint)
+                                .frame(maxWidth: .infinity, minHeight: 52)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(ctaEnabled ? theme.accent : theme.bgChip)
+                                )
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!ctaEnabled)
+                        .padding(.horizontal, 24)
+                    }
                 }
-                .buttonStyle(.plain)
-                .disabled(!ctaEnabled)
-                .padding(.horizontal, 24)
+                .padding(.bottom, 58)   // clears the progress dots
+
+                if centerContentOnScreen {
+                    content()
+                        .position(x: proxy.size.width / 2, y: proxy.size.height / 2)
+                }
             }
         }
-        .padding(.bottom, 58)   // clears the progress dots
     }
 }
 
@@ -71,7 +85,6 @@ struct OnboardingPage<Content: View>: View {
 
 struct OnboardingWelcomeStep: View {
     let theme: Theme
-    let agent: Agent
     let onContinue: () -> Void
 
     var body: some View {
@@ -82,7 +95,7 @@ struct OnboardingWelcomeStep: View {
             ctaTitle: "Get Started",
             ctaAction: onContinue
         ) {
-            MascotForAgent(agent: agent, listening: true, size: 150)
+            ClaudeMascot(listening: true, size: 150)
         }
     }
 }
@@ -149,7 +162,8 @@ struct OnboardingNotificationsStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Allow notifications",
-            subtitle: "Vibez pings you the moment Claude finishes or needs your input. iOS is about to show the dialog below for real. Tap Allow, exactly like this."
+            subtitle: "Vibez pings you the moment Claude finishes or needs your input. iOS is about to show the dialog below for real. Tap Allow, exactly like this.",
+            centerContentOnScreen: true
         ) {
             if state.notificationStatus == .denied {
                 OnboardingRemediation(
@@ -196,7 +210,8 @@ struct OnboardingScreenTimeStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Allow Screen Time access",
-            subtitle: "This is what lets Vibez actually shield Instagram, TikTok & co. iOS is about to show this dialog for real. Tap Continue, exactly like this."
+            subtitle: "This is what lets Vibez actually shield Instagram, TikTok & co. iOS is about to show this dialog for real. Tap Continue, exactly like this.",
+            centerContentOnScreen: true
         ) {
             if manager.authState == .denied {
                 OnboardingRemediation(
@@ -233,77 +248,10 @@ struct OnboardingScreenTimeStep: View {
     }
 }
 
-// MARK: - Step 4 · Agent pick
-
-struct OnboardingAgentPickStep: View {
-    let theme: Theme
-    @Binding var agentRaw: String
-    let onAdvance: () -> Void
-
-    var body: some View {
-        OnboardingPage(
-            theme: theme,
-            headline: "Which agent do you use?",
-            subtitle: "Picks the mascot, the accent color, and which install instructions you see next. Change it anytime in the app."
-        ) {
-            VStack(spacing: 12) {
-                ForEach([Agent.claude, .codex, .both]) { option in
-                    agentRow(option)
-                }
-            }
-            .padding(.horizontal, 24)
-        }
-    }
-
-    private func agentRow(_ option: Agent) -> some View {
-        let selected = agentRaw == option.rawValue
-        let rowTheme = Theme.make(agent: option)
-        return Button {
-            agentRaw = option.rawValue
-            // Brief pause so the checkmark registers before the slide.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                onAdvance()
-            }
-        } label: {
-            HStack(spacing: 14) {
-                MascotForAgent(
-                    agent: option,
-                    listening: true,
-                    size: 44,
-                    gap: 3,
-                    animate: false
-                )
-                .frame(width: 76)
-                Text(option == .both ? "Both" : option.label)
-                    .font(.system(size: 16, weight: .bold))
-                    .foregroundStyle(theme.fg)
-                Spacer()
-                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 20))
-                    .foregroundStyle(selected ? rowTheme.accent : theme.fgFaint)
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 16).fill(theme.bgPanel)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 16)
-                    .strokeBorder(
-                        selected ? rowTheme.accent : theme.hairline,
-                        lineWidth: selected ? 1.5 : 1
-                    )
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-// MARK: - Step 5 · Plugin install
+// MARK: - Step 4 · Plugin install
 
 struct OnboardingPluginStep: View {
     let theme: Theme
-    let agent: Agent
     let onAdvance: () -> Void
 
     @State private var copiedCommand: String?
@@ -318,33 +266,29 @@ struct OnboardingPluginStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Install the plugin",
-            subtitle: "On your Mac. The setup command at the end prints your 4-word Vibez ID. Keep it handy for the next step.",
+            subtitle: "On your Mac, in whichever agent you use. Once the plugin is installed, your 4-word Vibez ID prints automatically the moment a session starts — the setup command just shows it again. Keep it handy for the next step.",
             ctaTitle: "I have my Vibez ID",
             ctaAction: onAdvance
         ) {
             VStack(spacing: 18) {
-                if agent != .codex {
-                    commandGroup(
-                        label: "Claude Code",
-                        accent: Theme.claudeOrange,
-                        rows: [
-                            CommandRow(text: "/plugin marketplace add Peter-Zhao-751/Vibez"),
-                            CommandRow(text: "/plugin install vibez@plugin"),
-                            CommandRow(text: "/vibez:setup"),
-                        ]
-                    )
-                }
-                if agent != .claude {
-                    commandGroup(
-                        label: "Codex",
-                        accent: Theme.codexBlue,
-                        rows: [
-                            CommandRow(text: "codex plugin marketplace add Peter-Zhao-751/Vibez"),
-                            CommandRow(text: "codex plugin install vibez@vibez"),
-                            CommandRow(text: "ask Codex to run vibez-setup", copyable: false),
-                        ]
-                    )
-                }
+                commandGroup(
+                    label: "Claude Code",
+                    accent: Theme.claudeOrange,
+                    rows: [
+                        CommandRow(text: "/plugin marketplace add Peter-Zhao-751/Vibez"),
+                        CommandRow(text: "/plugin install vibez@plugin"),
+                        CommandRow(text: "/vibez:setup"),
+                    ]
+                )
+                commandGroup(
+                    label: "Codex",
+                    accent: theme.fgMute,
+                    rows: [
+                        CommandRow(text: "codex plugin marketplace add Peter-Zhao-751/Vibez"),
+                        CommandRow(text: "codex plugin install vibez@vibez"),
+                        CommandRow(text: "start a new session — it prints your Vibez ID", copyable: false),
+                    ]
+                )
             }
             .padding(.horizontal, 24)
         }
@@ -363,7 +307,14 @@ struct OnboardingPluginStep: View {
                     .foregroundStyle(theme.fgMute)
             }
             ForEach(Array(rows.enumerated()), id: \.element.id) { i, row in
-                commandRowView(number: i + 1, row: row)
+                CommandRowView(
+                    theme: theme,
+                    number: i + 1,
+                    text: row.text,
+                    copyable: row.copyable,
+                    copied: copiedCommand == row.text,
+                    onCopy: { markCopied(row.text) }
+                )
             }
         }
         .padding(14)
@@ -374,21 +325,90 @@ struct OnboardingPluginStep: View {
         )
     }
 
-    private func commandRowView(number: Int, row: CommandRow) -> some View {
+    private func markCopied(_ text: String) {
+        UIPasteboard.general.string = text
+        withAnimation { copiedCommand = text }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
+            if copiedCommand == text { copiedCommand = nil }
+        }
+    }
+}
+
+/// One command row: step number, horizontally-scrollable monospace
+/// command, copy affordance. A struct (not a builder func on the step)
+/// because the scroll-hint state is per-row.
+private struct CommandRowView: View {
+    let theme: Theme
+    let number: Int
+    let text: String
+    let copyable: Bool
+    let copied: Bool
+    let onCopy: () -> Void
+
+    private struct ScrollHint: Equatable {
+        var overflows = false
+        var atEnd = false
+    }
+
+    /// Whether the command is wider than the visible row, and whether
+    /// the user has scrolled to its end — drives the trailing "…" hint.
+    @State private var hint = ScrollHint()
+
+    var body: some View {
         HStack(spacing: 10) {
             Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(theme.fgFaint)
-            Text(row.text)
-                .font(.system(size: 12, design: .monospaced))
-                .foregroundStyle(row.copyable ? theme.fg : theme.fgMute)
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
+            // Long commands (the Codex marketplace add) overflow the
+            // row width — scroll horizontally instead of shrinking or
+            // truncating, so the whole command stays readable at full
+            // size. Taps inside the scroller still reach the row's
+            // copy gesture (a tap is never claimed by the pan).
+            ScrollView(.horizontal) {
+                Text(text)
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundStyle(copyable ? theme.fg : theme.fgMute)
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: false)
+            }
+            .scrollIndicators(.hidden)
+            .onScrollGeometryChange(for: ScrollHint.self) { geo in
+                ScrollHint(
+                    overflows: geo.contentSize.width > geo.containerSize.width + 1,
+                    // Small tolerance so the hint clears as the tail
+                    // lands, not only at the exact final pixel.
+                    atEnd: geo.contentOffset.x + geo.containerSize.width
+                        >= geo.contentSize.width - 8
+                )
+            } action: { _, new in
+                hint = new
+            }
+            // Trailing "…" over a fade into the chip color: the clipped
+            // command visibly slides under it, signaling there's more to
+            // scroll. Disappears once the end is reached.
+            .overlay(alignment: .trailing) {
+                if hint.overflows && !hint.atEnd {
+                    Text("…")
+                        .font(.system(size: 12, weight: .bold, design: .monospaced))
+                        .foregroundStyle(theme.fgMute)
+                        .padding(.leading, 16)
+                        .background(
+                            LinearGradient(
+                                colors: [theme.bgChip.opacity(0), theme.bgChip],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.18), value: hint)
             Spacer(minLength: 6)
-            if row.copyable {
-                Image(systemName: copiedCommand == row.text ? "checkmark" : "doc.on.doc")
+            if copyable {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 12))
-                    .foregroundStyle(copiedCommand == row.text ? .green : theme.fgMute)
+                    .foregroundStyle(copied ? .green : theme.fgMute)
             }
         }
         .padding(.horizontal, 12)
@@ -396,17 +416,13 @@ struct OnboardingPluginStep: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(theme.bgChip))
         .contentShape(Rectangle())
         .onTapGesture {
-            guard row.copyable else { return }
-            UIPasteboard.general.string = row.text
-            withAnimation { copiedCommand = row.text }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
-                if copiedCommand == row.text { copiedCommand = nil }
-            }
+            guard copyable else { return }
+            onCopy()
         }
     }
 }
 
-// MARK: - Step 6 · Vibez ID
+// MARK: - Step 5 · Vibez ID
 
 struct OnboardingVibezIdStep: View {
     let theme: Theme
@@ -432,7 +448,7 @@ struct OnboardingVibezIdStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Enter your Vibez ID",
-            subtitle: "The 4 words the setup command printed on your Mac. It pairs this phone to your agents.",
+            subtitle: "The 4 words the plugin printed on your Mac when your session started. It pairs this phone to your agents.",
             ctaTitle: "Continue",
             ctaEnabled: registrar.state == .registered,
             ctaAction: onAdvance
@@ -549,11 +565,10 @@ struct OnboardingVibezIdStep: View {
     }
 }
 
-// MARK: - Step 7 · How Vibez works + version
+// MARK: - Step 6 · How Vibez works + version
 
 struct OnboardingFinishStep: View {
     let theme: Theme
-    let agent: Agent
     let onDone: () -> Void
 
     var body: some View {
@@ -565,7 +580,7 @@ struct OnboardingFinishStep: View {
             ctaAction: onDone
         ) {
             VStack(spacing: 0) {
-                MascotForAgent(agent: agent, listening: true, size: 84, animate: false)
+                ClaudeMascot(listening: true, size: 84, animate: false)
                     .padding(.bottom, 22)
 
                 VStack(alignment: .leading, spacing: 16) {

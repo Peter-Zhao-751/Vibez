@@ -79,27 +79,21 @@ struct ShieldState {
         dark: true
     )
 
+    /// Single Claude accent — the shield renders Claude visuals no
+    /// matter which agent's push engaged it (the `agent` field is kept
+    /// as schema data, not a theme switch).
     nonisolated var accentUIColor: UIColor {
-        switch agent {
-        case .codex: return UIColor(red: 0.29, green: 0.48, blue: 1.00, alpha: 1.0)
-        default:     return UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
-        }
+        UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
     }
 
     nonisolated var backgroundUIColor: UIColor {
-        // Tamed-down agent color: 25% accent blended into 75% of the
-        // dark/light base. Gives a warm-brown wash for Claude/none/both
-        // and a cool-navy wash for Codex without going neon. The flat
-        // ShieldConfiguration.backgroundColor slot cannot do gradients,
-        // so this single tinted color is the closest approximation.
+        // Tamed-down accent: 25% Claude orange blended into 75% of the
+        // dark/light base — a warm-brown wash without going neon. The
+        // flat ShieldConfiguration.backgroundColor slot cannot do
+        // gradients, so this single tinted color is the closest
+        // approximation.
         let mix: CGFloat = 0.25
-        let (ar, ag, ab): (CGFloat, CGFloat, CGFloat)
-        switch agent {
-        case .codex:
-            (ar, ag, ab) = (0.29, 0.48, 1.00)
-        default:
-            (ar, ag, ab) = (0.95, 0.45, 0.20)
-        }
+        let (ar, ag, ab): (CGFloat, CGFloat, CGFloat) = (0.95, 0.45, 0.20)
         let dr: CGFloat = dark ? 0.047 : 0.984
         let dg: CGFloat = dark ? 0.051 : 0.973
         let db: CGFloat = dark ? 0.071 : 0.957

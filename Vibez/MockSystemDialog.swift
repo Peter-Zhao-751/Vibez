@@ -39,7 +39,7 @@ struct MockSystemDialog: View {
         let label: String
         /// Blue-filled capsule (iOS 26 "prominent" style).
         var prominent = false
-        /// The practice-tap target: fires onConfirm.
+        /// The practice-tap target: pulses, and fires onConfirm.
         var isConfirm = false
     }
 
@@ -55,29 +55,26 @@ struct MockSystemDialog: View {
     @State private var showDenyHint = false
 
     var body: some View {
-        VStack(spacing: 14) {
-            alertCard
-                .shake(trigger: denyShake, amount: 5, duration: 0.5)
-
-            // Deny hint sits below the card; see offset note at the
-            // bottom of this view — the whole stack rides together.
-
-            // Always-rendered hint row (opacity-only show) so the
-            // dialog doesn't jump when the hint appears.
-            Text(denyHint)
-                .font(.system(size: 12))
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 36)
-                .opacity(showDenyHint ? 1 : 0)
-                .animation(.easeInOut(duration: 0.25), value: showDenyHint)
-                .accessibilityHidden(!showDenyHint)
-        }
-        // The real iOS alert centers slightly higher than this page's
-        // content zone (the headline block pushes the zone's midpoint
-        // down). Lift the replica so the real prompt lands ON it —
-        // measured against the live dialog on the 26.4 sim.
-        .offset(y: -30)
+        alertCard
+            .shake(trigger: denyShake, amount: 5, duration: 0.5)
+            // The hint should never move the mock alert away from the
+            // system alert center. It is always laid out as an overlay.
+            .overlay(alignment: .bottom) {
+                Text(denyHint)
+                    .font(.system(size: 12))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(3)
+                    .frame(
+                        width: ApplePermissionAlertMetrics.cardWidth - 44,
+                        height: 52,
+                        alignment: .top
+                    )
+                    .opacity(showDenyHint ? 1 : 0)
+                    .animation(.easeInOut(duration: 0.25), value: showDenyHint)
+                    .accessibilityHidden(!showDenyHint)
+                    .offset(y: 66)
+            }
     }
 
     private var alertCard: some View {
@@ -146,6 +143,11 @@ struct MockSystemDialog: View {
                             : Color(uiColor: .secondarySystemFill)
                     )
                 )
+                .overlay {
+                    if button.isConfirm {
+                        pulseRing
+                    }
+                }
                 .contentShape(
                     RoundedRectangle(
                         cornerRadius: ApplePermissionAlertMetrics.buttonCornerRadius,
@@ -154,6 +156,37 @@ struct MockSystemDialog: View {
                 )
         }
         .buttonStyle(.plain)
+    }
+
+    /// Soft repeating pulse around the confirm button — the "tap me"
+    /// affordance from the approved design (option A). Driven by
+    /// TimelineView, NOT a repeatForever withAnimation: the previous
+    /// version animated layout (padding) forever, which kept the
+    /// button's subtree perpetually re-laying-out — UIKit swallowed
+    /// real touches on the moving control until an unrelated state
+    /// change (the deny shake) interrupted the animation, so Continue
+    /// only "started working" after a Don't Allow tap. A timeline
+    /// redraw is pure drawing: no transactions to leak, no layout to
+    /// animate, and the shape inset expands uniformly on every side.
+    /// The corner radius grows with the inset so the ring's corners
+    /// stay concentric with the button's.
+    private var pulseRing: some View {
+        TimelineView(.animation) { context in
+            let t = context.date.timeIntervalSinceReferenceDate
+            let phase = t.truncatingRemainder(dividingBy: 1.6) / 1.6
+            let eased = 1 - pow(1 - phase, 2)   // easeOut
+            let spread = CGFloat(1 + 7 * eased)
+            RoundedRectangle(
+                cornerRadius: ApplePermissionAlertMetrics.buttonCornerRadius + spread,
+                style: .continuous
+            )
+            .inset(by: -spread)
+            .stroke(
+                Color(uiColor: .systemBlue).opacity(0.55 * (1 - eased)),
+                lineWidth: 2
+            )
+        }
+        .allowsHitTesting(false)
     }
 }
 

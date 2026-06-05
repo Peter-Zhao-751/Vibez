@@ -2,9 +2,10 @@
 //  Mascots.swift
 //  Vibez
 //
-//  Pixel critter (Claude) and cloud-bot (Codex), translated from the
-//  reference design's inline SVG. Both breathe when listening, sleep
-//  when not, and randomly cycle eye expressions.
+//  The pixel critter (Claude) mascot, translated from the reference
+//  design's inline SVG. Breathes when listening, sleeps when not, and
+//  randomly cycles eye expressions. (The Codex cloud-bot is gone —
+//  the app is Claude-themed regardless of which agent pings.)
 //
 
 import SwiftUI
@@ -54,32 +55,6 @@ struct Zzz: View {
                 x: (originX + dx) * unit,
                 y: (originY + dy) * unit + CGFloat(driftY) * unit
             )
-    }
-}
-
-// MARK: - Public API
-
-struct MascotForAgent: View {
-    let agent: Agent
-    let listening: Bool
-    let size: CGFloat
-    var gap: CGFloat = 6
-    var focused: Bool = false
-    /// Gates the breathe/sleep-bob body loop; eyes keep cycling.
-    var animate: Bool = true
-
-    var body: some View {
-        switch agent {
-        case .claude:
-            ClaudeMascot(listening: listening, size: size, focused: focused, animate: animate)
-        case .codex:
-            CodexMascot(listening: listening, size: size, focused: focused, animate: animate)
-        case .both:
-            HStack(alignment: .bottom, spacing: gap) {
-                ClaudeMascot(listening: listening, size: size * 0.78, focused: focused, animate: animate)
-                CodexMascot(listening: listening, size: size * 0.78, focused: focused, animate: animate)
-            }
-        }
     }
 }
 
@@ -245,234 +220,12 @@ private struct ChevronShape: Shape {
     }
 }
 
-// MARK: - Codex — cloud bot
-
-struct CodexMascot: View {
-    let listening: Bool
-    let size: CGFloat
-    var focused: Bool = false
-    var animate: Bool = true
-    @State private var expression: Expression = .open
-    @State private var cursorOn: Bool = true
-
-    private let blue = Theme.codexBlue
-    private let blueLight = Color(hex: 0xaab8ee)
-    private let blueDeep = Theme.codexDeep
-    private let screenBg = Color(hex: 0x272a4a)
-    private let screenStroke = Color(hex: 0x1c1f3d)
-    private let eyeColor = Color(hex: 0x9af0d8)
-
-    var body: some View {
-        // Reference viewBox is 110×130
-        let w = size
-        let h = size * 130.0 / 110.0
-        ZStack(alignment: .topLeading) {
-            // Cloud head (flat bottom)
-            CodexHeadShape()
-                .fill(LinearGradient(
-                    colors: [blueLight, blue],
-                    startPoint: UnitPoint(x: 0.4, y: 0.35),
-                    endPoint: UnitPoint(x: 0.9, y: 1.0)
-                ))
-                .frame(width: w, height: h)
-            CodexHeadShape()
-                .stroke(blueDeep.opacity(0.55), lineWidth: max(1, w / 110 * 1.2))
-                .frame(width: w, height: h)
-            // Underside shadow where head meets neck
-            Rectangle()
-                .fill(blueDeep.opacity(0.22))
-                .frame(width: w * 94 / 110, height: h * 4 / 130)
-                .offset(x: w * 8 / 110, y: h * 66 / 130)
-
-            // Face screen
-            RoundedRectangle(cornerRadius: w * 8 / 110, style: .continuous)
-                .fill(screenBg)
-                .frame(width: w * 58 / 110, height: h * 32 / 130)
-                .offset(x: w * 26 / 110, y: h * 34 / 130)
-            RoundedRectangle(cornerRadius: w * 8 / 110, style: .continuous)
-                .stroke(screenStroke, lineWidth: max(1, w / 110 * 1.4))
-                .frame(width: w * 58 / 110, height: h * 32 / 130)
-                .offset(x: w * 26 / 110, y: h * 34 / 130)
-
-            // Eyes
-            CodexEyes(
-                expression: focused ? .squint : (listening ? expression : .open), // arches when sleeping too
-                color: eyeColor,
-                listening: listening
-            )
-            .frame(width: w, height: h)
-
-            // Neck
-            Rectangle()
-                .fill(blue)
-                .frame(width: w * 22 / 110, height: h * 6 / 130)
-                .offset(x: w * 44 / 110, y: h * 68 / 130)
-
-            // Body
-            RoundedRectangle(cornerRadius: w * 9 / 110, style: .continuous)
-                .fill(blue)
-                .frame(width: w * 50 / 110, height: h * 38 / 130)
-                .offset(x: w * 30 / 110, y: h * 74 / 130)
-            RoundedRectangle(cornerRadius: w * 9 / 110, style: .continuous)
-                .stroke(blueDeep, lineWidth: max(1, w / 110))
-                .frame(width: w * 50 / 110, height: h * 38 / 130)
-                .offset(x: w * 30 / 110, y: h * 74 / 130)
-
-            // Terminal ">_" text + blinking cursor
-            Text(">_")
-                .font(.system(size: w * 14 / 110, weight: .heavy, design: .monospaced))
-                .foregroundStyle(.white)
-                .offset(x: w * 38 / 110, y: h * 86 / 130)
-            if listening {
-                Rectangle()
-                    .fill(.white)
-                    .frame(width: w * 5 / 110, height: h * 11 / 130)
-                    .opacity(cursorOn ? 1 : 0)
-                    .offset(x: w * 60 / 110, y: h * 89 / 130)
-            }
-
-            // Arms
-            Capsule()
-                .fill(blue)
-                .frame(width: w * 18 / 110, height: h * 9 / 130)
-                .overlay(Capsule().stroke(blueDeep, lineWidth: max(1, w / 110)))
-                .offset(x: w * 14 / 110, y: h * 84 / 130)
-            Capsule()
-                .fill(blue)
-                .frame(width: w * 18 / 110, height: h * 9 / 130)
-                .overlay(Capsule().stroke(blueDeep, lineWidth: max(1, w / 110)))
-                .offset(x: w * 78 / 110, y: h * 84 / 130)
-
-            // Feet
-            RoundedRectangle(cornerRadius: w * 3 / 110)
-                .fill(blue)
-                .frame(width: w * 13 / 110, height: h * 9 / 130)
-                .offset(x: w * 38 / 110, y: h * 112 / 130)
-            RoundedRectangle(cornerRadius: w * 3 / 110)
-                .fill(blue)
-                .frame(width: w * 13 / 110, height: h * 9 / 130)
-                .offset(x: w * 59 / 110, y: h * 112 / 130)
-
-            // Ground shadow
-            Ellipse()
-                .fill(.black.opacity(0.15))
-                .frame(width: w * 48 / 110, height: h * 5 / 130)
-                .offset(x: w * 31 / 110, y: h * 122 / 130)
-
-            // Sleeping z's (matches react mascot at x=92, y=14 in 110×130 viewBox)
-            if !listening {
-                Zzz(color: blueDeep, originX: 92, originY: 14, unit: w / 110)
-                    .frame(width: w, height: h, alignment: .topLeading)
-                    .allowsHitTesting(false)
-            }
-        }
-        .frame(width: w, height: h, alignment: .topLeading)
-        .modifier(ExpressionCycler(listening: listening && !focused, expression: $expression))
-        .modifier(BodyBob(listening: listening, animate: animate))
-        .task(id: listening) {
-            if !listening { return }
-            while !Task.isCancelled {
-                cursorOn.toggle()
-                try? await Task.sleep(nanoseconds: 550_000_000)
-            }
-        }
-    }
-}
-
-private struct CodexHeadShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let w = rect.width / 110
-        let h = rect.height / 130
-        var p = Path()
-        // Path: M 8 70 L 8 42 A 18 18 0 0 1 28 24 A 22 22 0 0 1 55 8 A 22 22 0 0 1 82 24 A 18 18 0 0 1 102 42 L 102 70 Z
-        p.move(to: CGPoint(x: 8 * w, y: 70 * h))
-        p.addLine(to: CGPoint(x: 8 * w, y: 42 * h))
-        // Arc: A 18 18 0 0 1 28 24 — to (28,24), large=0, sweep=1
-        p.addArc(tangent1End: CGPoint(x: 8 * w, y: 24 * h),
-                 tangent2End: CGPoint(x: 28 * w, y: 24 * h),
-                 radius: 18 * w)
-        // A 22 22 0 0 1 55 8
-        p.addArc(tangent1End: CGPoint(x: 28 * w, y: 8 * h),
-                 tangent2End: CGPoint(x: 55 * w, y: 8 * h),
-                 radius: 22 * w)
-        // A 22 22 0 0 1 82 24
-        p.addArc(tangent1End: CGPoint(x: 82 * w, y: 8 * h),
-                 tangent2End: CGPoint(x: 82 * w, y: 24 * h),
-                 radius: 22 * w)
-        // A 18 18 0 0 1 102 42
-        p.addArc(tangent1End: CGPoint(x: 102 * w, y: 24 * h),
-                 tangent2End: CGPoint(x: 102 * w, y: 42 * h),
-                 radius: 18 * w)
-        p.addLine(to: CGPoint(x: 102 * w, y: 70 * h))
-        p.closeSubpath()
-        return p
-    }
-}
-
-private struct CodexEyes: View {
-    let expression: Expression
-    let color: Color
-    let listening: Bool
-
-    var body: some View {
-        GeometryReader { geo in
-            let w = geo.size.width / 110
-            let h = geo.size.height / 130
-            // Eye centers at x=40 and x=70 in viewBox units, y=50
-            let stroke = StrokeStyle(lineWidth: 3 * min(w, h), lineCap: .round, lineJoin: .round)
-            ZStack {
-                eye(at: CGPoint(x: 40 * w, y: 50 * h), w: w, h: h, stroke: stroke)
-                eye(at: CGPoint(x: 70 * w, y: 50 * h), w: w, h: h, stroke: stroke)
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func eye(at center: CGPoint, w: CGFloat, h: CGFloat, stroke: StrokeStyle) -> some View {
-        switch expression {
-        case .open:
-            ArchEyeShape()
-                .stroke(color, style: stroke)
-                .frame(width: 14 * w, height: 8 * h)
-                .position(x: center.x, y: center.y)
-        case .blink:
-            Path { p in
-                p.move(to: CGPoint(x: -7 * w, y: 0))
-                p.addLine(to: CGPoint(x: 7 * w, y: 0))
-            }
-            .stroke(color, style: stroke)
-            .frame(width: 14 * w, height: 1)
-            .position(x: center.x, y: center.y)
-        case .squint:
-            // Single squint chevron
-            let isLeft = center.x < 55 * w
-            ChevronShape(pointsRight: isLeft)
-                .stroke(color, style: stroke)
-                .frame(width: 9 * w, height: 12 * h)
-                .position(x: center.x, y: center.y)
-        }
-    }
-}
-
-private struct ArchEyeShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        // Approximation of: M (cx-7) 50 Q cx 42 (cx+7) 50
-        p.move(to: CGPoint(x: 0, y: rect.height))
-        p.addQuadCurve(
-            to: CGPoint(x: rect.width, y: rect.height),
-            control: CGPoint(x: rect.width / 2, y: 0)
-        )
-        return p
-    }
-}
-
 #if DEBUG
 #Preview("Mascot · focused") {
     HStack(spacing: 28) {
         VStack { ClaudeMascot(listening: true, size: 110); Text("listening").font(.caption2) }
         VStack { ClaudeMascot(listening: true, size: 110, focused: true); Text("focused").font(.caption2) }
-        VStack { CodexMascot(listening: true, size: 110, focused: true); Text("focused").font(.caption2) }
+        VStack { ClaudeMascot(listening: false, size: 110); Text("sleeping").font(.caption2) }
     }
     .padding()
     .preferredColorScheme(.dark)

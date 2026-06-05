@@ -2,28 +2,14 @@
 //  Theme.swift
 //  Vibez
 //
-//  Color palette and agent → accent mapping. Translated 1:1 from the
-//  reference design's `themeFor(agent, dark)` JS function.
+//  Color palette. Translated from the reference design's
+//  `themeFor(agent, dark)` JS function, now pinned to the Claude
+//  accent — the Codex theme/mascot is gone (visuals only: Codex
+//  *pushes* still flow through the pipeline and block apps).
 //
 
 import SwiftUI
 import UIKit
-
-enum Agent: String, CaseIterable, Identifiable {
-    case claude
-    case both
-    case codex
-
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .claude: "Claude Code"
-        case .both: "your agents"
-        case .codex: "Codex"
-        }
-    }
-}
 
 /// Order in which stacked overlays surface to the user when more than
 /// one block is pending at once.
@@ -102,37 +88,20 @@ struct Theme {
 
     static let claudeOrange = Color(hex: 0xdd7a52)
     static let claudeDeep   = Color(hex: 0xb85a36)
-    static let codexBlue    = Color(hex: 0x8c9ce8)
-    static let codexDeep    = Color(hex: 0x5d6fbc)
 
-    static func make(agent: Agent) -> Theme {
-        let accent: Color
-        let accentDeep: Color
-        switch agent {
-        case .claude:
-            accent = claudeOrange
-            accentDeep = claudeDeep
-        case .codex:
-            accent = codexBlue
-            accentDeep = codexDeep
-        case .both:
-            accent = .lerp(claudeOrange, codexBlue, t: 0.5)
-            accentDeep = .lerp(claudeDeep, codexDeep, t: 0.5)
-        }
-
-        let pillStops: [Color] = (agent == .both)
-            ? [claudeOrange, codexBlue]
-            : [accent, accentDeep]
+    static func make() -> Theme {
+        let accent = claudeOrange
+        let accentDeep = claudeDeep
 
         let pillGradient = LinearGradient(
-            colors: pillStops,
+            colors: [accent, accentDeep],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
         )
 
         // Every neutral resolves its own light/dark variant from the live
-        // trait collection. accent/accentDeep/pillGradient are agent-only
-        // (identical in both schemes), so they stay static.
+        // trait collection. accent/accentDeep/pillGradient are identical
+        // in both schemes, so they stay static.
         return Theme(
             bg:       .dynamic(light: Color(hex: 0xfbf8f4), dark: Color(hex: 0x0c0d12)),
             bgPanel:  .dynamic(light: .white,               dark: Color(hex: 0x15161c)),
@@ -169,15 +138,5 @@ extension Color {
         Color(uiColor: UIColor { traits in
             traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
         })
-    }
-
-    static func lerp(_ a: Color, _ b: Color, t: Double) -> Color {
-        let aC = a.resolve(in: .init())
-        let bC = b.resolve(in: .init())
-        return Color(
-            red: Double(aC.red) + (Double(bC.red) - Double(aC.red)) * t,
-            green: Double(aC.green) + (Double(bC.green) - Double(aC.green)) * t,
-            blue: Double(aC.blue) + (Double(bC.blue) - Double(aC.blue)) * t
-        )
     }
 }

@@ -19,7 +19,15 @@ struct VibezApp: App {
 
     var body: some Scene {
         WindowGroup {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-vibez.debug.settingsOnly") {
+                DebugSettingsLaunchView()
+            } else {
+                ContentView()
+            }
+            #else
             ContentView()
+            #endif
         }
     }
 
@@ -41,6 +49,23 @@ struct VibezApp: App {
         defaults.removeObject(forKey: legacyKey)
     }
 }
+
+#if DEBUG
+private struct DebugSettingsLaunchView: View {
+    @State private var isPresented = true
+
+    var body: some View {
+        SettingsView(
+            isPresented: $isPresented,
+            manager: .shared,
+            notifyClient: .shared,
+            registrar: .shared,
+            triggerStore: TriggerStore(),
+            ignoreStore: .shared
+        )
+    }
+}
+#endif
 
 final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCenterDelegate {
 

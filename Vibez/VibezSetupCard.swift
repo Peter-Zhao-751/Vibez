@@ -2,10 +2,11 @@
 //  VibezSetupCard.swift
 //  Vibez
 //
-//  Home-screen pairing card. The user runs /vibez:setup on their Mac
-//  (Claude Code or Codex), gets a 4-word Vibez ID, types it in here.
-//  We then call the registerPushToken Cloud Function with the FCM
-//  token + the ID; once the server has the pairing, /notify pushes
+//  Home-screen pairing card. Installing the Vibez plugin prints a
+//  4-word Vibez ID on the Mac the moment a session starts (Claude Code
+//  or Codex; /vibez:setup re-surfaces it anytime). The user types it
+//  in here. We then call the registerPushToken Cloud Function with the
+//  FCM token + the ID; once the server has the pairing, /notify pushes
 //  from the plugin reach this device.
 //
 //  Replaces the previous NotificationSetupCard (ntfy URL).
@@ -33,16 +34,17 @@ struct VibezSetupCard: View {
             && trimmedDraft != registrar.vibezId
     }
 
-    /// "Run /vibez:setup in Claude Code or Codex, then paste the Vibez
-    /// ID it gives you." — the command rendered in monospace fg, like
+    /// "Install the Vibez plugin — Claude Code and Codex print your
+    /// Vibez ID as soon as a session starts. /vibez:setup shows it
+    /// again anytime." — the command rendered in monospace fg, like
     /// the reference card.
     private var instructions: AttributedString {
-        var lead = AttributedString("Run ")
+        var lead = AttributedString("Install the Vibez plugin — Claude Code and Codex print your Vibez ID as soon as a session starts. ")
         lead.foregroundColor = theme.fgMute
         var cmd = AttributedString("/vibez:setup")
         cmd.font = .system(size: 12, design: .monospaced)
         cmd.foregroundColor = theme.fg
-        var tail = AttributedString(" in Claude Code or Codex, then paste the Vibez ID it gives you.")
+        var tail = AttributedString(" shows it again anytime.")
         tail.foregroundColor = theme.fgMute
         return lead + cmd + tail
     }
@@ -216,7 +218,7 @@ struct VibezSetupCard: View {
 #Preview("VibezSetupCard · idle") {
     VibezSetupCard(
         registrar: PushTokenRegistrar.shared,
-        theme: Theme.make(agent: .claude)
+        theme: Theme.make()
     )
     .padding()
     .background(Color.black)

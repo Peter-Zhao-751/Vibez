@@ -23,11 +23,9 @@ struct OnboardingFlow: View {
     let onFinish: () -> Void
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
-    @AppStorage("vibez.agent") private var agentRaw = Agent.claude.rawValue
     @Environment(\.scenePhase) private var scenePhase
 
-    private var agent: Agent { Agent(rawValue: agentRaw) ?? .claude }
-    private var theme: Theme { Theme.make(agent: agent) }
+    private var theme: Theme { Theme.make() }
 
     var body: some View {
         ZStack {
@@ -63,7 +61,6 @@ struct OnboardingFlow: View {
                     .padding(.bottom, 20)
             }
         }
-        .animation(.easeInOut(duration: 0.4), value: agent)
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             // Returning from the Settings app (remediation path): re-read
@@ -76,6 +73,25 @@ struct OnboardingFlow: View {
                 }
             }
         }
+        // Live-verify a permission step the moment it becomes current:
+        // the step list is a snapshot from begin(), so if the gate read
+        // was stale (or the permission was granted outside the flow),
+        // re-read it and skip forward instead of asking the user for
+        // something they already gave — "Allow notifications" must never
+        // show when notifications are already on.
+        .task(id: state.current) {
+            guard let step = state.current else { return }
+            switch step {
+            case .notifications: await state.refreshNotificationStatus()
+            case .screenTime: manager.refreshAuthorizationStatus()
+            case .welcome, .pluginInstall, .vibezId, .finish: return
+            }
+            // Re-check the step is still current (a concurrent scenePhase
+            // recheck may have advanced past it already) before skipping.
+            if state.current == step, state.currentStepSatisfied {
+                advance()
+            }
+        }
         .preferredColorScheme(
             (AppearancePref(rawValue: appearanceRaw) ?? .system).colorScheme
         )
@@ -85,19 +101,17 @@ struct OnboardingFlow: View {
     private func stepView(for step: OnboardingStep) -> some View {
         switch step {
         case .welcome:
-            OnboardingWelcomeStep(theme: theme, agent: agent, onContinue: advance)
+            OnboardingWelcomeStep(theme: theme, onContinue: advance)
         case .notifications:
             OnboardingNotificationsStep(theme: theme, state: state, onAdvance: advance)
         case .screenTime:
             OnboardingScreenTimeStep(theme: theme, manager: manager, onAdvance: advance)
-        case .agentPick:
-            OnboardingAgentPickStep(theme: theme, agentRaw: $agentRaw, onAdvance: advance)
         case .pluginInstall:
-            OnboardingPluginStep(theme: theme, agent: agent, onAdvance: advance)
+            OnboardingPluginStep(theme: theme, onAdvance: advance)
         case .vibezId:
             OnboardingVibezIdStep(theme: theme, registrar: registrar, onAdvance: advance)
         case .finish:
-            OnboardingFinishStep(theme: theme, agent: agent, onDone: onFinish)
+            OnboardingFinishStep(theme: theme, onDone: onFinish)
         }
     }
 

@@ -451,42 +451,44 @@ final class ScreenTimeManager {
         }
     }
 
-    /// One mascot PNG per agent, written to the App Group container.
-    /// VibezShield (extension) reads `shield-<agent>.png` and slots it
-    /// into `ShieldConfiguration.icon`. Pre-rendering here means the
-    /// extension never has to run SwiftUI/ImageRenderer (which can
-    /// trap in nonisolated extension contexts) AND VibezPushService
-    /// (NSE) doesn't have to render either — both just write the
-    /// `shieldState` dict, and the right PNG is already on disk.
+    /// The single Claude mascot PNG, written to the App Group container.
+    /// VibezShield (extension) reads `shield-claude.png` and slots it
+    /// into `ShieldConfiguration.icon` regardless of which agent's push
+    /// engaged the shield — the Codex theme/mascot is gone. Pre-rendering
+    /// here means the extension never has to run SwiftUI/ImageRenderer
+    /// (which can trap in nonisolated extension contexts) AND
+    /// VibezPushService (NSE) doesn't have to render either — both just
+    /// write the `shieldState` dict, and the PNG is already on disk.
     ///
-    /// Idempotent: skips agents whose PNG already exists. Bump the
-    /// filename suffix (or wipe the App Group container) when the
-    /// visual changes.
+    /// Idempotent: skips when the PNG already exists. Bump the
+    /// filename (or wipe the App Group container) when the visual
+    /// changes.
     private func prerenderAgentShieldsIfNeeded() {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return }
 
-        // Legacy single-PNG path from before per-agent renders. Safe
-        // to drop — VibezShield no longer looks at it.
-        let legacy = container.appendingPathComponent("shield.png")
-        try? FileManager.default.removeItem(at: legacy)
-
-        let agents: [ShieldState.Agent] = [.claude, .codex, .both, .none]
-        for agent in agents {
-            let url = container.appendingPathComponent("shield-\(agent.rawValue).png")
-            if FileManager.default.fileExists(atPath: url.path) { continue }
-            let state = ShieldState(
-                agent: agent,
-                title: nil,
-                body: nil,
-                expiresAt: nil,
-                dark: true
+        // Legacy files: the pre-per-agent single PNG, and the per-agent
+        // renders from when each agent had its own card. Safe to drop —
+        // VibezShield only loads shield-claude.png now.
+        for stale in ["shield.png", "shield-codex.png", "shield-both.png", "shield-none.png"] {
+            try? FileManager.default.removeItem(
+                at: container.appendingPathComponent(stale)
             )
-            if let png = renderShieldCardPNG(state: state) {
-                try? png.write(to: url)
-                shieldLog.info("prerendered shield-\(agent.rawValue, privacy: .public).png")
-            }
+        }
+
+        let url = container.appendingPathComponent("shield-claude.png")
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        let state = ShieldState(
+            agent: .claude,
+            title: nil,
+            body: nil,
+            expiresAt: nil,
+            dark: true
+        )
+        if let png = renderShieldCardPNG(state: state) {
+            try? png.write(to: url)
+            shieldLog.info("prerendered shield-claude.png")
         }
     }
 
@@ -797,8 +799,9 @@ final class ScreenTimeManager {
             case .codex:  agent = .codex
             }
         } else {
-            // Untagged ntfy ping — no agent context. Use the generic
-            // "both" tint so we don't bias the visual toward one agent.
+            // Untagged ntfy ping — no agent context. The value is pure
+            // data now (the shield renders Claude visuals regardless);
+            // "both" keeps the schema's untagged convention.
             agent = .both
         }
 

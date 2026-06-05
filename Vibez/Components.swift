@@ -572,12 +572,12 @@ struct TriggerEvent: Identifiable, Codable, Equatable {
 
     /// Map a ntfy message's producing agent to a trigger Source. The Vibez
     /// plugin always sets "_vibez:agent"; untagged pushes (e.g. a raw
-    /// `curl` test ping) fall back to the user's currently selected agent.
-    static func source(for agent: VibezAgent?, fallback: Agent) -> Source {
+    /// `curl` test ping) fall back to Claude.
+    static func source(for agent: VibezAgent?) -> Source {
         switch agent {
         case .claude: return .claude
         case .codex:  return .codex
-        case nil:     return fallback == .codex ? .codex : .claude
+        case nil:     return .claude
         }
     }
 }
@@ -618,7 +618,9 @@ struct TriggerRow: View {
         let row = HStack(alignment: .top, spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(event.source == .codex ? Theme.codexBlue : Theme.claudeOrange)
+                    .fill(Theme.claudeOrange)
+                // Which plugin pinged — Codex events still arrive and
+                // keep their "cx" tag; only the blue theming is gone.
                 Text(event.source == .codex ? "cx" : "cc")
                     .font(.system(size: 10, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white)

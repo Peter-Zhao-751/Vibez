@@ -3,10 +3,12 @@
 //  Vibez
 //
 //  Step engine for the first-run / incomplete-setup onboarding flow.
-//  The gate is pure live state — no "seen onboarding" flag: the flow
-//  presents while a permission is missing or no Vibez ID is paired and
-//  stops appearing the moment setup completes. Revoking a permission
-//  later correctly brings it back with just the missing step. Design:
+//  The gate reads live state (notif status + FC auth + Vibez ID),
+//  hardened by "vibez.onboardingCompleted": a completed install only
+//  re-presents on a DEFINITE failure (unpaired, or an explicit
+//  .denied — see hasDefiniteFailure), never on a cold-launch
+//  .notDetermined race. Revoking a permission later still brings the
+//  flow back with just the missing step. Design:
 //  docs/superpowers/specs/2026-06-04-onboarding-design.md.
 //
 
@@ -19,7 +21,6 @@ enum OnboardingStep: String, CaseIterable, Identifiable {
     case welcome
     case notifications
     case screenTime
-    case agentPick
     case pluginInstall
     case vibezId
     case finish
@@ -85,6 +86,20 @@ final class OnboardingState: Identifiable {
         !notificationsGranted || !screenTimeAuthorized || !paired
     }
 
+    /// A failure that is definitely real — not the cold-launch race.
+    /// Pairing is a synchronous UserDefaults read, and `.denied` only
+    /// comes back when the system actually answered; Family Controls'
+    /// `.notDetermined` is ambiguity, not evidence (its daemon can
+    /// report that for a beat after process start even when granted).
+    /// The launch gate uses this to keep completed installs from
+    /// re-presenting — or even waiting on a settle pass — over a
+    /// stale read.
+    var hasDefiniteFailure: Bool {
+        !paired
+            || notificationStatus == .denied
+            || manager.authState == .denied
+    }
+
     var current: OnboardingStep? {
         steps.indices.contains(index) ? steps[index] : nil
     }
@@ -109,7 +124,7 @@ final class OnboardingState: Identifiable {
         var steps: [OnboardingStep] = []
         if !notificationsGranted { steps.append(.notifications) }
         if !screenTimeAuthorized { steps.append(.screenTime) }
-        if !paired { steps.append(contentsOf: [.agentPick, .pluginInstall, .vibezId]) }
+        if !paired { steps.append(contentsOf: [.pluginInstall, .vibezId]) }
         if !steps.isEmpty { steps.insert(.welcome, at: 0) }
         steps.append(.finish)
         return steps
@@ -159,11 +174,11 @@ final class OnboardingState: Identifiable {
     }
 
     /// Whether a step's gate is already met. Action steps (welcome,
-    /// agent pick, plugin instructions, finish) are never "satisfied" —
-    /// they're informational and always shown once snapshotted.
+    /// plugin instructions, finish) are never "satisfied" — they're
+    /// informational and always shown once snapshotted.
     private func isSatisfied(_ step: OnboardingStep) -> Bool {
         switch step {
-        case .welcome, .agentPick, .pluginInstall, .finish:
+        case .welcome, .pluginInstall, .finish:
             false
         case .notifications:
             notificationsGranted

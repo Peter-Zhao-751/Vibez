@@ -4,13 +4,12 @@
 //
 //  Full-screen overlay shown when an agent has pinged the user.
 //  Animates in, dismisses on tap. When given a `message` it shows the
-//  push text verbatim; otherwise falls back to agent-themed copy.
+//  push text verbatim; otherwise falls back to placeholder copy.
 //
 
 import SwiftUI
 
 struct BlockedOverlay: View {
-    let agent: Agent
     let theme: Theme
     var message: NtfyMessage?
     /// Source of truth for the visible countdown. Reads from
@@ -52,9 +51,9 @@ struct BlockedOverlay: View {
     private var titleText: String {
         // displayTitle already prepends the event label ("Done — …",
         // "Needs you — …") so the user sees what Claude wants at a
-        // glance. Fall back to the agent-themed placeholder only when
-        // there's no message at all.
-        guard let msg = message else { return "\(agent.label) needs you." }
+        // glance. Fall back to the placeholder only when there's no
+        // message at all.
+        guard let msg = message else { return "Your agent needs you." }
         return msg.displayTitle
     }
 
@@ -63,20 +62,12 @@ struct BlockedOverlay: View {
         return "Permission requested · 0:42 ago"
     }
 
-    private var isCodexMessage: Bool {
-        message?.agent == .codex
-    }
-
-    private var gradientColor: Color {
-        isCodexMessage ? Theme.codexBlue : theme.accent
-    }
-
     var body: some View {
         ZStack(alignment: .top) {
             theme.bg
                 .overlay(
                     RadialGradient(
-                        colors: [gradientColor.opacity(colorScheme == .dark ? 0.28 : 0.20), .clear],
+                        colors: [theme.accent.opacity(colorScheme == .dark ? 0.28 : 0.20), .clear],
                         center: UnitPoint(x: 0.5, y: 0.30),
                         startRadius: 0,
                         endRadius: 520
@@ -105,25 +96,13 @@ struct BlockedOverlay: View {
             VStack(spacing: 0) {
                 Spacer().frame(height: 100)
 
-                if isCodexMessage {
-                    Image("Codex")
-                        .resizable()
-                        .aspectRatio(contentMode: .fit)
-                        .frame(width: 130, height: 130)
-                        .padding(.bottom, 18)
-                } else {
-                    MascotForAgent(
-                        agent: agent,
-                        listening: true,
-                        size: agent == .both ? 110 : 130
-                    )
+                ClaudeMascot(listening: true, size: 130)
                     .padding(.bottom, 18)
-                }
 
                 Text("BLOCKING IN PROGRESS")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .tracking(2.4)
-                    .foregroundStyle(gradientColor)
+                    .foregroundStyle(theme.accent)
                     .padding(.bottom, 10)
 
                 Text(.init(titleText))
@@ -162,22 +141,6 @@ struct BlockedOverlay: View {
                             }
                     }
                 }
-
-//                Button {
-//                    onDismiss()
-//                } label: {
-//                    Text("Open \(agent.label) →")
-//                        .font(.system(size: 15, weight: .semibold))
-//                        .foregroundStyle(theme.onAccent)
-//                        .padding(.horizontal, 28)
-//                        .padding(.vertical, 14)
-//                        .background(
-//                            RoundedRectangle(cornerRadius: 14)
-//                                .fill(theme.accent)
-//                        )
-//                        .shadow(color: theme.accentDeep.opacity(0.55), radius: 14, x: 0, y: 8)
-//                }
-//                .buttonStyle(.plain)
 
                 if allowDismiss {
                     Button(action: onDismiss) {
@@ -229,8 +192,7 @@ private func previewMessage(
 
 #Preview("Needs input · 14:32 · dark") {
     BlockedOverlay(
-        agent: .claude,
-        theme: Theme.make(agent: .claude),
+        theme: Theme.make(),
         message: previewMessage(),
         expiresAt: Date().addingTimeInterval(14 * 60 + 32),
         stackDepth: 1,
@@ -242,8 +204,7 @@ private func previewMessage(
 
 #Preview("Done · 28s · light") {
     BlockedOverlay(
-        agent: .claude,
-        theme: Theme.make(agent: .claude),
+        theme: Theme.make(),
         message: previewMessage(
             title: "Refactor blocking panel",
             body: "Wrapped the panel in a lazy stack and trimmed the unused gradient. Tests pass.",
@@ -259,8 +220,7 @@ private func previewMessage(
 
 #Preview("Stack of 3 · dark") {
     BlockedOverlay(
-        agent: .claude,
-        theme: Theme.make(agent: .claude),
+        theme: Theme.make(),
         message: previewMessage(
             title: "Investigate WebSocket disconnects",
             body: "Reconnect logic is dropping the second frame on iOS 17 — want me to add a retry guard?"
@@ -273,10 +233,11 @@ private func previewMessage(
     .preferredColorScheme(.dark)
 }
 
-#Preview("Codex · needs input · dark") {
+#Preview("Codex ping · Claude visuals · dark") {
+    // Codex pushes still arrive ("cx" tag) — they just render with the
+    // app's single Claude theme now.
     BlockedOverlay(
-        agent: .codex,
-        theme: Theme.make(agent: .codex),
+        theme: Theme.make(),
         message: previewMessage(
             title: "Wire up SSE handler",
             body: "Need confirmation before I rip out the polling fallback.",
@@ -292,8 +253,7 @@ private func previewMessage(
 
 #Preview("No dismiss · forced wait · dark") {
     BlockedOverlay(
-        agent: .claude,
-        theme: Theme.make(agent: .claude),
+        theme: Theme.make(),
         message: previewMessage(
             title: "Ship the Q4 changelog",
             body: "Want me to bundle the design-system entries under a single section, or keep them split out?"
@@ -309,8 +269,7 @@ private func previewMessage(
 
 #Preview("Untagged ping · no countdown · light") {
     BlockedOverlay(
-        agent: .claude,
-        theme: Theme.make(agent: .claude),
+        theme: Theme.make(),
         message: previewMessage(
             title: "Vibez",
             body: "Test push from a curl ping — no Vibez control tags.",

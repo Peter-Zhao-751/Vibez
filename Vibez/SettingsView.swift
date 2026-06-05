@@ -78,6 +78,12 @@ struct SettingsView: View {
         dismiss()
     }
 
+    private func openAppSettings() {
+        if let url = URL(string: UIApplication.openSettingsURLString) {
+            UIApplication.shared.open(url)
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -177,8 +183,8 @@ struct SettingsView: View {
         }
     }
 
-    /// The trailing "N selected" / "None" label + chevron. Flows as the
-    /// final item after the app icons.
+    /// The trailing "N selected" label + chevron. Flows as the final item
+    /// after the app icons.
     @ViewBuilder
     private func appsCountLabel(_ text: String) -> some View {
         HStack(spacing: 4) {
@@ -193,16 +199,16 @@ struct SettingsView: View {
     @ViewBuilder
     private var appsSection: some View {
         Section {
-            // Whole component is one tap target. No "Pick apps" label —
-            // the app icons flow top-left and wrap, while the "N selected"
-            // count sits at the top-right with the icons flowing around it
-            // (see AppsFlowLayout). Rectangle content shape so the empty
-            // space and the gaps between icons all open the picker.
-            Button {
-                presentPicker()
-            } label: {
-                Group {
-                    if manager.hasSelection {
+            if manager.hasSelection {
+                // Whole component is one tap target. No "Pick apps" label —
+                // the app icons flow top-left and wrap, while the "N selected"
+                // count sits at the top-right with the icons flowing around it
+                // (see AppsFlowLayout). Rectangle content shape so the empty
+                // space and the gaps between icons all open the picker.
+                Button {
+                    presentPicker()
+                } label: {
+                    Group {
                         AppsFlowLayout(spacing: 8, lineSpacing: 8) {
                             ForEach(Array(manager.selection.applicationTokens), id: \.self) { token in
                                 SettingsBlockedTokenIcon { Label(token) }
@@ -220,49 +226,71 @@ struct SettingsView: View {
                             appsCountLabel("\(manager.selectedCount) selected")
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
-                    } else {
-                        HStack(spacing: 0) {
-                            Spacer(minLength: 0)
-                            appsCountLabel("None")
-                        }
                     }
                 }
                 .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(manager.hasSelection
-                ? "Apps to block, \(manager.selectedCount) selected"
-                : "Apps to block, none selected")
-            .accessibilityHint("Opens the app picker")
-
-            if manager.authState != .authorized {
+                .buttonStyle(.plain)
+                .accessibilityLabel("Apps to block, \(manager.selectedCount) selected")
+                .accessibilityHint("Opens the app picker")
+            } else if manager.authState == .authorized {
                 Button {
-                    if let url = URL(string: UIApplication.openSettingsURLString) {
-                        UIApplication.shared.open(url)
-                    }
+                    presentPicker()
                 } label: {
-                    HStack {
+                    HStack(spacing: 10) {
                         Label {
-                            Text("Screen Time access not granted — tap to open Settings and enable it.")
-                                .font(.caption)
+                            Text("Pick apps to block")
                                 .foregroundStyle(Color.primary)
-                                .multilineTextAlignment(.leading)
                         } icon: {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundStyle(.orange)
+                            Image(systemName: "plus.circle.fill")
+                                .foregroundStyle(Color.accentColor)
                         }
                         Spacer(minLength: 8)
                         Image(systemName: "chevron.right")
-                            .font(.caption.weight(.semibold))
+                            .font(.title3.weight(.semibold))
                             .foregroundStyle(.tertiary)
                     }
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Apps to block, none selected")
+                .accessibilityHint("Opens the app picker")
+            }
+
+            if manager.authState != .authorized {
+                screenTimeAccessWarningButton
             }
         } header: {
             Text("Apps to block")
         } footer: {
             Text("Apple does not let apps preset Instagram or TikTok by name. Pick them yourself in the system picker.")
         }
+    }
+
+    private var screenTimeAccessWarningButton: some View {
+        Button(action: openAppSettings) {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.title3.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .frame(width: 24)
+
+                Text("Screen Time access not granted — tap to open Settings and enable it.")
+                    .foregroundStyle(Color.primary)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.title2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Screen Time access not granted")
+        .accessibilityHint("Opens Settings")
     }
 
     @ViewBuilder

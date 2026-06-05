@@ -69,15 +69,16 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         let titleText = state.title ?? "Stay focused"
         let subtitleText = state.body ?? "Vibez is keeping you off \(displayName)."
 
-        // Icon comes from the host-pre-rendered per-agent PNG. One file
-        // per agent is rendered once in ScreenTimeManager.init, so both
-        // the host and VibezPushService (NSE) can engage the shield
-        // without doing any rendering at engagement time.
-        let icon: UIImage? = loadCachedShieldImage(for: state.agent)
-        Logger.shieldExt.info("Icon: \(icon == nil ? "none" : "shield-\(state.agent.rawValue).png")")
+        // Icon comes from the host-pre-rendered PNG — always the Claude
+        // card, regardless of which agent's push engaged the shield.
+        // Rendered once in ScreenTimeManager.init, so both the host and
+        // VibezPushService (NSE) can engage the shield without doing any
+        // rendering at engagement time.
+        let icon: UIImage? = loadCachedShieldImage()
+        Logger.shieldExt.info("Icon: \(icon == nil ? "none" : "shield-claude.png")")
 
-        // No blur — backgroundColor is the tamed-down agent tint (warm
-        // brown for Claude, cool navy for Codex).
+        // No blur — backgroundColor is the tamed-down Claude tint
+        // (warm brown).
         return ShieldConfiguration(
             backgroundBlurStyle: nil,
             backgroundColor: state.backgroundUIColor,
@@ -99,11 +100,11 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         )
     }
 
-    private func loadCachedShieldImage(for agent: Agent) -> UIImage? {
+    private func loadCachedShieldImage() -> UIImage? {
         guard let containerURL = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return nil }
-        let imageURL = containerURL.appendingPathComponent("shield-\(agent.rawValue).png")
+        let imageURL = containerURL.appendingPathComponent("shield-claude.png")
         return UIImage(contentsOfFile: imageURL.path)
     }
 }

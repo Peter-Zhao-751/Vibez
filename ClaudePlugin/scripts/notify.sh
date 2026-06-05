@@ -113,6 +113,12 @@ mark_event() {
     date +%s >"${path}" 2>/dev/null || true
 }
 
+clear_event() {
+    local sid="$1" path
+    path="$(lastevent_path "${sid}")" || return 0
+    rm -f "${path}" 2>/dev/null || true
+}
+
 within_debounce_window() {
     local sid="$1" path ts now delta
     [ "${DEBOUNCE_SECONDS}" -gt 0 ] || return 1
@@ -164,6 +170,15 @@ post_vibez() {
         return 0
     fi
 
+    # Claim the stamp BEFORE the network call, not after. Hooks run in
+    # parallel (Codex fires paired events in the same second); a stamp
+    # written only on curl success leaves a 0.5-5s hole during which a
+    # concurrent hook sees "no stamp" and double-sends. Claiming here
+    # narrows the race to the one-liner above. A failed send rolls the
+    # claim back (below) so a network blip can't leave a phantom stamp
+    # that silences the burst's next event.
+    mark_event "${session}"
+
     local payload
     payload=$(jq -nc \
         --arg vibezId "${VIBEZ_ID}" \
@@ -179,17 +194,16 @@ post_vibez() {
          + (if $session != "" then {session:$session} else {} end)
          + (if $agent   != "" then {agent:$agent}     else {} end)')
 
-    # Stamp only on success — if the burst's first send failed, the
-    # phone never blocked, and eating the followers would silence the
-    # entire burst.
     if curl -fsS --max-time 5 \
         -H "content-type: application/json" \
         -X POST -d "${payload}" \
         "${BACKEND_URL}/notify" >/dev/null 2>&1; then
         log "sent: ${title} (event=${event})"
-        mark_event "${session}"
     else
         log "send failed: ${title} (event=${event})"
+        # Roll the claim back: the phone never got this push, so the
+        # next event for the session must not be debounced against it.
+        clear_event "${session}"
     fi
 }
 

@@ -17,35 +17,51 @@ Vibez/                        Main iOS app target.
   VibezApp.swift              SwiftUI @main; AppDelegate calls FirebaseApp.configure(),
                               registers for remote notifications, sets Messaging delegate,
                               forwards APN→FCM, and delivers pushes via NotifyClient.shared.
-  ContentView.swift           Home screen: mascot, big toggle, VibezSetupCard, analytics,
-                              recent triggers. Owns the overlay queue and the incoming-push
-                              handler (handleIncoming). `setupNeeded` gates on no Vibez ID or
+  ContentView.swift           Home-screen root: shared state, scene-lifecycle plumbing
+                              (App Group drains, scenePhase re-checks), setup-card
+                              presentation dance. `setupNeeded` gates on no Vibez ID or
                               a registration error (in-flight states stay unlocked); it also
                               seeds the initial layout state in init so a paired cold start
                               renders the expanded layout on frame 1 — no reflow, hint and
-                              mascot appear together. Presents OnboardingFlow as a
-                              fullScreenCover on launch while setup is incomplete; onboarding
-                              owns the permission prompts (the old auto-requesting .task is
-                              gone).
+                              mascot appear together. The rest of the screen lives in the
+                              ContentView+* sibling files (extensions — shared members are
+                              internal on purpose, `private` is file-scoped).
+  ContentView+Home.swift      Home layout half: hero/mascot, big toggle, setup card, Recent
+                              triggers sheet, focus-mode tap flow + its app-picker detour.
+  ContentView+Incoming.swift  Push-routing half: handleIncoming + the overlay queue and the
+                              per-ping block-duration policy.
+  ContentView+Previews.swift  Seeded preview environments for the home screen.
+  OnboardingLaunchGate.swift  Cold-launch onboarding gate (ViewModifier), extracted from
+                              ContentView: decides once per launch whether OnboardingFlow
+                              presents, owns the fullScreenCover + the
+                              "vibez.onboardingCompleted" flag, and arms the toggle after a
+                              completed (not skipped) walkthrough. Onboarding owns the
+                              permission prompts (the old auto-requesting .task is gone).
   VibezSetupCard.swift        Pairing card — user types in the 4-word Vibez ID, calls
                               registrar.setVibezId(...). Replaces the old NotificationSetupCard.
   OnboardingState.swift       @Observable step engine for the onboarding flow. Gate is
                               live state (notif status + FC auth + Vibez ID present),
                               hardened by "vibez.onboardingCompleted": FC's
                               authorizationStatus can read .notDetermined for a beat
-                              after cold launch even when granted, so completed installs
-                              (and FC-only failures) settleAndRecheck() for up to ~2s
-                              before the flow presents. Steps snapshot at begin();
-                              advance() auto-skips steps satisfied mid-flow. DEBUG launch
-                              arg -vibez.debug.fakeScreenTimeAuth YES fakes the FC gate
+                              after cold launch even when granted, so a completed install
+                              re-presents ONLY on a definite failure (unpaired or an
+                              explicit .denied — hasDefiniteFailure), never on that
+                              ambiguity (no settle stall, no flash). FC-only failures on
+                              never-completed installs settleAndRecheck() for up to ~2s.
+                              Steps snapshot at begin(); advance() auto-skips steps
+                              satisfied mid-flow, and OnboardingFlow live-verifies each
+                              permission step as it becomes current (self-skips if the
+                              permission is already granted). DEBUG launch arg
+                              -vibez.debug.fakeScreenTimeAuth YES fakes the FC gate
                               for sim verification (FC can't be granted on a sim).
   OnboardingFlow.swift        fullScreenCover container: forward-only transitions, progress
                               dots, Skip, scenePhase re-check for Settings round-trips.
                               Presented by ContentView (launch) and SettingsView (Tutorial).
-  OnboardingSteps.swift       The seven pages: welcome, notifications + Screen Time
+  OnboardingSteps.swift       The six pages: welcome, notifications + Screen Time
                               (practice-tap mock dialogs w/ denied-state remediation),
-                              agent pick, plugin install, Vibez ID pairing, how-it-works
-                              + app version.
+                              plugin install (shows BOTH agents' commands), Vibez ID
+                              pairing, how-it-works + app version. The agent-pick page
+                              and the "vibez.agent" pref are gone — Claude theme always.
   MockSystemDialog.swift      Practice-tap replica of the iOS permission alert — confirm
                               fires the real prompt; Don't Allow wiggles + hints. System
                               look on purpose (not app theme).
@@ -62,9 +78,10 @@ Vibez/                        Main iOS app target.
                               (NtfyMessage name kept deliberately — renaming churns many files).
   ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
                               ManagedSettingsStore shield apply/remove, App Group writer.
-                              Pre-renders one shield PNG per agent into the App Group at init.
+                              Pre-renders the single Claude shield PNG (shield-claude.png)
+                              into the App Group at init; prunes the legacy per-agent PNGs.
   ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
-                              a per-agent PNG into the App Group container so VibezShield (and
+                              the Claude PNG into the App Group container so VibezShield (and
                               the NSE) can engage the shield without running ImageRenderer.
   Components.swift            Shared design-system views (pill toggle, top bar, blocked-app
                               card, recent-trigger row) + the TriggerEvent model.
@@ -72,8 +89,13 @@ Vibez/                        Main iOS app target.
                               countdown bound to ScreenTimeManager.pendingTriggers.
   SettingsView.swift          Settings sheet: app picker, block durations, re-pair the Vibez
                               ID, appearance override.
-  Mascots.swift               Vector mascots — Claude (pixel critter) + Codex (cloud bot).
-  Theme.swift                 Color palette + agent→accent mapping.
+  Mascots.swift               Vector mascot — Claude (pixel critter). The Codex cloud-bot
+                              and all Codex theming are deleted (2026-06-05): the app renders
+                              Claude visuals regardless of which agent pings. Codex pushes
+                              still flow ("cx" tag, recent-trigger chips, blocking) — only
+                              the visual identity is gone.
+  Theme.swift                 Color palette, pinned to the Claude accent (Theme.make(), no
+                              agent param; the Agent enum is gone).
   AnalyticsTracker.swift      Per-day usage stats (conversations, replies, ping counts);
                               resets at local midnight. Feeds ContentView's analytics panel.
   TriggerStore.swift          Persists recent triggers (capped at 100) for the Recent
@@ -85,8 +107,9 @@ Vibez/                        Main iOS app target.
   GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
 VibezShield/                  Shield Configuration Extension (separate target). Reads
                               ShieldState from the App Group and loads the host-rendered
-                              per-agent PNG from the App Group container into
-                              ShieldConfiguration.icon. Deliberately NO SwiftUI/ImageRenderer
+                              Claude PNG from the App Group container into
+                              ShieldConfiguration.icon (the dict's `agent` field is parsed
+                              but no longer drives visuals). Deliberately NO SwiftUI/ImageRenderer
                               here (MainActor-isolated, traps in the extension); all rendering
                               lives in the host's ShieldCardRenderer. Falls back to a
                               text-only shield when the PNG is missing.
