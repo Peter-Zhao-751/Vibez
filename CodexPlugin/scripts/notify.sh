@@ -82,6 +82,53 @@ clamp_field() {
     fi
 }
 
+# Per-session block debounce. An agent can fire several block-type
+# events for one conversation within seconds — sequential question
+# asks before the user answers the first, or a Stop landing right
+# after the user's last reply. The first shield:on of a burst blocks
+# + banners the phone; followers inside the window are pure noise
+# (the phone is already blocked, or the user literally just replied
+# at this Mac). A shield:on send is therefore SKIPPED when ANY event
+# for the same session was sent — or suppressed — within the last
+# VIBEZ_BLOCK_DEBOUNCE_SECONDS. shield:off (replies) always sends:
+# it's what unblocks the phone; it just refreshes the stamp, which
+# is what catches the trailing "done" right after the last answer.
+# Stamp files hold an epoch second; 0 disables the debounce.
+DEBOUNCE_SECONDS="${VIBEZ_BLOCK_DEBOUNCE_SECONDS:-5}"
+case "${DEBOUNCE_SECONDS}" in
+    ''|*[!0-9]*) DEBOUNCE_SECONDS=5 ;;
+esac
+
+lastevent_path() {
+    local sid="$1"
+    [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
+    printf '%s/lastevent.%s' "${CONFIG_DIR}" "${sid}"
+}
+
+mark_event() {
+    local sid="$1" path
+    path="$(lastevent_path "${sid}")" || return 0
+    date +%s >"${path}" 2>/dev/null || true
+}
+
+within_debounce_window() {
+    local sid="$1" path ts now delta
+    [ "${DEBOUNCE_SECONDS}" -gt 0 ] || return 1
+    path="$(lastevent_path "${sid}")" || return 1
+    [ -f "${path}" ] || return 1
+    ts="$(tr -cd '0-9' <"${path}" 2>/dev/null)"
+    [ -n "${ts}" ] || return 1
+    now="$(date +%s)"
+    delta="$((now - ts))"
+    # A future-dated stamp (clock stepped backward mid-session) must
+    # not debounce — a negative delta would pass -lt until wall-clock
+    # catches up, eating every block for the session in the meantime.
+    # Check-then-stamp is also not atomic across hook processes: two
+    # near-simultaneous events can both pass and both send. Accepted —
+    # worst case is the pre-debounce behavior, one extra banner.
+    [ "${delta}" -ge 0 ] && [ "${delta}" -lt "${DEBOUNCE_SECONDS}" ]
+}
+
 # POST a Vibez payload to the backend's /notify endpoint. Title and
 # body are required; the four trailing args become the event / shield /
 # session / agent fields of the JSON payload (omitted when empty).
@@ -105,6 +152,16 @@ post_vibez() {
         return 0
     fi
 
+    # Same-conversation debounce: skip block-type sends fired within
+    # the window of this session's last event. Suppressed sends still
+    # refresh the stamp (rolling window), so a machine-gun burst stays
+    # silent for its whole run, not just its first few seconds.
+    if [ "${shield}" = "on" ] && within_debounce_window "${session}"; then
+        mark_event "${session}"
+        log "debounced: ${title} (event=${event} session=${session})"
+        return 0
+    fi
+
     local payload
     payload=$(jq -nc \
         --arg vibezId "${VIBEZ_ID}" \
@@ -120,12 +177,18 @@ post_vibez() {
          + (if $session != "" then {session:$session} else {} end)
          + (if $agent   != "" then {agent:$agent}     else {} end)')
 
-    curl -fsS --max-time 5 \
+    # Stamp only on success — if the burst's first send failed, the
+    # phone never blocked, and eating the followers would silence the
+    # entire burst.
+    if curl -fsS --max-time 5 \
         -H "content-type: application/json" \
         -X POST -d "${payload}" \
-        "${BACKEND_URL}/notify" >/dev/null 2>&1 \
-        && log "sent: ${title} (event=${event})" \
-        || log "send failed: ${title} (event=${event})"
+        "${BACKEND_URL}/notify" >/dev/null 2>&1; then
+        log "sent: ${title} (event=${event})"
+        mark_event "${session}"
+    else
+        log "send failed: ${title} (event=${event})"
+    fi
 }
 
 # Codex has no hook that fires on the user's response to a PermissionRequest
@@ -348,6 +411,10 @@ case "${EVENT}" in
             log "session-start (Vibez ID exists)"
         fi
         [ -f "${LEGACY_TOPIC_FILE}" ] && rm -f "${LEGACY_TOPIC_FILE}" 2>/dev/null || true
+        # Sweep stale debounce stamps so dead sessions don't pile up.
+        # (BSD find: -mtime +1 deletes after ~2 days. Stamps go inert
+        # seconds after the window closes anyway — this is hygiene.)
+        find "${CONFIG_DIR}" -maxdepth 1 -name 'lastevent.*' -mtime +1 -delete 2>/dev/null || true
         ;;
 
     permission-request)
@@ -555,6 +622,31 @@ case "${EVENT}" in
         long_field="$(printf 'a%.0s' $(seq 1 150))"
         check_eq "clamp-field-caps"   "$(clamp_field "${long_field}" 100)" "${long_field:0:99}…"
         check_eq "clamp-field-passes" "$(clamp_field "short" 100)" "short"
+
+        # Debounce predicate — exercised against a throwaway CONFIG_DIR
+        # so a selftest never touches real ~/.config/vibez state, and a
+        # pinned window so an env override can't skew the stale test.
+        # (LOG_FILE was resolved at startup, so logging is unaffected.)
+        dbprobe() {
+            if within_debounce_window "$1"; then printf 'debounced'; else printf 'send'; fi
+        }
+        saved_debounce="${DEBOUNCE_SECONDS}"
+        DEBOUNCE_SECONDS=5
+        CONFIG_DIR="$(mktemp -d)"
+        check_eq "debounce-no-stamp"    "$(dbprobe sess1)" "send"
+        mark_event "sess1"
+        check_eq "debounce-fresh-stamp" "$(dbprobe sess1)" "debounced"
+        printf '%s' "$(( $(date +%s) - 60 ))" >"${CONFIG_DIR}/lastevent.sess2"
+        check_eq "debounce-stale-stamp" "$(dbprobe sess2)" "send"
+        printf 'junk' >"${CONFIG_DIR}/lastevent.sess3"
+        check_eq "debounce-junk-stamp"  "$(dbprobe sess3)" "send"
+        printf '%s' "$(( $(date +%s) + 60 ))" >"${CONFIG_DIR}/lastevent.sess4"
+        check_eq "debounce-future-stamp" "$(dbprobe sess4)" "send"
+        check_eq "debounce-nosid"       "$(dbprobe nosid)" "send"
+        DEBOUNCE_SECONDS=0
+        check_eq "debounce-disabled"    "$(dbprobe sess1)" "send"
+        DEBOUNCE_SECONDS="${saved_debounce}"
+        rm -rf "${CONFIG_DIR}"
 
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi

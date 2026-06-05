@@ -177,6 +177,15 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   and `VibezPushService/NotificationService.swift` (the NSE, which also engages the shield).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
 - **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
+- **Same-conversation block debounce (both plugins, mirrored):** `notify.sh` skips a
+  `shield:on` send when ANY event for the same session was sent (or suppressed) within
+  `VIBEZ_BLOCK_DEBOUNCE_SECONDS` (default 5s, rolling window, `0` disables; stamp file
+  `~/.config/vibez/lastevent.<sid>`, stamped only on curl success). `shield:off` always
+  sends (it unblocks the phone) but refreshes the stamp — that's what silences the
+  trailing `done`/re-ask right after the user's last reply. First ask of a burst still
+  blocks + banners with the full timer. Known accepted edges: concurrent hooks can race
+  the stamp (worst case = one extra banner), and a genuinely new ask <5s after a reply
+  is silenced (user is at the Mac at that moment).
 - **Firestore database is named "tokens" (non-default).** Always use `getFirestore("tokens")` on the server; the iOS app never touches Firestore directly — it goes through `registerPushToken`.
 - **All Cloud Functions are deployed with `{invoker: "public"}`.** Gen-2 functions are Cloud Run services that default to authenticated; we explicitly open them.
 - **Backend abuse limits (design spec 2026-06-04):** `/notify` and

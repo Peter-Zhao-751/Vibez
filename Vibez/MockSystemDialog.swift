@@ -10,7 +10,7 @@
 //  one-line reason the permission matters.
 //
 //  Visuals deliberately copy the iOS 26 system alert (left-aligned
-//  title/body, side-by-side capsule buttons, ~306pt card) instead of
+//  title/body, side-by-side capsule buttons, 320pt card) instead of
 //  the app theme, so the rehearsal matches what iOS is about to show.
 //  Button ORDER and prominence are per-dialog — notifications puts
 //  Allow right; Screen Time puts Continue LEFT with a prominent blue
@@ -21,12 +21,25 @@
 
 import SwiftUI
 
+private enum ApplePermissionAlertMetrics {
+    static let cardWidth: CGFloat = 320
+    static let cornerRadius: CGFloat = 30
+    static let horizontalInset: CGFloat = 22
+    static let topInset: CGFloat = 24
+    static let bottomInset: CGFloat = 20
+    static let titleBodySpacing: CGFloat = 7
+    static let buttonTopSpacing: CGFloat = 16
+    static let buttonSpacing: CGFloat = 8
+    static let buttonHeight: CGFloat = 44
+    static let buttonCornerRadius: CGFloat = 22
+}
+
 struct MockSystemDialog: View {
     struct DialogButton {
         let label: String
         /// Blue-filled capsule (iOS 26 "prominent" style).
         var prominent = false
-        /// The practice-tap target: pulses, and fires onConfirm.
+        /// The practice-tap target: fires onConfirm.
         var isConfirm = false
     }
 
@@ -68,29 +81,40 @@ struct MockSystemDialog: View {
     }
 
     private var alertCard: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: ApplePermissionAlertMetrics.titleBodySpacing) {
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(.primary)
             Text(message)
-                .font(.system(size: 13))
+                .font(.system(size: 15))
                 .foregroundStyle(.secondary)
 
-            HStack(spacing: 8) {
+            HStack(spacing: ApplePermissionAlertMetrics.buttonSpacing) {
                 ForEach(Array(buttons.enumerated()), id: \.offset) { _, button in
                     buttonView(button)
                 }
             }
-            .padding(.top, 16)
+            .padding(.top, ApplePermissionAlertMetrics.buttonTopSpacing)
         }
         .multilineTextAlignment(.leading)
-        .padding(.horizontal, 22)
-        .padding(.top, 24)
-        .padding(.bottom, 20)
-        .frame(width: 316)
+        .padding(.horizontal, ApplePermissionAlertMetrics.horizontalInset)
+        .padding(.top, ApplePermissionAlertMetrics.topInset)
+        .padding(.bottom, ApplePermissionAlertMetrics.bottomInset)
+        .frame(width: ApplePermissionAlertMetrics.cardWidth)
         .background(
             .regularMaterial,
-            in: RoundedRectangle(cornerRadius: 30, style: .continuous)
+            in: RoundedRectangle(
+                cornerRadius: ApplePermissionAlertMetrics.cornerRadius,
+                style: .continuous
+            )
         )
+        .overlay {
+            RoundedRectangle(
+                cornerRadius: ApplePermissionAlertMetrics.cornerRadius,
+                style: .continuous
+            )
+            .strokeBorder(.white.opacity(0.12), lineWidth: 1)
+        }
     }
 
     @ViewBuilder
@@ -104,51 +128,32 @@ struct MockSystemDialog: View {
             }
         } label: {
             Text(button.label)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(size: 17, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .foregroundStyle(
                     button.prominent ? Color.white : Color.primary
                 )
-                .frame(maxWidth: .infinity, minHeight: 44)
+                .frame(maxWidth: .infinity, minHeight: ApplePermissionAlertMetrics.buttonHeight)
                 .background(
-                    Capsule().fill(
+                    RoundedRectangle(
+                        cornerRadius: ApplePermissionAlertMetrics.buttonCornerRadius,
+                        style: .continuous
+                    )
+                    .fill(
                         button.prominent
                             ? Color(uiColor: .systemBlue)
-                            : Color.primary.opacity(0.06)
+                            : Color(uiColor: .secondarySystemFill)
                     )
                 )
-                .overlay {
-                    if button.isConfirm {
-                        pulseRing
-                    }
-                }
-                .contentShape(Capsule())
-        }
-        .buttonStyle(.plain)
-    }
-
-    /// Soft repeating pulse around the confirm button — the "tap me"
-    /// affordance from the approved design (option A). Driven by
-    /// TimelineView, NOT a repeatForever withAnimation: the previous
-    /// version animated layout (padding) forever, which kept the
-    /// button's subtree perpetually re-laying-out — UIKit swallowed
-    /// real touches on the moving control until an unrelated state
-    /// change (the deny shake) interrupted the animation, so Continue
-    /// only "started working" after a Don't Allow tap. A timeline
-    /// redraw is pure drawing: no transactions to leak, no layout to
-    /// animate, and the shape inset expands uniformly on every side.
-    private var pulseRing: some View {
-        TimelineView(.animation) { context in
-            let t = context.date.timeIntervalSinceReferenceDate
-            let phase = t.truncatingRemainder(dividingBy: 1.6) / 1.6
-            let eased = 1 - pow(1 - phase, 2)   // easeOut
-            Capsule()
-                .inset(by: CGFloat(-1 - 7 * eased))
-                .stroke(
-                    Color(uiColor: .systemBlue).opacity(0.55 * (1 - eased)),
-                    lineWidth: 2
+                .contentShape(
+                    RoundedRectangle(
+                        cornerRadius: ApplePermissionAlertMetrics.buttonCornerRadius,
+                        style: .continuous
+                    )
                 )
         }
-        .allowsHitTesting(false)
+        .buttonStyle(.plain)
     }
 }
 
