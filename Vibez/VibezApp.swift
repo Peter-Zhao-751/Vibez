@@ -122,6 +122,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         fetchCompletionHandler completionHandler: @escaping (UIBackgroundFetchResult) -> Void
     ) {
         let keys = userInfo.keys.map { String(describing: $0) }.joined(separator: ",")
+        // Mirrors acceptPushUserInfo's aps.alert-first dig — log-only,
+        // not authoritative; keep the precedence in sync.
         let apsAlert = ((userInfo["aps"] as? [String: Any])?["alert"])
             as? [String: Any]
         let pushTitle = (apsAlert?["title"] as? String)

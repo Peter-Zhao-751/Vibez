@@ -171,7 +171,7 @@ final class NotifyClient {
         let agentStr = msg.agent.map { $0.rawValue } ?? "nil"
         let sessionStr = msg.sessionId ?? "nil"
         log.info(
-            "Parsed push: event=\(eventStr, privacy: .public) shield=\(shieldStr, privacy: .public) session=\(sessionStr, privacy: .public) agent=\(agentStr, privacy: .public) drain=\(wasBackgroundEngaged, privacy: .public)"
+            "Parsed push: title=\(msg.title, privacy: .public) event=\(eventStr, privacy: .public) shield=\(shieldStr, privacy: .public) session=\(sessionStr, privacy: .public) agent=\(agentStr, privacy: .public) drain=\(wasBackgroundEngaged, privacy: .public)"
         )
 
         // Engage the shield here, NOT in ContentView.handleIncoming.
