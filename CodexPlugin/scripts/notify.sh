@@ -66,6 +66,19 @@ ensure_vibez_id() {
     fi
 }
 
+# Hard-cap a payload field at N chars with a trailing ellipsis. Call
+# sites already clip for display (72/160); this is the defensive floor
+# inside post_vibez itself so no future call site can bypass clipping.
+# Server mirrors these caps (title 100 / body 200) and clamps too.
+clamp_field() {
+    local raw="$1" max="$2"
+    if [ "${#raw}" -gt "${max}" ]; then
+        printf '%s…' "${raw:0:$((max - 1))}"
+    else
+        printf '%s' "${raw}"
+    fi
+}
+
 # POST a Vibez payload to the backend's /notify endpoint. Title and
 # body are required; the four trailing args become the event / shield /
 # session / agent fields of the JSON payload (omitted when empty).
@@ -76,6 +89,9 @@ post_vibez() {
     local shield="${4:-}"
     local session="${5:-}"
     local agent="${6:-}"
+    title="$(clamp_field "${title}" 100)"
+    body="$(clamp_field "${body}" 200)"
+    session="${session:0:128}"
 
     if [ -z "${VIBEZ_ID}" ]; then
         log "skip: no Vibez ID configured (event=${EVENT})"
@@ -508,6 +524,16 @@ case "${EVENT}" in
                 printf 'FAIL %s (expected=%s got=%s)\n' "$name" "$expected" "$got"
             fi
         }
+        check_eq() {
+            local name="$1" got="$2" expected="$3"
+            if [ "${got}" = "${expected}" ]; then
+                pass=$((pass+1))
+                printf 'PASS %s\n' "$name"
+            else
+                fail=$((fail+1))
+                printf 'FAIL %s (expected=[%s] got=[%s])\n' "$name" "$expected" "$got"
+            fi
+        }
         check "trailing-q"       "Should I commit this?"          1
         check "mid-q"            "I changed X. Did that work?"     1
         check "no-q"             "I committed the change."         0
@@ -522,6 +548,11 @@ case "${EVENT}" in
         check "quoted-q-only"      "Set placeholder to \"Should I commit?\" — done." 0
         check "quoted-plus-real-q" "Renamed \`foo?\`. Anything else?"                1
         check "smart-quoted-q"     "Updated to “Should I commit?” — done."           0
+
+        long_field="$(printf 'a%.0s' $(seq 1 150))"
+        check_eq "clamp-field-caps"   "$(clamp_field "${long_field}" 100)" "${long_field:0:99}…"
+        check_eq "clamp-field-passes" "$(clamp_field "short" 100)" "short"
+
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi
         ;;
