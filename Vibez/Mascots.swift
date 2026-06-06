@@ -4,8 +4,10 @@
 //
 //  The pixel critter (Claude) mascot, translated from the reference
 //  design's inline SVG. Breathes when listening, sleeps when not, and
-//  randomly cycles eye expressions. (The Codex cloud-bot is gone —
-//  the app is Claude-themed regardless of which agent pings.)
+//  randomly cycles eye expressions. The Codex cloud-bot vector stays
+//  deleted — the Codex logo is a PNG asset (codex.imageset) used on
+//  the blocking surfaces (BlockedOverlay + shield card); everything
+//  else in the app stays Claude-themed.
 //
 
 import SwiftUI

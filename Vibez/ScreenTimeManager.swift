@@ -829,9 +829,9 @@ final class ScreenTimeManager {
             case .codex:  agent = .codex
             }
         } else {
-            // Untagged ntfy ping — no agent context. The value is pure
-            // data now (the shield renders Claude visuals regardless);
-            // "both" keeps the schema's untagged convention.
+            // Untagged ntfy ping — no agent context. "both" keeps the
+            // schema's untagged convention; the renderer/extension map
+            // it to the Claude card.
             agent = .both
         }
 
