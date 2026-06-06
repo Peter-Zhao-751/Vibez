@@ -35,9 +35,14 @@ private enum ShieldCardTheme {
     static let fgMuteOnDark  = Color.white.opacity(0.65)
     static let fgMuteOnLight = Color.black.opacity(0.55)
 
-    /// Single Claude accent — every shield renders Claude visuals
-    /// regardless of which agent's push engaged it.
-    static let accent = Color(red: 0.95, green: 0.45, blue: 0.20)
+    /// Per-agent accent: vivid blue behind the Codex logo, Claude
+    /// orange for everything else (claude/both/none).
+    static func accent(_ agent: ShieldState.Agent) -> Color {
+        switch agent {
+        case .codex: Color(red: 0.29, green: 0.48, blue: 1.00)
+        default:     Color(red: 0.95, green: 0.45, blue: 0.20)
+        }
+    }
 }
 
 /// Square image carrying just the mascot — iOS renders it as the
@@ -47,6 +52,8 @@ private enum ShieldCardTheme {
 private struct ShieldCardView: View {
     let state: ShieldState
 
+    private var accent: Color { ShieldCardTheme.accent(state.agent) }
+
     var body: some View {
         ZStack {
             // Soft circular accent glow behind the mascot — gives the
@@ -54,16 +61,35 @@ private struct ShieldCardView: View {
             Circle()
                 .fill(
                     RadialGradient(
-                        colors: [ShieldCardTheme.accent.opacity(0.28), .clear],
+                        colors: [accent.opacity(0.28), .clear],
                         center: .center,
                         startRadius: 0,
                         endRadius: 180
                     )
                 )
 
-            ShieldCardClaudePixel(size: 280)
+            ShieldCardMascot(agent: state.agent, size: 280)
         }
         .frame(width: 400, height: 400)
+    }
+}
+
+/// Codex renders the logo asset; everything else renders the Claude
+/// pixel critter. Mirrors BlockedOverlay's per-message mascot pick.
+private struct ShieldCardMascot: View {
+    let agent: ShieldState.Agent
+    var size: CGFloat = 110
+
+    var body: some View {
+        switch agent {
+        case .codex:
+            Image("codex")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: size, height: size)
+        case .claude, .both, .none:
+            ShieldCardClaudePixel(size: size)
+        }
     }
 }
 
@@ -80,7 +106,7 @@ private struct ShieldCardClaudePixel: View {
     var body: some View {
         ZStack(alignment: .topLeading) {
             ClaudeBodyShape()
-                .fill(ShieldCardTheme.accent)
+                .fill(ShieldCardTheme.accent(.claude))
             ClaudeEyesShape()
                 .fill(Self.eyeColor)
         }
@@ -106,5 +132,15 @@ private struct ClaudeEyesShape: Shape {
         body: "Should I bump the minor version before publishing, or roll the patch and ship a follow-up?",
         expiresAt: nil,
         dark: true
+    ))
+}
+
+#Preview("Codex · light") {
+    ShieldCardView(state: ShieldState(
+        agent: .codex,
+        title: "Wire up SSE handler",
+        body: "Need confirmation before I rip out the polling fallback.",
+        expiresAt: nil,
+        dark: false
     ))
 }
