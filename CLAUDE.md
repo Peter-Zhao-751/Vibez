@@ -1,6 +1,6 @@
 # Vibez
 
-iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone whenever Claude Code or Codex finishes a task or asks for input — turning agent idle time into focus time instead of doomscroll time.
+iOS app that blocks distracting apps (Instagram, TikTok, etc.) whenever Claude Code or Codex finishes a task or asks for input — turning agent idle time into focus time instead of doomscroll time. Live on the App Store, free, as **"AI Coding Focus - Vibez"** (https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 
 ## Status
 
@@ -8,7 +8,7 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) on Peter's iPhone
 - **Firebase-backed push pipeline working end-to-end.** Mac plugin (Claude Code or Codex) POSTs lifecycle events to a Firebase Cloud Function (`/notify`); the function fans out via FCM to every device registered to the user's Vibez ID. Push lands while Vibez is suspended (the whole reason FCM replaces ntfy). The four-word Vibez ID pairs Mac → phone.
 - **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and shows a custom shield (host-rendered mascot PNG + push title/body, tinted accent background, "Close" button). The PNG is rendered on the host (`ShieldCardRenderer`), not in the extension.
 - **ntfy is gone.** WebSocket subscription, ntfy URL UI, push-vibez.py, and the topic-based plugin path are all removed. One push path: plugin → Firebase → FCM → APNs → Vibez.
-- **Next phase: Family Controls Distribution Request + App Store review.** Backend already runs on Peter's Firebase project; .p8 lives in Firebase Cloud Messaging, never ships to users.
+- **Shipped: live on the App Store (2026-06-06, v1.0, free).** Family Controls Distribution Request and App Store review were both approved within days. Backend runs on Peter's Firebase project; .p8 lives in Firebase Cloud Messaging, never ships to users.
 
 ## File map
 
@@ -78,24 +78,29 @@ Vibez/                        Main iOS app target.
                               (NtfyMessage name kept deliberately — renaming churns many files).
   ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
                               ManagedSettingsStore shield apply/remove, App Group writer.
-                              Pre-renders the single Claude shield PNG (shield-claude.png)
-                              into the App Group at init; prunes the legacy per-agent PNGs.
+                              Pre-renders the per-agent shield PNGs (shield-claude.png,
+                              shield-codex.png) into the App Group at init; prunes legacy
+                              renders (shield.png, -both, -none).
   ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
-                              the Claude PNG into the App Group container so VibezShield (and
-                              the NSE) can engage the shield without running ImageRenderer.
+                              the per-agent PNGs (Claude pixel critter / Codex logo + blue
+                              glow) into the App Group container so VibezShield (and the NSE)
+                              can engage the shield without running ImageRenderer.
   Components.swift            Shared design-system views (pill toggle, top bar, blocked-app
                               card, recent-trigger row) + the TriggerEvent model.
   BlockedOverlay.swift        Full-screen in-app overlay shown when an agent pings; live
-                              countdown bound to ScreenTimeManager.pendingTriggers.
+                              countdown bound to ScreenTimeManager.pendingTriggers. Codex
+                              pings render the codex logo + periwinkle accent; everything
+                              else stays Claude.
   SettingsView.swift          Settings sheet: app picker, block durations, re-pair the Vibez
                               ID, appearance override.
   Mascots.swift               Vector mascot — Claude (pixel critter). The Codex cloud-bot
-                              and all Codex theming are deleted (2026-06-05): the app renders
-                              Claude visuals regardless of which agent pings. Codex pushes
-                              still flow ("cx" tag, recent-trigger chips, blocking) — only
-                              the visual identity is gone.
+                              VECTOR stays deleted (2026-06-05), but the Codex identity is
+                              back on the two blocking surfaces (2026-06-06): BlockedOverlay
+                              and the shield card render the codex.imageset logo + blues
+                              when a "cx" push engages them. Everywhere else stays Claude.
   Theme.swift                 Color palette, pinned to the Claude accent (Theme.make(), no
-                              agent param; the Agent enum is gone).
+                              agent param; the Agent enum is gone). Theme.codexBlue (#8c9ce8)
+                              is the one Codex constant — BlockedOverlay's per-message accent.
   AnalyticsTracker.swift      Per-day usage stats (conversations, replies, ping counts);
                               resets at local midnight. Feeds ContentView's analytics panel.
   TriggerStore.swift          Persists recent triggers (capped at 100) for the Recent
@@ -107,12 +112,14 @@ Vibez/                        Main iOS app target.
   GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
 VibezShield/                  Shield Configuration Extension (separate target). Reads
                               ShieldState from the App Group and loads the host-rendered
-                              Claude PNG from the App Group container into
-                              ShieldConfiguration.icon (the dict's `agent` field is parsed
-                              but no longer drives visuals). Deliberately NO SwiftUI/ImageRenderer
-                              here (MainActor-isolated, traps in the extension); all rendering
-                              lives in the host's ShieldCardRenderer. Falls back to a
-                              text-only shield when the PNG is missing.
+                              per-agent PNG (shield-claude.png / shield-codex.png) into
+                              ShieldConfiguration.icon; the dict's `agent` field drives icon,
+                              Close-button accent, and background wash again (Codex = blue/navy,
+                              2026-06-06). A missing Codex PNG or an untagged ping falls back
+                              to the Claude card. Deliberately NO SwiftUI/ImageRenderer here
+                              (MainActor-isolated, traps in the extension); all rendering lives
+                              in the host's ShieldCardRenderer. Falls back to a text-only
+                              shield when the PNG is missing.
   ShieldConfigurationExtension.swift  ShieldConfigurationDataSource subclass; per-open tally.
   ShieldCard.swift                    Agent enum, ShieldState reader, theme constants.
   VibezShield.entitlements            family-controls + application-groups
@@ -186,7 +193,7 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
 
 - **No bundle-ID presets.** Apple does not let apps specify "Instagram + TikTok" by name. The user picks via `FamilyActivityPicker`; the returned `ApplicationToken`s are opaque.
 - **Real device only for shielding.** `ManagedSettingsStore` shields are no-ops in the simulator. `xcodebuild` against `iphonesimulator26.4` is fine for compile checks but the feature itself only works on hardware.
-- **Paid ADP required for development on device, not just for App Store.** Peter is enrolled. App Store distribution additionally needs the Family Controls Distribution Request form (~3-week review) — not yet submitted.
+- **Paid ADP required for development on device, not just for App Store.** Peter is enrolled. The Family Controls Distribution Request is granted for all three bundle IDs (approval took ~1 minute, not the commonly-reported weeks) — don't re-request it.
 - **APNs auth key must be enabled for BOTH Sandbox and Production at Apple Developer Center.** Single-environment keys cause `messaging/third-party-auth-error` → `BadEnvironmentKeyInToken` on debug builds (sandbox tokens). Always create keys with both environments enabled.
 
 ## Conventions
@@ -198,6 +205,12 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   is mirrored across three sites — keep them in sync: `Vibez/ScreenTimeManager.swift`
   (`ShieldState.asDict`, writer), `VibezShield/ShieldCard.swift` (`ShieldState.read`, reader),
   and `VibezPushService/NotificationService.swift` (the NSE, which also engages the shield).
+- **Agent accent colors are mirrored across two targets** — Codex RGB(0.29, 0.48, 1.00)
+  and Claude RGB(0.95, 0.45, 0.20) live in BOTH `Vibez/ShieldCardRenderer.swift`
+  (`ShieldCardTheme`) and `VibezShield/ShieldCard.swift` (`accentUIColor` /
+  `backgroundUIColor`). Separate targets can't share source — keep them in sync when
+  changing either. (`Theme.codexBlue` #8c9ce8 is deliberately different: the in-app
+  overlay's softer periwinkle.)
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
 - **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
 - **Same-conversation block debounce (both plugins, mirrored):** `notify.sh` skips a
@@ -259,8 +272,14 @@ The repo runs Claude Code sessions inside `.claude/worktrees/<name>/` on a `clau
 4. Mac: every subsequent hook (Stop, AskUserQuestion, etc.) calls `post_vibez` → POST to `/notify` with the Vibez ID and lifecycle payload.
 5. Server: `/notify` queries Firestore for all devices where `vibezId == X`, fans out via `getMessaging().sendEachForMulticast()`. APNs delivers to the phone, AppDelegate parses the payload, `NotifyClient.acceptPushUserInfo` publishes `lastMessage`, `ContentView.handleIncoming` raises overlay + shield.
 
-### Roadmap to App Store ship
+### App Store status
 
-1. Family Controls Distribution Request (~3-week Apple review). Not yet submitted.
-2. App Check on the Cloud Functions (currently `invoker: "public"`; Vibez ID is the only secret).
-3. App Store review (~1-week typical).
+Shipped 2026-06-06: free, v1.0, listed as **"AI Coding Focus - Vibez"**
+(https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780). Family Controls
+Distribution Request and App Store review were both approved within days of submission.
+Update submissions are the ordinary flow: archive (Release, Any iOS Device), upload,
+submit — keep the aps-environment Debug/Release entitlements split intact.
+
+Remaining post-launch hardening:
+
+1. App Check on the Cloud Functions (currently `invoker: "public"`; Vibez ID is the only secret).
