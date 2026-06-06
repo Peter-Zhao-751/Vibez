@@ -454,44 +454,47 @@ final class ScreenTimeManager {
         }
     }
 
-    /// The single Claude mascot PNG, written to the App Group container.
-    /// VibezShield (extension) reads `shield-claude.png` and slots it
-    /// into `ShieldConfiguration.icon` regardless of which agent's push
-    /// engaged the shield — the Codex theme/mascot is gone. Pre-rendering
-    /// here means the extension never has to run SwiftUI/ImageRenderer
-    /// (which can trap in nonisolated extension contexts) AND
-    /// VibezPushService (NSE) doesn't have to render either — both just
-    /// write the `shieldState` dict, and the PNG is already on disk.
+    /// The per-agent mascot PNGs, written to the App Group container.
+    /// VibezShield (extension) reads `shield-<agent>.png` and slots it
+    /// into `ShieldConfiguration.icon` — Claude pixel critter or Codex
+    /// logo + blue glow, picked by the agent that engaged the shield
+    /// (untagged pings fall back to the Claude card in the extension).
+    /// Pre-rendering here means the extension never has to run
+    /// SwiftUI/ImageRenderer (which can trap in nonisolated extension
+    /// contexts) AND VibezPushService (NSE) doesn't have to render
+    /// either — both just write the `shieldState` dict, and the PNGs
+    /// are already on disk.
     ///
-    /// Idempotent: skips when the PNG already exists. Bump the
-    /// filename (or wipe the App Group container) when the visual
-    /// changes.
+    /// Idempotent: skips PNGs that already exist. Bump the filenames
+    /// (or wipe the App Group container) when the visuals change.
     private func prerenderAgentShieldsIfNeeded() {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return }
 
-        // Legacy files: the pre-per-agent single PNG, and the per-agent
-        // renders from when each agent had its own card. Safe to drop —
-        // VibezShield only loads shield-claude.png now.
-        for stale in ["shield.png", "shield-codex.png", "shield-both.png", "shield-none.png"] {
+        // Legacy files: the pre-per-agent single PNG, and the renders
+        // for agents that no longer get their own card (both/none use
+        // the extension's Claude fallback).
+        for stale in ["shield.png", "shield-both.png", "shield-none.png"] {
             try? FileManager.default.removeItem(
                 at: container.appendingPathComponent(stale)
             )
         }
 
-        let url = container.appendingPathComponent("shield-claude.png")
-        guard !FileManager.default.fileExists(atPath: url.path) else { return }
-        let state = ShieldState(
-            agent: .claude,
-            title: nil,
-            body: nil,
-            expiresAt: nil,
-            dark: true
-        )
-        if let png = renderShieldCardPNG(state: state) {
-            try? png.write(to: url)
-            shieldLog.info("prerendered shield-claude.png")
+        for agent in [ShieldState.Agent.claude, .codex] {
+            let url = container.appendingPathComponent("shield-\(agent.rawValue).png")
+            guard !FileManager.default.fileExists(atPath: url.path) else { continue }
+            let state = ShieldState(
+                agent: agent,
+                title: nil,
+                body: nil,
+                expiresAt: nil,
+                dark: true
+            )
+            if let png = renderShieldCardPNG(state: state) {
+                try? png.write(to: url)
+                shieldLog.info("prerendered shield-\(agent.rawValue, privacy: .public).png")
+            }
         }
     }
 
