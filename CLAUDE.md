@@ -61,7 +61,7 @@ Vibez/                        Main iOS app target.
                               (practice-tap mock dialogs w/ denied-state remediation),
                               plugin install (shows BOTH agents' commands), Vibez ID
                               pairing, how-it-works + app version. The agent-pick page
-                              and the "vibez.agent" pref are gone — Claude theme always.
+                              and the "vibez.agent" pref are gone — onboarding renders the Claude theme always.
   MockSystemDialog.swift      Practice-tap replica of the iOS permission alert — confirm
                               fires the real prompt; Don't Allow wiggles + hints. System
                               look on purpose (not app theme).
@@ -80,7 +80,7 @@ Vibez/                        Main iOS app target.
                               ManagedSettingsStore shield apply/remove, App Group writer.
                               Pre-renders the per-agent shield PNGs (shield-claude.png,
                               shield-codex.png) into the App Group at init; prunes legacy
-                              renders (shield.png, -both, -none).
+                              renders (shield.png, shield-both.png, shield-none.png).
   ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
                               the per-agent PNGs (Claude pixel critter / Codex logo + blue
                               glow) into the App Group container so VibezShield (and the NSE)
