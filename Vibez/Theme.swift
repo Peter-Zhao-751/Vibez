@@ -3,9 +3,11 @@
 //  Vibez
 //
 //  Color palette. Translated from the reference design's
-//  `themeFor(agent, dark)` JS function, now pinned to the Claude
-//  accent — the Codex theme/mascot is gone (visuals only: Codex
-//  *pushes* still flow through the pipeline and block apps).
+//  `themeFor(agent, dark)` JS function, pinned to the Claude accent.
+//  The one Codex color (codexBlue) exists for the blocking surfaces
+//  only — BlockedOverlay (and the shield card, which has its own
+//  constants) go blue when a Codex push engages them; the rest of
+//  the app stays Claude.
 //
 
 import SwiftUI
@@ -88,6 +90,10 @@ struct Theme {
 
     static let claudeOrange = Color(hex: 0xdd7a52)
     static let claudeDeep   = Color(hex: 0xb85a36)
+    /// Codex periwinkle — used ONLY by BlockedOverlay's per-message
+    /// accent. The app theme stays Claude (Theme.make() has no agent
+    /// param on purpose); blocking surfaces go blue per message.
+    static let codexBlue    = Color(hex: 0x8c9ce8)
 
     static func make() -> Theme {
         let accent = claudeOrange

@@ -62,12 +62,23 @@ struct BlockedOverlay: View {
         return "Permission requested · 0:42 ago"
     }
 
+    private var isCodexMessage: Bool {
+        message?.agent == .codex
+    }
+
+    /// Per-message accent: Codex pings go periwinkle; everything else
+    /// (Claude, untagged) keeps the app's Claude orange. Colors the
+    /// radial glow + the "BLOCKING IN PROGRESS" eyebrow only.
+    private var accentColor: Color {
+        isCodexMessage ? Theme.codexBlue : theme.accent
+    }
+
     var body: some View {
         ZStack(alignment: .top) {
             theme.bg
                 .overlay(
                     RadialGradient(
-                        colors: [theme.accent.opacity(colorScheme == .dark ? 0.28 : 0.20), .clear],
+                        colors: [accentColor.opacity(colorScheme == .dark ? 0.28 : 0.20), .clear],
                         center: UnitPoint(x: 0.5, y: 0.30),
                         startRadius: 0,
                         endRadius: 520
@@ -96,13 +107,21 @@ struct BlockedOverlay: View {
             VStack(spacing: 0) {
                 Spacer().frame(height: 100)
 
-                ClaudeMascot(listening: true, size: 130)
-                    .padding(.bottom, 18)
+                if isCodexMessage {
+                    Image("codex")
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 130, height: 130)
+                        .padding(.bottom, 18)
+                } else {
+                    ClaudeMascot(listening: true, size: 130)
+                        .padding(.bottom, 18)
+                }
 
                 Text("BLOCKING IN PROGRESS")
                     .font(.system(size: 11, weight: .heavy, design: .monospaced))
                     .tracking(2.4)
-                    .foregroundStyle(theme.accent)
+                    .foregroundStyle(accentColor)
                     .padding(.bottom, 10)
 
                 Text(.init(titleText))
@@ -233,9 +252,9 @@ private func previewMessage(
     .preferredColorScheme(.dark)
 }
 
-#Preview("Codex ping · Claude visuals · dark") {
-    // Codex pushes still arrive ("cx" tag) — they just render with the
-    // app's single Claude theme now.
+#Preview("Codex ping · logo + periwinkle · dark") {
+    // Codex pushes ("cx" tag) render the Codex logo + periwinkle accent
+    // on this overlay; the rest of the app stays Claude-themed.
     BlockedOverlay(
         theme: Theme.make(),
         message: previewMessage(
