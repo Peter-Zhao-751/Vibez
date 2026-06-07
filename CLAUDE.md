@@ -86,7 +86,8 @@ Vibez/                        Main iOS app target.
                               glow) into the App Group container so VibezShield (and the NSE)
                               can engage the shield without running ImageRenderer.
   Components.swift            Shared design-system views (pill toggle, top bar, blocked-app
-                              card, recent-trigger row) + the TriggerEvent model.
+                              card, recent-trigger row) + the TriggerEvent model. The row's
+                              cc/cx chip is tinted per agent (Codex = Theme.codexBlue).
   BlockedOverlay.swift        Full-screen in-app overlay shown when an agent pings; live
                               countdown bound to ScreenTimeManager.pendingTriggers. Codex
                               pings render the codex logo + periwinkle accent; everything
@@ -95,12 +96,14 @@ Vibez/                        Main iOS app target.
                               ID, appearance override.
   Mascots.swift               Vector mascot — Claude (pixel critter). The Codex cloud-bot
                               VECTOR stays deleted (2026-06-05), but the Codex identity is
-                              back on the two blocking surfaces (2026-06-06): BlockedOverlay
-                              and the shield card render the codex.imageset logo + blues
-                              when a "cx" push engages them. Everywhere else stays Claude.
+                              back on the per-ping surfaces (2026-06-06): BlockedOverlay and
+                              the shield card render the codex.imageset logo + blues, and the
+                              recent-trigger cx chip tints periwinkle, when a "cx" push
+                              engages them. Everywhere else stays Claude.
   Theme.swift                 Color palette, pinned to the Claude accent (Theme.make(), no
                               agent param; the Agent enum is gone). Theme.codexBlue (#8c9ce8)
-                              is the one Codex constant — BlockedOverlay's per-message accent.
+                              is the one Codex constant — BlockedOverlay's per-message accent
+                              + the recent-trigger cx chip.
   AnalyticsTracker.swift      Per-day usage stats (conversations, replies, ping counts);
                               resets at local midnight. Feeds ContentView's analytics panel.
   TriggerStore.swift          Persists recent triggers (capped at 100) for the Recent
