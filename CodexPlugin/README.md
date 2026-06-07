@@ -12,9 +12,15 @@ Sibling plugin: the Claude Code version lives in [`ClaudePlugin/`](../ClaudePlug
 | **SessionStart** (subsequent runs) | No | Nothing. |
 | **PermissionRequest** | Yes (in `default` / `acceptEdits` / `plan` modes) | Tool name + a short snippet of `tool_input` — e.g. "shell: rm -rf node_modules". |
 | **Stop** | Yes | Title with the cwd basename + a ~160-char excerpt of Codex's last message (`last_assistant_message`). |
-| **UserPromptSubmit** | Yes | A short excerpt of your reply — also tells the Vibez app to lift the shield for this session. |
+| **UserPromptSubmit / approval response** | Yes | A short excerpt of your reply, or an approval acknowledgement. Shell approvals lift the shield when the approved command starts instead of waiting for it to finish. |
 
 PermissionRequest pings are suppressed in `dontAsk` and `bypassPermissions` modes — those modes never show the user a prompt, so a phone ping wouldn't be actionable.
+
+Codex does not expose a lifecycle hook for the exact instant a numbered approval
+choice is submitted. For shell approvals, Vibez bridges that gap with a detached
+process watcher scoped to the Codex process tree. Denied commands never start and
+therefore do not lift the shield; `PostToolUse` remains the fallback for edits,
+MCP calls, and commands that complete too quickly to observe.
 
 ## Install
 

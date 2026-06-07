@@ -153,11 +153,11 @@ post_vibez() {
 
     if [ -z "${VIBEZ_ID}" ]; then
         log "skip: no Vibez ID configured (event=${EVENT})"
-        return 0
+        return 1
     fi
     if ! command -v jq >/dev/null 2>&1; then
         log "skip: jq not installed (event=${EVENT})"
-        return 0
+        return 1
     fi
 
     # Same-conversation debounce: skip block-type sends fired within
@@ -201,6 +201,7 @@ post_vibez() {
         -X POST -d "${payload}" \
         "${BACKEND_URL}/notify" >/dev/null 2>&1; then
         log "sent: ${title} (event=${event})"
+        return 0
     else
         log "send failed: ${title} (event=${event})"
         # Roll the claim back — shield:on only (off never claimed, and
@@ -208,18 +209,23 @@ post_vibez() {
         # phone never got this push, so the next agent event for the
         # session must not be debounced against it.
         [ "${shield}" = "on" ] && clear_event "${session}" || true
+        return 1
     fi
 }
 
 # Codex has no hook that fires on the user's response to a PermissionRequest
-# (approve/deny tap in Codex Desktop). The closest observable signal is the
-# PostToolUse on the underlying tool — but PostToolUse also fires for every
-# autonomous tool call in dontAsk/bypassPermissions sessions, which would
-# blow through the backend for nothing. To gate it, permission-request and
-# pre-tool-use(ask_user_question) drop a per-session marker; post-tool-use
-# only pushes shield-off when the marker exists, then clears it. stop and
-# user-prompt-submit also clear it so a stale marker doesn't trigger a
-# false shield-off later.
+# (approve/deny selection in Codex). PostToolUse is too late for long-running
+# shell commands because it fires only after the command completes. For Bash
+# approvals, permission-request therefore starts a detached watcher that
+# snapshots matching Codex child processes before the prompt appears and sends
+# shield:off as soon as a new matching command process starts. A denial never
+# starts the command, so it remains blocked. PostToolUse stays as the fallback
+# for fast commands, edits, MCP calls, and picker responses.
+#
+# permission-request and pre-tool-use(question picker) drop a per-session
+# marker; the first successful unblock path clears it. stop and
+# user-prompt-submit also clear it so a stale marker cannot trigger a false
+# shield-off later.
 pending_marker_path() {
     local sid="$1"
     [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
@@ -242,6 +248,173 @@ has_pending() {
     local sid="$1" path
     path="$(pending_marker_path "${sid}")" || return 1
     [ -f "${path}" ]
+}
+
+# Find the Codex process that launched this hook. The approval watcher uses
+# that process as its tree root so an unrelated command elsewhere on the Mac
+# cannot be mistaken for this approval.
+find_codex_ancestor() {
+    local pid="${PPID}" comm base lower next
+    while [ -n "${pid}" ] && [ "${pid}" -gt 1 ] 2>/dev/null; do
+        comm="$(ps -p "${pid}" -o comm= 2>/dev/null | sed -E 's/^[[:space:]]+//')"
+        base="${comm##*/}"
+        lower="$(printf '%s' "${base}" | tr '[:upper:]' '[:lower:]')"
+        case "${lower}" in
+            codex|codex-*) printf '%s' "${pid}"; return 0 ;;
+        esac
+        next="$(ps -p "${pid}" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+        case "${next}" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        pid="${next}"
+    done
+    return 1
+}
+
+# Print descendant PIDs whose process command contains the approved shell
+# command. Both strings are whitespace-normalized because ps flattens newlines
+# from multi-line shell commands.
+matching_approval_processes() {
+    local root_pid="$1" command="$2"
+    ps -axo pid=,ppid=,command= 2>/dev/null |
+        VIBEZ_ROOT_PID="${root_pid}" VIBEZ_COMMAND="${command}" awk '
+            {
+                pid = $1
+                parent[pid] = $2
+                $1 = ""
+                $2 = ""
+                sub(/^[[:space:]]+/, "")
+                text[pid] = $0
+                ids[++count] = pid
+            }
+            END {
+                root = ENVIRON["VIBEZ_ROOT_PID"]
+                needle = ENVIRON["VIBEZ_COMMAND"]
+                gsub(/[[:space:]]+/, " ", needle)
+                # ps prints post-spawn argv: the quoting the shell consumed
+                # when launching the command never appears there. Strip
+                # quotes from both sides so an approved `rg -i "a|b"`
+                # matches the spawned `rg -i a|b`. (\047 = single quote.)
+                gsub(/["\047]/, "", needle)
+                # Escalation needles arrive shlex-joined as a spawn vector
+                # ("zsh -lc <cmd>"); stdin-typed (fork) sessions never spawn
+                # that wrapper process — only the command itself shows up in
+                # ps. Try the prefix-stripped needle too.
+                bare = needle
+                sub(/^[A-Za-z0-9_.\/-]*sh -l?c /, "", bare)
+                descendant[root] = 1
+
+                # Process trees are shallow, but iterate to a fixed point so
+                # wrappers such as sandbox-exec -> zsh -> command are covered.
+                for (pass = 1; pass <= count; pass++) {
+                    changed = 0
+                    for (i = 1; i <= count; i++) {
+                        pid = ids[i]
+                        if (!descendant[pid] && descendant[parent[pid]]) {
+                            descendant[pid] = 1
+                            changed = 1
+                        }
+                    }
+                    if (!changed) break
+                }
+
+                for (i = 1; i <= count; i++) {
+                    pid = ids[i]
+                    candidate = text[pid]
+                    gsub(/[[:space:]]+/, " ", candidate)
+                    gsub(/["\047]/, "", candidate)
+                    if (pid != root && descendant[pid] &&
+                        (index(candidate, needle) > 0 || index(candidate, bare) > 0)) {
+                        print pid
+                    }
+                }
+            }
+        '
+}
+
+start_approval_watcher() {
+    local sid="$1" title="$2" tool_name="$3" command="$4"
+    local root_pid baseline state nonce
+
+    [ -n "${command}" ] || {
+        log "approval-watch: no command in payload (tool=${tool_name} session=${sid})"
+        return 0
+    }
+    root_pid="$(find_codex_ancestor)" || {
+        log "approval-watch: no Codex ancestor (session=${sid})"
+        return 0
+    }
+    baseline="$(matching_approval_processes "${root_pid}" "${command}" | tr '\n' ' ')"
+    nonce="$(date +%s).$$"
+    state="${CONFIG_DIR}/approval-watch.${sid}.${nonce}.json"
+
+    jq -nc \
+        --arg sid "${sid}" \
+        --arg title "${title}" \
+        --arg toolName "${tool_name}" \
+        --arg command "${command}" \
+        --arg rootPid "${root_pid}" \
+        --arg baseline "${baseline}" \
+        '{sid:$sid,title:$title,toolName:$toolName,command:$command,
+          rootPid:$rootPid,baseline:$baseline}' >"${state}" 2>/dev/null || return 0
+    chmod 600 "${state}" 2>/dev/null || true
+
+    log "approval-watch: started (tool=${tool_name} session=${sid})"
+    # Redirect every descriptor so Codex does not wait for the detached watcher
+    # to close the hook process pipes.
+    nohup bash "${BASH_SOURCE[0]}" _watch-approval "${state}" \
+        </dev/null >/dev/null 2>&1 &
+}
+
+watch_approval_start() {
+    local state="$1" sid title tool_name command root_pid baseline timeout deadline
+    local pid
+
+    [ -f "${state}" ] || return 0
+    sid="$(jq -r '.sid // empty' "${state}" 2>/dev/null)"
+    title="$(jq -r '.title // empty' "${state}" 2>/dev/null)"
+    tool_name="$(jq -r '.toolName // "tool"' "${state}" 2>/dev/null)"
+    command="$(jq -r '.command // empty' "${state}" 2>/dev/null)"
+    root_pid="$(jq -r '.rootPid // empty' "${state}" 2>/dev/null)"
+    baseline="$(jq -r '.baseline // empty' "${state}" 2>/dev/null)"
+    case "${root_pid}" in
+        ''|*[!0-9]*) rm -f "${state}" 2>/dev/null || true; return 0 ;;
+    esac
+
+    timeout="${VIBEZ_APPROVAL_WATCH_SECONDS:-600}"
+    case "${timeout}" in
+        ''|*[!0-9]*) timeout=600 ;;
+    esac
+    deadline="$(( $(date +%s) + timeout ))"
+
+    local end_reason="timeout"
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        if ! has_pending "${sid}"; then end_reason="pending-cleared"; break; fi
+        if ! kill -0 "${root_pid}" 2>/dev/null; then end_reason="codex-exited"; break; fi
+
+        for pid in $(matching_approval_processes "${root_pid}" "${command}"); do
+            case " ${baseline} " in
+                *" ${pid} "*) continue ;;
+            esac
+            if post_vibez "${title}" "(approved: ${tool_name})" \
+                "replied" "off" "${sid}" "cx"; then
+                clear_pending "${sid}"
+                log "approval-watch: command started (tool=${tool_name} session=${sid})"
+            else
+                # Keep pending so PostToolUse can retry after a transient
+                # network failure.
+                log "approval-watch: send failed; keeping fallback (session=${sid})"
+            fi
+            rm -f "${state}" 2>/dev/null || true
+            return 0
+        done
+        sleep 0.1
+    done
+
+    # Every non-match exit logs its reason — a watcher that never fires must
+    # be visible in the log, not indistinguishable from one that never ran.
+    log "approval-watch: ended without match (${end_reason}, tool=${tool_name} session=${sid})"
+    rm -f "${state}" 2>/dev/null || true
 }
 
 # True when the argument is a slash-command invocation — either the bare
@@ -435,6 +608,11 @@ case "${EVENT}" in
         # (BSD find: -mtime +1 deletes after ~2 days. Stamps go inert
         # seconds after the window closes anyway — this is hygiene.)
         find "${CONFIG_DIR}" -maxdepth 1 -name 'lastevent.*' -mtime +1 -delete 2>/dev/null || true
+        find "${CONFIG_DIR}" -maxdepth 1 -name 'approval-watch.*.json' -mtime +1 -delete 2>/dev/null || true
+        # pending.* markers from killed sessions otherwise live forever, and a
+        # resumed session id would treat its first autonomous PostToolUse as a
+        # reply (spurious shield:off).
+        find "${CONFIG_DIR}" -maxdepth 1 -name 'pending.*' -mtime +1 -delete 2>/dev/null || true
         ;;
 
     permission-request)
@@ -473,6 +651,14 @@ case "${EVENT}" in
         post_vibez "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
             "needs-input" "on" "${sid}" "cx"
         mark_pending "${sid}"
+        case "${tool_name}" in
+            Bash|bash|shell|exec_command)
+                command="$(jq_get '.tool_input.command')"
+                [ -z "${command}" ] && command="$(jq_get '.tool_input.cmd')"
+                start_approval_watcher \
+                    "${sid}" "$(clip_title "${title_raw}")" "${tool_name}" "${command}"
+                ;;
+        esac
         ;;
 
     stop)
@@ -506,13 +692,12 @@ case "${EVENT}" in
         ;;
 
     pre-tool-use)
-        # ask_user_question is Codex's interactive picker — turn is paused
-        # mid-flight until the user submits, so neither Stop nor
-        # PermissionRequest fires while it's pending. This is the only
-        # hook that can ping the phone in time.
+        # request_user_input is Codex's interactive picker. Older builds and
+        # imported Claude-compatible configs may call it ask_user_question or
+        # AskUserQuestion, so keep all three spellings.
         tool_name="$(jq_get '.tool_name')"
         case "${tool_name}" in
-            ask_user_question|AskUserQuestion) ;;
+            request_user_input|ask_user_question|AskUserQuestion) ;;
             *) exit 0 ;;
         esac
 
@@ -526,9 +711,8 @@ case "${EVENT}" in
         [ -z "${title_raw}" ] && title_raw="${proj}"
         is_slash_command "${title_raw}" && exit 0
 
-        # Try Claude-style (.questions[0].question) and singular (.question)
-        # shapes — the exact ask_user_question input schema isn't public,
-        # so be permissive and fall back to a generic body.
+        # Codex uses .questions[0].question; retain the singular fallback for
+        # older/imported question-tool schemas.
         question="$(jq_get '.tool_input.questions[0].question')"
         [ -z "${question}" ] && question="$(jq_get '.tool_input.question')"
         [ -z "${question}" ] && question="Codex is asking a question."
@@ -539,13 +723,11 @@ case "${EVENT}" in
         ;;
 
     post-tool-use)
-        # Codex doesn't fire a hook the moment the user taps Approve/Deny
-        # on a PermissionRequest, or picks an option in ask_user_question.
-        # The earliest observable signal is this PostToolUse: by the time
-        # it fires, the user has engaged. Only push when permission-request
-        # or pre-tool-use(ask_user_question) earlier in this session left
-        # a pending marker — otherwise this fires for every tool call in
-        # autonomous mode and drowns the phone.
+        # The approval watcher handles long-running shell commands at process
+        # start. PostToolUse remains the fallback for edits, MCP calls, commands
+        # too short for the watcher to observe, and question-picker responses.
+        # Only push when an earlier interactive event left a pending marker;
+        # otherwise autonomous tool calls would drown the phone.
         sid="$(jq_get '.session_id' 'nosid')"
         has_pending "${sid}" || exit 0
 
@@ -563,7 +745,7 @@ case "${EVENT}" in
         # tool_response is command output that may be huge or contain
         # secrets — keep it generic.
         case "${tool_name}" in
-            ask_user_question|AskUserQuestion)
+            request_user_input|ask_user_question|AskUserQuestion)
                 body="$(jq_get '.tool_response.content')"
                 [ -z "${body}" ] && body="(answered)"
                 ;;
@@ -575,6 +757,10 @@ case "${EVENT}" in
         post_vibez "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
             "replied" "off" "${sid}" "cx"
         clear_pending "${sid}"
+        ;;
+
+    _watch-approval)
+        watch_approval_start "${2:-}"
         ;;
 
     user-prompt-submit)
@@ -643,6 +829,65 @@ case "${EVENT}" in
         check_eq "clamp-field-caps"   "$(clamp_field "${long_field}" 100)" "${long_field:0:99}…"
         check_eq "clamp-field-passes" "$(clamp_field "short" 100)" "short"
 
+        # Approval process matching — a newly spawned descendant containing
+        # the exact requested command must be observable, while the current
+        # selftest process must not match before that child exists.
+        approval_marker="vibez-approval-selftest-$$"
+        approval_probe="sleep 2 & wait"
+        check_eq "approval-watch-no-process" \
+            "$(matching_approval_processes "$$" "${approval_marker}")" ""
+        bash -c "${approval_probe}" "${approval_marker}" &
+        approval_probe_pid=$!
+        sleep 0.1
+        approval_matches="$(matching_approval_processes "$$" "${approval_marker}")"
+        case " ${approval_matches} " in
+            *" ${approval_probe_pid} "*) approval_found="found" ;;
+            *) approval_found="missing" ;;
+        esac
+        check_eq "approval-watch-finds-child" "${approval_found}" "found"
+        kill "${approval_probe_pid}" 2>/dev/null || true
+        wait "${approval_probe_pid}" 2>/dev/null || true
+
+        # Quoted-command matching. The hook receives the command as the user
+        # approved it — quotes intact — but the spawned process's argv has had
+        # that quoting consumed by the shell, and ps prints bare argv. The
+        # matcher must align the two or any quoted command (most of them)
+        # never matches.
+        quoted_dir="$(mktemp -d)"
+        quoted_script="${quoted_dir}/rgmark"
+        printf '#!/bin/bash\nsleep 2 & wait\n' >"${quoted_script}"
+        chmod +x "${quoted_script}"
+        "${quoted_script}" -n -i "bigg|toggle" /tmp &
+        quoted_pid=$!
+        sleep 0.1
+        quoted_needle="${quoted_script} -n -i \"bigg|toggle\" /tmp"
+        quoted_matches="$(matching_approval_processes "$$" "${quoted_needle}")"
+        case " ${quoted_matches} " in
+            *" ${quoted_pid} "*) quoted_found="found" ;;
+            *) quoted_found="missing" ;;
+        esac
+        check_eq "approval-watch-quoted-cmd" "${quoted_found}" "found"
+        kill "${quoted_pid}" 2>/dev/null || true
+        wait "${quoted_pid}" 2>/dev/null || true
+
+        # Escalation needles arrive shlex-joined as "<shell> -lc '<cmd>'". In
+        # stdin-typed (zsh-fork) sessions no process ever carries that prefix —
+        # only the bare command appears in ps. The matcher must also try the
+        # prefix-stripped needle.
+        "${quoted_script}" -q /tmp &
+        prefix_pid=$!
+        sleep 0.1
+        prefix_needle="bash -lc '${quoted_script} -q /tmp'"
+        prefix_matches="$(matching_approval_processes "$$" "${prefix_needle}")"
+        case " ${prefix_matches} " in
+            *" ${prefix_pid} "*) prefix_found="found" ;;
+            *) prefix_found="missing" ;;
+        esac
+        check_eq "approval-watch-shell-prefix" "${prefix_found}" "found"
+        kill "${prefix_pid}" 2>/dev/null || true
+        wait "${prefix_pid}" 2>/dev/null || true
+        rm -rf "${quoted_dir}"
+
         # Debounce predicate — exercised against a throwaway CONFIG_DIR
         # so a selftest never touches real ~/.config/vibez state, and a
         # pinned window so an env override can't skew the stale test.
@@ -698,6 +943,40 @@ case "${EVENT}" in
         check_eq "stamp-off-fail-preserves"    "$(stampprobe pvA)" "stamped"
         post_vibez "t" "b" "needs-input" "on" "pvB" "cx"
         check_eq "stamp-on-fail-rolls-back"    "$(stampprobe pvB)" "clean"
+
+        # Full watcher path: begin with a pending session, start a matching
+        # process after the watch loop is active, and verify the successful
+        # shield-off clears pending before PostToolUse would run.
+        approval_sid="approval-selftest"
+        approval_marker="vibez-watch-integration-$$"
+        approval_state="${CONFIG_DIR}/approval-watch.selftest.json"
+        mark_pending "${approval_sid}"
+        jq -nc \
+            --arg sid "${approval_sid}" \
+            --arg title "approval test" \
+            --arg toolName "Bash" \
+            --arg command "${approval_marker}" \
+            --arg rootPid "$$" \
+            '{sid:$sid,title:$title,toolName:$toolName,command:$command,
+              rootPid:$rootPid,baseline:""}' >"${approval_state}"
+        printf '%s' "${approval_marker}" >"${CONFIG_DIR}/approval-marker"
+        (
+            sleep 0.2
+            marker="$(cat "${CONFIG_DIR}/approval-marker")"
+            bash -c 'sleep 2 & wait' "${marker}"
+        ) &
+        approval_launcher_pid=$!
+        curl() { return 0; }
+        watch_approval_start "${approval_state}"
+        if has_pending "${approval_sid}"; then
+            approval_pending="pending"
+        else
+            approval_pending="cleared"
+        fi
+        check_eq "approval-watch-clears-pending" "${approval_pending}" "cleared"
+        kill "${approval_launcher_pid}" 2>/dev/null || true
+        wait "${approval_launcher_pid}" 2>/dev/null || true
+
         unset -f curl
         LOG_FILE="${saved_log}"
         VIBEZ_ID="${saved_id}"

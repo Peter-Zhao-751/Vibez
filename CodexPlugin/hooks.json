@@ -22,7 +22,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "^(ask_user_question|AskUserQuestion)$",
+        "matcher": "^(request_user_input|ask_user_question|AskUserQuestion)$",
         "hooks": [
           {
             "type": "command",
