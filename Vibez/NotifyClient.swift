@@ -16,6 +16,7 @@
 //
 
 import Foundation
+import Intents
 import OSLog
 import UserNotifications
 
@@ -280,13 +281,75 @@ final class NotifyClient {
         if let sessionId = msg.sessionId {
             content.userInfo["session"] = sessionId
         }
+        // Codex pings get the blue pixel-Z identity: communication-
+        // notification styling puts the blue avatar in the banner's
+        // app-icon slot (iOS badges the real app icon on its corner —
+        // system behavior, not removable). Deliberately NO attachment:
+        // device banners render an attachment as a SECOND blue icon on
+        // the trailing edge (the sim doesn't, which hid it). Missing
+        // PNG (first-launch race) or a styling failure → plain banner,
+        // same as today.
+        var finalContent: UNNotificationContent = content
+        if msg.agent == .codex {
+            if let comm = Self.codexCommunicationContent(
+                updating: content, sessionId: msg.sessionId
+            ) {
+                finalContent = comm
+                log.info("scheduleLocalNotification: applied codex communication styling")
+            } else {
+                log.warning("scheduleLocalNotification: codex communication styling unavailable")
+            }
+        }
 
         let request = UNNotificationRequest(
             identifier: msg.id,
-            content: content,
+            content: finalContent,
             trigger: nil // deliver immediately
         )
         UNUserNotificationCenter.current().add(request) { _ in }
+    }
+
+    /// Restyles a Codex notification as a communication notification:
+    /// donates an INSendMessageIntent whose sender carries the blue
+    /// pixel-Z avatar (the App Group PNG), so iOS renders that avatar
+    /// in the banner's app-icon slot. The sender's display name is the
+    /// content's (already prefixed, markdown-stripped) title, so the
+    /// visible text is unchanged — only the icon is. Requires the
+    /// com.apple.developer.usernotifications.communication entitlement
+    /// + INSendMessageIntent in NSUserActivityTypes. Mirrored in
+    /// VibezPushService/NotificationService.swift; keep the two in sync.
+    static func codexCommunicationContent(
+        updating content: UNNotificationContent,
+        sessionId: String?
+    ) -> UNNotificationContent? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        ), let avatarData = try? Data(
+            contentsOf: container.appendingPathComponent("notif-codex-v2.png")
+        ) else { return nil }
+
+        let sender = INPerson(
+            personHandle: INPersonHandle(value: "codex", type: .unknown),
+            nameComponents: nil,
+            displayName: content.title,
+            image: INImage(imageData: avatarData),
+            contactIdentifier: nil,
+            customIdentifier: "codex"
+        )
+        let intent = INSendMessageIntent(
+            recipients: nil,
+            outgoingMessageType: .outgoingMessageText,
+            content: content.body,
+            speakableGroupName: nil,
+            conversationIdentifier: sessionId ?? "codex",
+            serviceName: nil,
+            sender: sender,
+            attachments: nil
+        )
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        interaction.donate(completion: nil)
+        return try? content.updating(from: intent)
     }
 
     /// Clear every Vibez entry from Notification Center. Called on

@@ -76,15 +76,31 @@ Vibez/                        Main iOS app target.
                               acceptPushUserInfo → lastMessage → ContentView.handleIncoming.
                               Owns VibezEvent / VibezShield / VibezAgent / NtfyMessage types
                               (NtfyMessage name kept deliberately — renaming churns many files).
+                              Codex ("cx") banners get the blue pixel-Z identity (2026-06-06):
+                              scheduleLocalNotification restyles them as communication
+                              notifications (codexCommunicationContent — INSendMessageIntent
+                              whose sender avatar is the App Group's notif-codex-v2.png, shown in
+                              the banner's app-icon slot; iOS badges the real app icon on its
+                              corner — system behavior, not removable). Deliberately NO
+                              UNNotificationAttachment: device banners render one as a second
+                              blue icon on the trailing edge (the sim doesn't, which hid it).
+                              Claude banners stay plain. The helper is mirrored in the NSE —
+                              keep in sync.
   ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
                               ManagedSettingsStore shield apply/remove, App Group writer.
                               Pre-renders the per-agent shield PNGs (shield-claude.png,
-                              shield-codex.png) into the App Group at init; prunes legacy
-                              renders (shield.png, shield-both.png, shield-none.png).
+                              shield-codex.png) AND the Codex notification avatar
+                              (notif-codex-v2.png) into the App Group at init; prunes
+                              legacy renders (shield.png, shield-both.png, shield-none.png,
+                              notif-codex.png).
   ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
                               the per-agent PNGs (Claude pixel critter / Codex logo + blue
                               glow) into the App Group container so VibezShield (and the NSE)
-                              can engage the shield without running ImageRenderer.
+                              can engage the shield without running ImageRenderer. Also owns
+                              renderNotificationIconPNG — rasterizes the codex-blue asset
+                              (light variant forced) INSCRIBED in the avatar's circle mask on
+                              a transparent canvas, so the visible shape stays a rounded
+                              square instead of iOS's default circle crop.
   Components.swift            Shared design-system views (pill toggle, top bar, blocked-app
                               card, recent-trigger row) + the TriggerEvent model. The row's
                               cc/cx chip is tinted per agent (Codex = Theme.codexBlue).
@@ -97,9 +113,11 @@ Vibez/                        Main iOS app target.
   Mascots.swift               Vector mascot — Claude (pixel critter). The Codex cloud-bot
                               VECTOR stays deleted (2026-06-05), but the Codex identity is
                               back on the per-ping surfaces (2026-06-06): BlockedOverlay and
-                              the shield card render the codex.imageset logo + blues, and the
-                              recent-trigger cx chip tints periwinkle, when a "cx" push
-                              engages them. Everywhere else stays Claude.
+                              the shield card render the codex.imageset logo + blues, the
+                              recent-trigger cx chip tints periwinkle, and notification
+                              banners show the blue pixel-Z avatar (codex-blue.imageset via
+                              communication notifications), when a "cx" push engages them.
+                              Everywhere else stays Claude.
   Theme.swift                 Color palette, pinned to the Claude accent (Theme.make(), no
                               agent param; the Agent enum is gone). Theme.codexBlue (#8c9ce8)
                               is the one Codex constant — BlockedOverlay's per-message accent
@@ -111,7 +129,11 @@ Vibez/                        Main iOS app target.
   IgnoreStore.swift           Persists mute rules (e.g. ignore one conversation by sid) so
                               muted sessions don't raise overlays/shields.
   Vibez.entitlements          aps-environment=development + family-controls + application-groups
+                              + usernotifications.communication (Codex banner avatar).
   VibezRelease.entitlements   Release variant — aps-environment=production.
+  Info.plist                  Merged with the generated plist: remote-notification background
+                              mode + NSUserActivityTypes=INSendMessageIntent (communication
+                              notifications).
   GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
 VibezShield/                  Shield Configuration Extension (separate target). Reads
                               ShieldState from the App Group and loads the host-rendered
@@ -132,9 +154,18 @@ VibezPushService/             Notification Service Extension (separate target). 
                               (the host AppDelegate isn't called when backgrounded on iOS 26).
                               Reads selection/armed/pendingTriggers/blockSeconds from the App
                               Group, writes via ManagedSettingsStore("vibez.shield"), and prunes
-                              per-session on a shield:off / reason:timeout push.
+                              per-session on a shield:off / reason:timeout push. Codex ("cx")
+                              pushes additionally get the blue pixel-Z banner identity
+                              (communication-notification restyle — mirrors NotifyClient's
+                              helper; reads notif-codex-v2.png from the App Group, never
+                              renders). NSEs do NOT launch for simctl pushes on the
+                              simulator — banner/shield behavior here is device-verify-only;
+                              the host's scheduleLocalNotification path is the sim-testable
+                              twin.
   NotificationService.swift   UNNotificationServiceExtension subclass.
-  VibezPushService.entitlements  family-controls + application-groups
+  VibezPushService.entitlements  family-controls + application-groups (deliberately NO
+                                 usernotifications.communication — the display-time check
+                                 is against the host app's entitlement)
   Info.plist
 Backend/                      Firebase project: vibez-backend.
   firebase.json               Cloud Functions deploy config (codebase=default).
@@ -214,6 +245,19 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   `backgroundUIColor`). Separate targets can't share source — keep them in sync when
   changing either. (`Theme.codexBlue` #8c9ce8 is deliberately different: the in-app
   overlay's softer periwinkle.)
+- **Codex banner identity is mirrored across two targets** —
+  `codexCommunicationContent` (INSendMessageIntent restyle; the blue pixel-Z avatar
+  takes the banner's app-icon slot, iOS badges the real app icon on its corner)
+  lives in BOTH `Vibez/NotifyClient.swift` and
+  `VibezPushService/NotificationService.swift`. Both read `notif-codex-v2.png`, which
+  ONLY the host writes (`ScreenTimeManager.prerenderNotificationIconIfNeeded`,
+  idempotent by file existence — bump the filename when the artwork changes). The
+  restyle needs the `com.apple.developer.usernotifications.communication` entitlement
+  (host app only) and `NSUserActivityTypes=INSendMessageIntent` in the app's
+  Info.plist. Do NOT add a UNNotificationAttachment on top: device banners render it
+  as a second blue icon on the trailing edge (tried + removed 2026-06-06; the sim
+  hides attachment thumbnails, so it slipped past sim verification). Comm-context
+  resolution delays the banner ~2s — screenshot probes must wait ≥4s.
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
 - **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
 - **Same-conversation block debounce (both plugins, mirrored):** `notify.sh` skips a
@@ -282,6 +326,13 @@ Shipped 2026-06-06: free, v1.0, listed as **"AI Coding Focus - Vibez"**
 Distribution Request and App Store review were both approved within days of submission.
 Update submissions are the ordinary flow: archive (Release, Any iOS Device), upload,
 submit — keep the aps-environment Debug/Release entitlements split intact.
+
+The Codex banner avatar (2026-06-06) added the Communication Notifications
+entitlement on the host app (self-service — Xcode automatic signing adds the
+capability on the next device build; no Apple request form). Review note for the
+next update: comm notifications are nominally for person-to-person messaging —
+agent pings are a defensible-but-gray use. If a reviewer balks, the fallback is
+dropping `codexCommunicationContent` (the rest of the Codex identity stays).
 
 Remaining post-launch hardening:
 

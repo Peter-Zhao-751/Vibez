@@ -20,6 +20,7 @@ import UserNotifications
 import ManagedSettings
 import FamilyControls
 import Foundation
+import Intents
 import OSLog
 
 /// Mirror of `Vibez/ScreenTimeManager.swift`'s `PendingTrigger`. Keep the
@@ -167,7 +168,24 @@ final class NotificationService: UNNotificationServiceExtension {
                 best.interruptionLevel = .passive
                 best.sound = nil
             }
-            contentHandler(best)
+            // Codex pings get the blue pixel-Z identity: communication-
+            // notification styling puts the blue avatar in the banner's
+            // app-icon slot (iOS badges the real app icon on its corner —
+            // system behavior, not removable). Deliberately NO attachment:
+            // device banners render an attachment as a SECOND blue icon on
+            // the trailing edge. Not gated on `armed` — banner identity is
+            // independent of shielding. Missing PNG (push before the
+            // host's first post-update launch) or a styling failure →
+            // plain banner. Applied LAST — updating(from:) snapshots the
+            // content, so every mutation above must already be in place.
+            var deliver: UNNotificationContent = best
+            if agent == "cx", let comm = Self.codexCommunicationContent(
+                updating: best, sessionId: session.isEmpty ? nil : session
+            ) {
+                deliver = comm
+                log.info("applied codex communication styling")
+            }
+            contentHandler(deliver)
         } else {
             contentHandler(request.content)
         }
@@ -508,6 +526,47 @@ final class NotificationService: UNNotificationServiceExtension {
     }
 
     // MARK: - Display helpers (duplicated from NotifyClient)
+
+    /// Restyles a Codex notification as a communication notification:
+    /// donates an INSendMessageIntent whose sender carries the blue
+    /// pixel-Z avatar (the App Group PNG), so iOS renders that avatar
+    /// in the banner's app-icon slot. The sender's display name is the
+    /// content's (already prefixed, markdown-stripped) title, so the
+    /// visible text is unchanged — only the icon is. Mirror of
+    /// NotifyClient.codexCommunicationContent; keep the two in sync.
+    private static func codexCommunicationContent(
+        updating content: UNNotificationContent,
+        sessionId: String?
+    ) -> UNNotificationContent? {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        ), let avatarData = try? Data(
+            contentsOf: container.appendingPathComponent("notif-codex-v2.png")
+        ) else { return nil }
+
+        let sender = INPerson(
+            personHandle: INPersonHandle(value: "codex", type: .unknown),
+            nameComponents: nil,
+            displayName: content.title,
+            image: INImage(imageData: avatarData),
+            contactIdentifier: nil,
+            customIdentifier: "codex"
+        )
+        let intent = INSendMessageIntent(
+            recipients: nil,
+            outgoingMessageType: .outgoingMessageText,
+            content: content.body,
+            speakableGroupName: nil,
+            conversationIdentifier: sessionId ?? "codex",
+            serviceName: nil,
+            sender: sender,
+            attachments: nil
+        )
+        let interaction = INInteraction(intent: intent, response: nil)
+        interaction.direction = .incoming
+        interaction.donate(completion: nil)
+        return try? content.updating(from: intent)
+    }
 
     private static func displayTitle(title: String, event: String) -> String {
         let prefix: String?

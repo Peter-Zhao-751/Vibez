@@ -25,6 +25,34 @@ func renderShieldCardPNG(state: ShieldState) -> Data? {
     return renderer.uiImage?.pngData()
 }
 
+/// Rasterizes a catalog asset for the Codex communication-notification
+/// avatar. Forces the light-appearance variant: the rendered PNG is a
+/// fixed image (it can't adapt when the system flips appearance), and
+/// the periwinkle-tile variant of the blue pixel-Z reads as "blue" on
+/// both light and dark banner material.
+///
+/// iOS masks every comm-notification avatar to a CIRCLE with no square
+/// option, so the tile is drawn INSCRIBED in that circle on a
+/// transparent canvas — the mask has nothing to clip and the visible
+/// shape stays a rounded square, like a regular app icon. Side 280 in
+/// a 400 canvas (half-diagonal 198 < radius 200) keeps the corners
+/// inside the mask, and 280 = 2.8× the SVG's 100-unit grid keeps the
+/// pixel-art edges on exact pixel boundaries.
+@MainActor
+func renderNotificationIconPNG(assetName: String) -> Data? {
+    let traits = UITraitCollection(userInterfaceStyle: .light)
+    guard let image = UIImage(named: assetName, in: nil, compatibleWith: traits)
+    else { return nil }
+    let size = CGSize(width: 400, height: 400)
+    let format = UIGraphicsImageRendererFormat()
+    format.scale = 1
+    return UIGraphicsImageRenderer(size: size, format: format)
+        .image { _ in
+            image.draw(in: CGRect(x: 60, y: 60, width: 280, height: 280))
+        }
+        .pngData()
+}
+
 // MARK: - SwiftUI
 
 private enum ShieldCardTheme {

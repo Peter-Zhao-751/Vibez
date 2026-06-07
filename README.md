@@ -16,7 +16,14 @@ Vibez connects Claude Code and Codex lifecycle events to an iOS Screen Time shie
 
 <a href="ClaudePlugin/README.md"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
 <a href="CodexPlugin/README.md"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
-<a href="#ios-app"><img alt="iOS app" src="https://img.shields.io/badge/iOS_app-local_build-fff5e8?style=flat-square&labelColor=1a0e08"></a>
+<a href="https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780"><img alt="iOS app on the App Store" src="https://img.shields.io/badge/iOS_app-App_Store-dd7a52?style=flat-square&labelColor=1a0e08"></a>
+
+<br><br>
+
+<img src="assets/mockups/vibez_blocking_in_progress_transparent.png" width="23%" alt="Blocking in progress — the agent needs you, selected apps shielded behind a live countdown">
+<img src="assets/mockups/vibez_connect_light_transparent.png" width="23%" alt="Connect card — pair your phone once with the 4-word Vibez ID">
+<img src="assets/mockups/vibez_focus_mode_transparent.png" width="23%" alt="Focus mode — tap the mascot to hold a manual block">
+<img src="assets/mockups/vibez_how_it_works_transparent.png" width="23%" alt="How Vibez works — agent pushes, apps shield, reply releases">
 
 </div>
 
@@ -39,7 +46,7 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 |---|---|---|
 | [`ClaudePlugin/`](ClaudePlugin/) | Working | Claude Code plugin for `SessionStart`, `Notification`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
 | [`CodexPlugin/`](CodexPlugin/) | Working | Codex plugin for `SessionStart`, `PermissionRequest`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
-| [`Vibez/`](Vibez/) | Local build | SwiftUI iOS app that receives FCM pushes, records recent triggers, and applies Family Controls / Managed Settings shields. |
+| [`Vibez/`](Vibez/) | [On the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780) | SwiftUI iOS app that receives FCM pushes, records recent triggers, and applies Family Controls / Managed Settings shields. |
 | [`Backend/`](Backend/) | Working | Firebase Cloud Functions (`registerPushToken`, `notify`, `dispatchUnblock`) that pair devices and fan out pushes via FCM. |
 | [`VibezExtension/`](VibezExtension/) | Local build | Chrome (MV3) extension that mirrors the block on desktop browsers. |
 | [`assets/`](assets/) | Working assets | Logo, glyph, icon, and README artwork. |
@@ -72,7 +79,9 @@ Full details: [`CodexPlugin/README.md`](CodexPlugin/README.md)
 
 ## iOS App
 
-The iOS app is built around Apple's `FamilyControls` and `ManagedSettings` frameworks:
+**[AI Coding Focus — Vibez](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780)** is free on the App Store.
+
+The app is built around Apple's `FamilyControls` and `ManagedSettings` frameworks:
 
 1. Enter your 4-word Vibez ID.
 2. Grant notification permission.
@@ -80,7 +89,7 @@ The iOS app is built around Apple's `FamilyControls` and `ManagedSettings` frame
 4. Pick the apps, categories, or websites to shield.
 5. Leave Vibez enabled while your agent works.
 
-Distribution is still gated by Apple. Local device builds need a paid Apple Developer Program team because Apple does not grant the `family-controls` entitlement to personal teams. App Store distribution also requires Apple's Family Controls Distribution Request review. The simulator is useful for compile checks, but Screen Time shields are no-ops there.
+Building from source instead needs a paid Apple Developer Program team because Apple does not grant the `family-controls` entitlement to personal teams. The simulator is useful for compile checks, but Screen Time shields are no-ops there.
 
 ## Configuration
 
@@ -112,7 +121,7 @@ Vibez/
 ├── CodexPlugin/            Codex plugin
 ├── Backend/                Firebase Cloud Functions (push fan-out + scheduling)
 ├── VibezExtension/         Chrome (MV3) browser companion
-├── assets/                 Logos, icons, lockups, glyphs
+├── assets/                 Logos, icons, lockups, glyphs, app mockups
 ├── docs/                   Design notes and implementation plans
 ├── Vibez.xcodeproj/
 └── CLAUDE.md               Project context for agent sessions
@@ -122,8 +131,7 @@ Vibez/
 
 - Claude Code plugin: working.
 - Codex plugin: working.
-- iOS app: Screen Time shield flow implemented for local builds.
-- App Store release: pending paid developer enrollment and Family Controls distribution approval.
+- iOS app: [free on the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 
 ## License
 

@@ -170,6 +170,7 @@ final class ScreenTimeManager {
         Self.recoverFromAppGroupIfNeeded()
         mirrorLiveSettingsToAppGroup()
         prerenderAgentShieldsIfNeeded()
+        prerenderNotificationIconIfNeeded()
         loadSelection()
         loadStateAndMigrate()
         loadFocusState()
@@ -495,6 +496,33 @@ final class ScreenTimeManager {
                 try? png.write(to: url)
                 shieldLog.info("prerendered shield-\(agent.rawValue, privacy: .public).png")
             }
+        }
+    }
+
+    /// The Codex notification-thumbnail PNG (blue pixel-Z), written to
+    /// the App Group container. Both banner paths attach it to
+    /// `cx`-tagged pings — NotifyClient.scheduleLocalNotification
+    /// (foreground) and VibezPushService (background) copy it to a temp
+    /// file and hand that to UNNotificationAttachment (which consumes
+    /// its file). Pre-rendering here keeps the NSE render-free, same as
+    /// the shield PNGs above.
+    ///
+    /// Idempotent: skips if the PNG exists. Bump the filename (or wipe
+    /// the App Group container) when the artwork changes.
+    private func prerenderNotificationIconIfNeeded() {
+        guard let container = FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        ) else { return }
+        // v1 was a full-bleed tile; v2 inscribes it in the avatar's
+        // circle mask so the visible shape stays square.
+        try? FileManager.default.removeItem(
+            at: container.appendingPathComponent("notif-codex.png")
+        )
+        let url = container.appendingPathComponent("notif-codex-v2.png")
+        guard !FileManager.default.fileExists(atPath: url.path) else { return }
+        if let png = renderNotificationIconPNG(assetName: "codex-blue") {
+            try? png.write(to: url)
+            shieldLog.info("prerendered notif-codex-v2.png")
         }
     }
 
