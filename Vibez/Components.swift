@@ -617,10 +617,10 @@ struct TriggerRow: View {
     var body: some View {
         let row = HStack(alignment: .top, spacing: 10) {
             ZStack {
+                // Which plugin pinged — chip tinted per agent, matching
+                // the blocking surfaces (periwinkle for Codex pings).
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.claudeOrange)
-                // Which plugin pinged — Codex events still arrive and
-                // keep their "cx" tag; only the blue theming is gone.
+                    .fill(event.source == .codex ? Theme.codexBlue : Theme.claudeOrange)
                 Text(event.source == .codex ? "cx" : "cc")
                     .font(.system(size: 10, weight: .heavy, design: .monospaced))
                     .foregroundStyle(.white)
