@@ -89,28 +89,37 @@ struct BigToggle: View {
             : (enabled ? "Disable Vibez" : "Enable Vibez"))
     }
 
-    /// Track — accent gradient + inner top highlight when on (or in
-    /// focus), sunken neutral when off. Focus is only reachable while
-    /// armed, so the fill never has to animate between gradient and
-    /// neutral during the morph.
+    /// Track — the accent layer reveals from left to right with the knob,
+    /// then retracts along the same path when switched off. Keeping the
+    /// neutral track underneath avoids recoloring the whole pill at once.
     private var track: some View {
-        Capsule()
-            .fill(enabled || focusMode
-                ? AnyShapeStyle(theme.pillGradient.shadow(
+        ZStack {
+            Capsule()
+                .fill(theme.pillOff.shadow(
+                    .inner(color: .black.opacity(0.18), radius: 3, y: 2)))
+
+            Capsule()
+                .fill(theme.pillGradient.shadow(
                     .inner(color: .white.opacity(0.18), radius: 0.5, y: 1)))
-                : AnyShapeStyle(theme.pillOff.shadow(
-                    .inner(color: .black.opacity(0.18), radius: 3, y: 2))))
-            .shadow(
-                color: theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)),
-                radius: focusMode ? 12 : (enabled ? 14 : 7)
-            )
-            .shadow(
-                color: enabled || focusMode ? theme.accentDeep.opacity(0.667) : .clear,
-                radius: 12,
-                y: focusMode ? 10 : 12
-            )
-            // Recolors on the reference's plain .5s ease when toggled.
-            .animation(.easeInOut(duration: 0.5), value: enabled)
+                .mask {
+                    Rectangle()
+                        .scaleEffect(
+                            x: enabled || focusMode ? 1 : 0,
+                            y: 1,
+                            anchor: .leading
+                        )
+                }
+        }
+        .shadow(
+            color: theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)),
+            radius: focusMode ? 12 : (enabled ? 14 : 7)
+        )
+        .shadow(
+            color: enabled || focusMode ? theme.accentDeep.opacity(0.667) : .clear,
+            radius: 12,
+            y: focusMode ? 10 : 12
+        )
+        .animation(Self.slideAnimation, value: enabled)
     }
 
     /// Knob — plain white, slides edge to edge.
@@ -616,16 +625,7 @@ struct TriggerRow: View {
 
     var body: some View {
         let row = HStack(alignment: .top, spacing: 10) {
-            ZStack {
-                // Which plugin pinged — chip tinted per agent, matching
-                // the blocking surfaces (periwinkle for Codex pings).
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(event.source == .codex ? Theme.codexBlue : Theme.claudeOrange)
-                Text(event.source == .codex ? "cx" : "cc")
-                    .font(.system(size: 10, weight: .heavy, design: .monospaced))
-                    .foregroundStyle(.white)
-            }
-            .frame(width: 28, height: 28)
+            TriggerSourceBadge(source: event.source)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 5) {
@@ -692,6 +692,119 @@ struct TriggerRow: View {
         } else {
             row
         }
+    }
+}
+
+private struct TriggerSourceBadge: View {
+    let source: TriggerEvent.Source
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 8)
+                .fill(source == .codex ? Color.white : Theme.claudeOrange)
+
+            if source == .codex {
+                StaticCodexBadgeLogo(size: 24)
+            } else {
+                StaticClaudeBadgeMascot(size: 18)
+            }
+        }
+        .frame(width: 28, height: 28)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(source == .codex ? "Codex" : "Claude Code")
+    }
+}
+
+private struct StaticCodexBadgeLogo: View {
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            CodexBadgeCloudShape()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(hex: 0xaab8ee),
+                            Color(hex: 0x4968ff),
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
+
+            GeometryReader { proxy in
+                let unit = proxy.size.width / 24
+
+                Path { path in
+                    path.move(to: CGPoint(x: 7.4 * unit, y: 8.2 * unit))
+                    path.addLine(to: CGPoint(x: 9.6 * unit, y: 12 * unit))
+                    path.addLine(to: CGPoint(x: 7.4 * unit, y: 15.8 * unit))
+                }
+                .stroke(
+                    .white,
+                    style: StrokeStyle(
+                        lineWidth: 1.7 * unit,
+                        lineCap: .round,
+                        lineJoin: .round
+                    )
+                )
+
+                Capsule()
+                    .fill(.white)
+                    .frame(width: 5.8 * unit, height: 1.7 * unit)
+                    .offset(x: 12.2 * unit, y: 14.9 * unit)
+            }
+        }
+        .frame(width: size, height: size)
+    }
+}
+
+private struct CodexBadgeCloudShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        let unit = rect.width / 24
+        var path = Path()
+
+        path.addRoundedRect(
+            in: CGRect(x: 4.1 * unit, y: 4.2 * unit, width: 15.8 * unit, height: 15.6 * unit),
+            cornerSize: CGSize(width: 5.2 * unit, height: 5.2 * unit)
+        )
+        path.addEllipse(in: CGRect(x: 7.1 * unit, y: 0.7 * unit, width: 10.5 * unit, height: 10.5 * unit))
+        path.addEllipse(in: CGRect(x: 13.3 * unit, y: 2.2 * unit, width: 9.8 * unit, height: 9.8 * unit))
+        path.addEllipse(in: CGRect(x: 15.4 * unit, y: 7.2 * unit, width: 8.3 * unit, height: 9.1 * unit))
+        path.addEllipse(in: CGRect(x: 12.7 * unit, y: 13.2 * unit, width: 9.2 * unit, height: 9.2 * unit))
+        path.addEllipse(in: CGRect(x: 6.8 * unit, y: 14.0 * unit, width: 9.4 * unit, height: 9.4 * unit))
+        path.addEllipse(in: CGRect(x: 1.0 * unit, y: 11.2 * unit, width: 9.5 * unit, height: 9.5 * unit))
+        path.addEllipse(in: CGRect(x: 0.3 * unit, y: 5.4 * unit, width: 9.8 * unit, height: 9.8 * unit))
+        path.addEllipse(in: CGRect(x: 3.0 * unit, y: 2.6 * unit, width: 9.2 * unit, height: 9.2 * unit))
+
+        return path
+    }
+}
+
+private struct StaticClaudeBadgeMascot: View {
+    let size: CGFloat
+
+    var body: some View {
+        let height = size * 0.9
+        let unit = size / 100
+
+        ZStack(alignment: .topLeading) {
+            ClaudeBodyShape()
+                .fill(.white)
+                .frame(width: size, height: height)
+
+            Rectangle()
+                .fill(Theme.claudeOrange)
+                .frame(width: 12 * unit, height: 14 * unit)
+                .offset(x: 22 * unit, y: 28 * unit)
+
+            Rectangle()
+                .fill(Theme.claudeOrange)
+                .frame(width: 12 * unit, height: 14 * unit)
+                .offset(x: 66 * unit, y: 28 * unit)
+        }
+        .frame(width: size, height: height, alignment: .topLeading)
     }
 }
 

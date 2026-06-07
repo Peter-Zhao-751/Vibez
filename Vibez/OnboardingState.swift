@@ -165,12 +165,37 @@ final class OnboardingState: Identifiable {
 
     /// Move forward, skipping any step whose gate got satisfied since
     /// the snapshot. finish is never satisfied, so this always lands.
+    /// RAW: callers that represent an explicit user CTA (welcome's
+    /// Get Started, the plugin page's "I have my Vibez ID", the Vibez
+    /// ID page's Continue) use this — leaving an *action* step is the
+    /// user's decision. Gate-driven callers (a permission grant, a
+    /// Settings round-trip) must use advanceIfCurrentStepSatisfied()
+    /// instead so they can't hop past an action step.
     func advance() {
         var next = index + 1
         while next < steps.count - 1, isSatisfied(steps[next]) {
             next += 1
         }
         index = min(next, steps.count - 1)
+    }
+
+    /// Advance past the current step ONLY if its own gate is already
+    /// satisfied — the idempotent primitive for every "a permission
+    /// flipped, move on" trigger.
+    ///
+    /// Why this exists: a single Screen Time grant fires TWO advance
+    /// triggers — the step's in-flow onAdvance AND the scenePhase
+    /// `.active` recheck (Family Controls' authorization sheet flips
+    /// scenePhase; the notification alert does not, which is why only
+    /// Screen Time hit this). With a raw advance() the second trigger
+    /// carried the flow from the gate-less pluginInstall action step
+    /// straight on to the Vibez ID page, skipping "Install the plugin"
+    /// entirely. Routing grant-driven advances through here makes them
+    /// idempotent: once the flow lands on an action step (never
+    /// "satisfied"), repeat calls no-op.
+    func advanceIfCurrentStepSatisfied() {
+        guard let step = current, isSatisfied(step) else { return }
+        advance()
     }
 
     /// Whether a step's gate is already met. Action steps (welcome,

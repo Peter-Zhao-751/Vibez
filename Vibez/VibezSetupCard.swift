@@ -34,17 +34,15 @@ struct VibezSetupCard: View {
             && trimmedDraft != registrar.vibezId
     }
 
-    /// "Install the Vibez plugin — Claude Code and Codex print your
-    /// Vibez ID as soon as a session starts. /vibez:setup shows it
-    /// again anytime." — the command rendered in monospace fg, like
-    /// the reference card.
+    /// The setup summary, with the Claude Code command rendered in
+    /// monospace so it stands out from the surrounding instructions.
     private var instructions: AttributedString {
-        var lead = AttributedString("Install the Vibez plugin — Claude Code and Codex print your Vibez ID as soon as a session starts. ")
+        var lead = AttributedString("Install the Vibez plugin. Claude Code and Codex show your Vibez ID when a session starts. For step-by-step instructions, open Settings and tap Tutorial. ")
         lead.foregroundColor = theme.fgMute
         var cmd = AttributedString("/vibez:setup")
         cmd.font = .system(size: 12, design: .monospaced)
         cmd.foregroundColor = theme.fg
-        var tail = AttributedString(" shows it again anytime.")
+        var tail = AttributedString(" shows your ID again in Claude Code.")
         tail.foregroundColor = theme.fgMute
         return lead + cmd + tail
     }

@@ -150,7 +150,7 @@ private func previewContent(
 #Preview("Recent triggers · dark") {
     // A full Recent triggers list — collapsed sheet shows the top three,
     // with the rest available on expand. Mix of replied/pending and a
-    // Codex row so the sheet shows both cc and cx source chips.
+    // Codex row so the sheet shows both source mascots.
     let events: [TriggerEvent] = [
         previewTrigger(minutesAgo: 1,   source: .claude,
                        title: previewClaudeTitles[0].0, label: previewClaudeTitles[0].1,
@@ -218,8 +218,7 @@ private func previewContent(
 
 #Preview("Busy day · Codex · dark") {
     // Same shape as the Claude variant but with a higher proportion of
-    // `.codex` rows (Codex pings still arrive; they render in the
-    // single Claude theme).
+    // `.codex` rows and their blue Codex logo badges.
     let active = PendingTrigger(
         sessionId: "preview-codex-active",
         addedAt: Date().addingTimeInterval(-180),

@@ -103,9 +103,9 @@ struct OnboardingFlow: View {
         case .welcome:
             OnboardingWelcomeStep(theme: theme, onContinue: advance)
         case .notifications:
-            OnboardingNotificationsStep(theme: theme, state: state, onAdvance: advance)
+            OnboardingNotificationsStep(theme: theme, state: state, onAdvance: advanceAfterPermissionGrant)
         case .screenTime:
-            OnboardingScreenTimeStep(theme: theme, manager: manager, onAdvance: advance)
+            OnboardingScreenTimeStep(theme: theme, manager: manager, onAdvance: advanceAfterPermissionGrant)
         case .pluginInstall:
             OnboardingPluginStep(theme: theme, onAdvance: advance)
         case .vibezId:
@@ -118,6 +118,16 @@ struct OnboardingFlow: View {
     private func advance() {
         withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
             state.advance()
+        }
+    }
+
+    /// Grant-driven advance for the permission steps. Idempotent so it
+    /// can't compound with the scenePhase / `.task` recheck into a
+    /// double hop that skips the plugin-install page — see
+    /// OnboardingState.advanceIfCurrentStepSatisfied().
+    private func advanceAfterPermissionGrant() {
+        withAnimation(.spring(response: 0.45, dampingFraction: 0.88)) {
+            state.advanceIfCurrentStepSatisfied()
         }
     }
 

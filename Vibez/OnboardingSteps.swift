@@ -383,24 +383,27 @@ private struct CommandRowView: View {
             } action: { _, new in
                 hint = new
             }
-            // Trailing "…" over a fade into the chip color: the clipped
-            // command visibly slides under it, signaling there's more to
-            // scroll. Disappears once the end is reached.
+            // Fade the clipped command first, then draw the "…" on an
+            // opaque chip-colored segment so text cannot show through it.
+            // Disappears once the end is reached.
             .overlay(alignment: .trailing) {
                 if hint.overflows && !hint.atEnd {
-                    Text("…")
-                        .font(.system(size: 12, weight: .bold, design: .monospaced))
-                        .foregroundStyle(theme.fgMute)
-                        .padding(.leading, 16)
-                        .background(
-                            LinearGradient(
-                                colors: [theme.bgChip.opacity(0), theme.bgChip],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
+                    HStack(spacing: 0) {
+                        LinearGradient(
+                            colors: [theme.bgChip.opacity(0), theme.bgChip],
+                            startPoint: .leading,
+                            endPoint: .trailing
                         )
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
+                            .frame(width: 16)
+
+                        Text("…")
+                            .font(.system(size: 12, weight: .bold, design: .monospaced))
+                            .foregroundStyle(theme.fgMute)
+                            .padding(.horizontal, 2)
+                            .background(theme.bgChip)
+                    }
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
                 }
             }
             .animation(.easeInOut(duration: 0.18), value: hint)

@@ -54,9 +54,9 @@ struct SettingsView: View {
     @State private var vibezIdError: String? = nil
     @State private var tutorial: OnboardingState?
     @State private var copiedFeedback = false
+    @State private var systemColorScheme = SystemColorSchemeProbe.current
     @FocusState private var vibezIdFocused: Bool
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.colorScheme) private var systemColorScheme
 
     /// Opens the system FamilyActivityPicker seeded with the current
     /// selection. The draft is re-created with `includeEntireCategory`
@@ -154,13 +154,21 @@ struct SettingsView: View {
         // present time but went stale when the Appearance picker flipped
         // it — the rest of the app recolored, this sheet didn't.
         .preferredColorScheme(appearanceScheme)
+        .background {
+            SystemColorSchemeProbe(colorScheme: $systemColorScheme)
+                .frame(width: 0, height: 0)
+        }
     }
 
-    /// The color scheme the Appearance preference resolves to (nil =
-    /// follow system). Single source feeding the sheet's
-    /// `.preferredColorScheme`, mirroring ContentView's `appearance`.
-    private var appearanceScheme: ColorScheme? {
-        (AppearancePref(rawValue: appearanceRaw) ?? .system).colorScheme
+    /// Resolve System explicitly for this presentation. Removing a light
+    /// preference with `nil` can leave an already-presented sheet inheriting
+    /// its old light trait even after the parent window returns to System.
+    private var appearanceScheme: ColorScheme {
+        switch AppearancePref(rawValue: appearanceRaw) ?? .system {
+        case .system: systemColorScheme
+        case .light: .light
+        case .dark: .dark
+        }
     }
 
     // MARK: Sections
@@ -526,6 +534,81 @@ struct SettingsView: View {
         copiedFeedback = true
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.4) {
             copiedFeedback = false
+        }
+    }
+}
+
+/// Reads the UIWindowScene trait, which continues to represent the device's
+/// appearance even while this sheet has its own explicit color-scheme
+/// preference. Observing the scene also keeps an open System-mode sheet in
+/// sync with scheduled or Control Center appearance changes.
+private struct SystemColorSchemeProbe: UIViewRepresentable {
+    @Binding var colorScheme: ColorScheme
+
+    static var current: ColorScheme {
+        let style = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first(where: { $0.activationState != .unattached })?
+            .traitCollection.userInterfaceStyle
+            ?? UITraitCollection.current.userInterfaceStyle
+        return style == .dark ? .dark : .light
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(colorScheme: $colorScheme)
+    }
+
+    func makeUIView(context: Context) -> ProbeView {
+        let view = ProbeView()
+        view.coordinator = context.coordinator
+        return view
+    }
+
+    func updateUIView(_ view: ProbeView, context: Context) {
+        context.coordinator.colorScheme = $colorScheme
+        context.coordinator.observe(view.window?.windowScene)
+    }
+
+    final class ProbeView: UIView {
+        weak var coordinator: Coordinator?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            coordinator?.observe(window?.windowScene)
+        }
+    }
+
+    final class Coordinator: NSObject {
+        var colorScheme: Binding<ColorScheme>
+        private weak var scene: UIWindowScene?
+        private var registration: (any UITraitChangeRegistration)?
+
+        init(colorScheme: Binding<ColorScheme>) {
+            self.colorScheme = colorScheme
+        }
+
+        func observe(_ newScene: UIWindowScene?) {
+            guard scene !== newScene else { return }
+            if let scene, let registration {
+                scene.unregisterForTraitChanges(registration)
+            }
+            scene = newScene
+            guard let newScene else {
+                registration = nil
+                return
+            }
+            registration = newScene.registerForTraitChanges(
+                [UITraitUserInterfaceStyle.self]
+            ) { [weak self] (scene: UIWindowScene, _: UITraitCollection) in
+                self?.publish(scene.traitCollection.userInterfaceStyle)
+            }
+            publish(newScene.traitCollection.userInterfaceStyle)
+        }
+
+        private func publish(_ style: UIUserInterfaceStyle) {
+            let resolved: ColorScheme = style == .dark ? .dark : .light
+            guard colorScheme.wrappedValue != resolved else { return }
+            colorScheme.wrappedValue = resolved
         }
     }
 }
