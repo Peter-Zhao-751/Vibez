@@ -146,4 +146,18 @@ extension Color {
             traits.userInterfaceStyle == .dark ? UIColor(dark) : UIColor(light)
         })
     }
+
+    /// Scales the color's RGB toward black by `fraction` (0 = unchanged,
+    /// 1 = black), preserving hue and alpha. Used to dim the backdrop
+    /// bubbles in dark mode so they read as a deep glow, not a bright wash.
+    func darkened(by fraction: Double) -> Color {
+        let f = max(0, min(1, fraction))
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(self).getRed(&r, green: &g, blue: &b, alpha: &a)
+        return Color(.sRGB,
+                     red: Double(r) * (1 - f),
+                     green: Double(g) * (1 - f),
+                     blue: Double(b) * (1 - f),
+                     opacity: Double(a))
+    }
 }

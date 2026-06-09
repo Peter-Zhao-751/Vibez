@@ -14,8 +14,10 @@ import { getState, patchState, onStateChanged, DEFAULTS } from "../storage";
 import { KEEPALIVE_ALARM, KEEPALIVE_PERIOD_MIN } from "../config";
 import { errorMessage } from "../messaging";
 import { listenEvents, callRegister } from "./firestore";
+import { createRegistrar } from "./registration";
 import {
   durationSecondsFor,
+  insertRecent,
   overlayFor,
   prune,
   sessionKeyFor,
@@ -73,24 +75,13 @@ async function ensureClientId(state: StoredState): Promise<string> {
   return id;
 }
 
-async function maybeRegister(): Promise<void> {
-  const state = await getState();
-  if (!state.vibezId) return;
-  const clientId = await ensureClientId(state);
-  if (state.registration.phase === "registering") return;
-  await patchState({ registration: { phase: "registering", error: null } });
-  try {
-    await callRegister(clientId, state.vibezId);
-    await patchState({ registration: { phase: "registered", error: null } });
-  } catch (e) {
-    await patchState({
-      registration: {
-        phase: "error",
-        error: errorMessage(e),
-      },
-    });
-  }
-}
+const maybeRegister = createRegistrar({
+  getState,
+  patchState,
+  ensureClientId,
+  callRegister,
+  errorMessage,
+});
 
 // ------------------------------------------------------- listener lifecycle ----
 
@@ -115,7 +106,6 @@ async function syncListener(): Promise<void> {
 async function applyEvent(doc: VibezEventDoc): Promise<void> {
   const seen = await loadProcessed();
   if (seen.has(doc.id)) return;
-  await markProcessed(doc.id);
 
   const state = await getState();
   const analytics = recordEvent(state.analytics, doc); // passive count
@@ -125,12 +115,14 @@ async function applyEvent(doc: VibezEventDoc): Promise<void> {
     const sessions = { ...state.blockState.sessions };
     if (doc.session) delete sessions[doc.session];
     await commitBlock(state, sessions, analytics);
+    await markProcessed(doc.id);
     return;
   }
 
   // Disarmed → analytics only; no block, no Recent Triggers row.
   if (!state.armed) {
     await patchState({ analytics });
+    await markProcessed(doc.id);
     return;
   }
 
@@ -150,9 +142,16 @@ async function applyEvent(doc: VibezEventDoc): Promise<void> {
     blockSeconds: seconds,
     sessionId: doc.session,
   };
-  const recents = [trigger, ...state.recentTriggers].slice(0, MAX_RECENTS);
+  const recents = insertRecent(state.recentTriggers, trigger, MAX_RECENTS);
 
   await commitBlock(state, sessions, analytics, recents);
+  // Mark processed AFTER the state writes land. Marking up front meant a
+  // failure mid-apply dropped the event forever (at-most-once); now a
+  // crash re-delivers on the next snapshot. Replays are safe: the block
+  // map is keyed by session with a deterministic expiry, and recents
+  // dedupe by id (insertRecent) — at worst the ping counter double-counts
+  // one event.
+  await markProcessed(doc.id);
 }
 
 function previewOverlay(expiresAt: number): OverlayInfo {
@@ -217,6 +216,11 @@ function scheduleExpiry(sessions: PendingSessions): void {
 
 // ------------------------------------------------------------- commands ----
 
+/// Deliberately lifts EVERY pending session, unlike iOS where Dismiss
+/// resolves only the top overlay and reveals the next: on the web the
+/// overlay covers the page the user is trying to reach, so instantly
+/// re-covering it with the next pending block would read as "Dismiss
+/// does nothing". (Design call 2026-06-09.)
 async function dismissAll(): Promise<void> {
   const state = await getState();
   await commitBlock(state, {}, state.analytics);

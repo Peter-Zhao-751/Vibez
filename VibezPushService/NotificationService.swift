@@ -44,6 +44,16 @@ private extension ManagedSettingsStore.Name {
     static let vibez = ManagedSettingsStore.Name("vibez.shield")
 }
 
+private extension String {
+    /// Mirror of `Vibez/SessionID.swift`'s `isUsableSessionId` (separate
+    /// target, can't share source) — keep the two in sync. A session id
+    /// counts only when it's non-empty and not the "nosid" sentinel the
+    /// plugins send for untagged events.
+    var isUsableSessionId: Bool {
+        !isEmpty && self != "nosid"
+    }
+}
+
 final class NotificationService: UNNotificationServiceExtension {
 
     private let log = Logger(subsystem: "vibezlol.Vibez", category: "PushService")
@@ -63,6 +73,14 @@ final class NotificationService: UNNotificationServiceExtension {
         static let notifyBanners = "vibez.notifyBanners"
         static let shieldState = "shieldState"
         static let focusMode = "vibez.focusMode.v1"
+        /// Effective appearance the shield renders with (true = dark),
+        /// mirrored from the host so the background shield matches the
+        /// app's light/dark choice.
+        static let shieldDark = "vibez.shieldDark"
+        /// "Hide task details" toggle, mirrored from the host. When on,
+        /// the cross-app shield's title/body are replaced with generic
+        /// strings (banner text is untouched).
+        static let genericShield = "vibez.genericShield"
     }
 
     var contentHandler: ((UNNotificationContent) -> Void)?
@@ -76,6 +94,34 @@ final class NotificationService: UNNotificationServiceExtension {
     private var notificationsOff: Bool {
         !(sharedDefaults?.object(forKey: Key.notifyBanners) as? Bool ?? true)
     }
+
+    /// The big toggle (`vibez.manualBlocking.v1`), mirrored into the App
+    /// Group by ScreenTimeManager. When OFF, Vibez is dormant: the shield
+    /// doesn't engage (see applyShieldState) AND agent pushes deliver
+    /// silently — "off" means the user wants Vibez out of the way entirely,
+    /// so the banner surface is suppressed exactly like `notificationsOff`.
+    /// Defaults to armed-when-unknown (`?? true`) so a missing/garbled value
+    /// never silently swallows a ping — the same fail-toward-showing default
+    /// `notificationsOff` uses, and deliberately the opposite of the shield
+    /// read in applyShieldState, which fails toward NOT blocking.
+    private var disarmed: Bool {
+        !(sharedDefaults?.object(forKey: Key.armed) as? Bool ?? true)
+    }
+
+    /// "Hide task details" (Settings → Block screen), mirrored into the
+    /// App Group by ScreenTimeManager. When on, the cross-app shield's
+    /// title/body are replaced with fixed generic strings so a
+    /// background-engaged shield reveals nothing about the task. Defaults
+    /// to off (show real details) when unset.
+    private var genericShield: Bool {
+        sharedDefaults?.object(forKey: Key.genericShield) as? Bool ?? false
+    }
+
+    /// Generic stand-ins for the cross-app shield when "Hide task
+    /// details" is on. Mirror of ShieldState.genericTitle/genericBody in
+    /// Vibez/ScreenTimeManager.swift — keep in sync.
+    private static let genericShieldTitle = "Your agent needs you"
+    private static let genericShieldBody = "Vibez is keeping you focused until you reply."
 
     override func didReceive(
         _ request: UNNotificationRequest,
@@ -96,41 +142,60 @@ final class NotificationService: UNNotificationServiceExtension {
         let title = request.content.title
         let body = request.content.body
         let reason = (userInfo["reason"] as? String) ?? ""
+        // Per-session ordering stamp (epoch millis, server-assigned). A
+        // push whose seq is behind the last one we applied for this
+        // session is STALE: an out-of-order delivery (a late shield:on
+        // arriving after a newer shield:off, or a superseded timeout)
+        // that must NOT re-drive the shield. FCM/APNs give no ordering
+        // guarantee across separate messages, so without this gate a
+        // fast approve (off sent ~1-3s after on) could land off-then-on
+        // and strand the shield. Absent seq → arrival-order fallback.
+        let seq = (userInfo["seq"] as? NSNumber)?.doubleValue
+        let stale = isStalePush(session: session, seq: seq)
 
-        log.info("didReceive: shield=\(shield, privacy: .public) session=\(session, privacy: .public) event=\(event, privacy: .public) agent=\(agent, privacy: .public)")
+        log.info("didReceive: shield=\(shield, privacy: .public) session=\(session, privacy: .public) event=\(event, privacy: .public) agent=\(agent, privacy: .public) seq=\(seq ?? -1, privacy: .public) stale=\(stale, privacy: .public)")
 
-        applyShieldState(
-            shield: shield,
-            session: session,
-            event: event,
-            agent: agent,
-            title: title,
-            body: body,
-            reason: reason
-        )
+        if stale {
+            // The newer state for this session already won — leave the
+            // shield and the replay file untouched.
+            log.info("ignoring stale push (seq behind last applied for \(session, privacy: .public))")
+        } else {
+            applyShieldState(
+                shield: shield,
+                session: session,
+                event: event,
+                agent: agent,
+                title: title,
+                body: body,
+                reason: reason,
+                seqPresent: seq != nil
+            )
+            recordSeq(session: session, seq: seq)
 
-        // Stash the original push payload so the host can replay the
-        // overlay / Recent triggers row / analytics when the user
-        // re-opens Vibez. Without this the in-app overlay never
-        // appears for background-engaged blocks — handleIncoming is
-        // driven by NotifyClient.lastMessage, which the NSE (a
-        // separate process) can't set directly. Carry the system's
-        // request identifier so the host can dedupe replay against
-        // pushes it already processed via willPresent — without a
-        // stable id, every drain re-enqueues the overlay.
-        // A timeout unblock is a backup mechanism, not a ping — never
-        // replay it as an in-app overlay / Recent-triggers row.
-        if reason != "timeout" {
-            writeLastMessageToAppGroup(
-                userInfo: userInfo, title: title, body: body,
-                identifier: request.identifier)
+            // Stash the original push payload so the host can replay the
+            // overlay / Recent triggers row / analytics when the user
+            // re-opens Vibez. Without this the in-app overlay never
+            // appears for background-engaged blocks — handleIncoming is
+            // driven by NotifyClient.lastMessage, which the NSE (a
+            // separate process) can't set directly. Carry the system's
+            // request identifier so the host can dedupe replay against
+            // pushes it already processed via willPresent — without a
+            // stable id, every drain re-enqueues the overlay.
+            // A timeout unblock is a backup mechanism, not a ping — never
+            // replay it as an in-app overlay / Recent-triggers row.
+            if reason != "timeout" {
+                writeLastMessageToAppGroup(
+                    userInfo: userInfo, title: title, body: body,
+                    identifier: request.identifier)
+            }
         }
 
         // Keep Notification Center tidy. Issued here, before contentHandler
         // below, because the extension can be suspended the instant that
         // fires. Widest case first:
-        //   • notifications off → pull EVERY Vibez entry on every push, so
-        //     nothing piles up while the user has banners disabled.
+        //   • notifications off OR toggle off → pull EVERY Vibez entry on
+        //     every push, so nothing piles up while Vibez is silenced
+        //     (banners disabled in settings, or the big toggle off).
         //   • otherwise → pull every stale shield:off control entry
         //     ("Replied" pings, timeout unblocks). Those have to be alert
         //     pushes (silent pushes don't wake this extension), so each
@@ -141,11 +206,11 @@ final class NotificationService: UNNotificationServiceExtension {
         // Either way the current push isn't in the delivered list yet, so it
         // still files in passively; the next push (or the host's
         // on-activation sweep) clears the remainder.
-        if notificationsOff {
+        if notificationsOff || disarmed {
             clearAllDeliveredNotifications()
         } else {
             let isReply = shield == "off" && reason != "timeout"
-                && !session.isEmpty && session != "nosid"
+                && session.isUsableSessionId
             clearStaleDeliveredNotifications(repliedSession: isReply ? session : nil)
         }
 
@@ -156,15 +221,19 @@ final class NotificationService: UNNotificationServiceExtension {
         if let best = bestAttemptContent {
             best.title = Self.stripMarkdown(Self.displayTitle(title: title, event: event))
             best.body = Self.stripMarkdown(body.isEmpty ? "Vibez ping" : body)
-            // Notifications off → deliver this push silently: a passive
-            // interruption level files it into Notification Center with no
-            // banner, no sound, no screen wake, and we drop the sound the
-            // server attached to a shield:on push. The shield work already
-            // ran, so apps stay blocked — only the interruption is
-            // suppressed, and the sweep above keeps the backlog clear.
-            // shield:off is already passive server-side, so this is a no-op
-            // for it.
-            if notificationsOff {
+            // Silence the banner when Vibez is dormant — either the user
+            // disabled notifications in settings, or the big toggle is off.
+            // A passive interruption level files it into Notification Center
+            // with no banner, no sound, no screen wake, and we drop the
+            // sound the server attached to a shield:on push; the sweep above
+            // keeps the backlog clear. The two cases differ on the SHIELD,
+            // not the banner: notifications-off still engaged the shield
+            // above, whereas the toggle-off case already had applyShieldState
+            // no-op it. shield:off is already passive server-side, so this is
+            // a no-op for it.
+            // `stale` also files passively: a late shield:on for a
+            // session the user already resolved must not buzz/banner.
+            if notificationsOff || disarmed || stale {
                 best.interruptionLevel = .passive
                 best.sound = nil
             }
@@ -249,7 +318,8 @@ final class NotificationService: UNNotificationServiceExtension {
         agent: String,
         title: String,
         body: String,
-        reason: String
+        reason: String,
+        seqPresent: Bool
     ) {
         guard sharedDefaults != nil else {
             log.error("App Group defaults unavailable — check the application-groups entitlement")
@@ -257,7 +327,7 @@ final class NotificationService: UNNotificationServiceExtension {
         }
 
         if shield == "off" {
-            handleShieldOff(session: session, reason: reason)
+            handleShieldOff(session: session, reason: reason, seqPresent: seqPresent)
         } else {
             handleShieldOn(session: session, event: event, agent: agent, title: title, body: body)
         }
@@ -267,14 +337,19 @@ final class NotificationService: UNNotificationServiceExtension {
     /// matching pending trigger and, if nothing else is open, drop the OS
     /// shield. Runs regardless of `armed` (resolving stale state when the
     /// toggle is off is harmless).
-    private func handleShieldOff(session: String, reason: String) {
-        guard !session.isEmpty, session != "nosid" else { return }
+    private func handleShieldOff(session: String, reason: String, seqPresent: Bool) {
+        guard session.isUsableSessionId else { return }
         var triggers = loadPendingTriggers()
-        if reason == "timeout" {
-            // Backup unblock: drop ONLY if this session's timer is
-            // actually due. Not due (the timer was reset by a later
-            // ping) or already gone → no-op, so a stale/duplicate
-            // dispatch can never unblock early. Design spec §3.
+        if reason == "timeout" && !seqPresent {
+            // LEGACY fallback (push carried no seq): drop ONLY if this
+            // session's timer is actually due. This guard is what caused
+            // the "stuck forever" bug — the device pins expiresAt to the
+            // shield:on *delivery* time, while the server schedules the
+            // timeout from *send* time + buffer, so a delivery skew larger
+            // than the buffer makes this no-op with no retry. When seq IS
+            // present the seq gate above has already rejected the timeout
+            // if a later re-ping superseded it, so we unblock
+            // unconditionally and this fragile time check is skipped.
             guard let t = triggers.first(
                       where: {$0.sessionId == session}),
                   Date() >= t.expiresAt else {
@@ -310,7 +385,7 @@ final class NotificationService: UNNotificationServiceExtension {
             return
         }
 
-        guard !session.isEmpty, session != "nosid" else {
+        guard session.isUsableSessionId else {
             // Untagged ping — still refresh the shield context so the
             // extension's card has the latest title/body, but there's
             // no per-session trigger to add.
@@ -371,13 +446,20 @@ final class NotificationService: UNNotificationServiceExtension {
         // categories/domains can't bleed through on a real change.
         let desiredApps = apps.isEmpty ? nil : apps
         let desiredWebs = webs.isEmpty ? nil : webs
+        let desiredCats: ShieldSettings.ActivityCategoryPolicy<Application>? =
+            cats.isEmpty ? nil : .specific(cats)
         if store.shield.applications != desiredApps {
             store.shield.applications = desiredApps
         }
         if store.shield.webDomains != desiredWebs {
             store.shield.webDomains = desiredWebs
         }
-        store.shield.applicationCategories = cats.isEmpty ? nil : .specific(cats)
+        // Same guard as apps/webs — an unconditional re-assign here was
+        // the one facet that could still flash the live shield on a
+        // repeat push for category-based selections.
+        if store.shield.applicationCategories != desiredCats {
+            store.shield.applicationCategories = desiredCats
+        }
 
         log.info("applyShield: apps=\(apps.count, privacy: .public) cats=\(cats.count, privacy: .public) webs=\(webs.count, privacy: .public)")
     }
@@ -475,23 +557,96 @@ final class NotificationService: UNNotificationServiceExtension {
         case "cx": agentEnum = "codex"
         default:   agentEnum = "both"
         }
+        // Match the host's light/dark choice, mirrored to the App Group by
+        // ScreenTimeManager.updateEffectiveAppearance. Default dark when
+        // unset — the shield's long-standing appearance.
+        let dark = sharedDefaults?.object(forKey: Key.shieldDark) as? Bool ?? true
         var dict: [String: Any] = [
             "agent": agentEnum,
-            "dark": true,
+            "dark": dark,
             "updatedAt": Date().timeIntervalSince1970,
         ]
         // Use the same prefixed displayTitle the host writes — matches
         // the foreground card so users see "Done — title" / "Needs you
-        // — title" regardless of which path engaged the shield.
-        let cleanTitle = Self.stripMarkdown(Self.displayTitle(title: title, event: event))
+        // — title" regardless of which path engaged the shield. When
+        // "Hide task details" is on, swap in the fixed generic strings so
+        // the cross-app shield reveals nothing; the banner (best.title/
+        // body in didReceive) keeps the real title/body on its own path.
+        let cleanTitle: String
+        let cleanBody: String?
+        if genericShield {
+            cleanTitle = Self.genericShieldTitle
+            cleanBody = Self.genericShieldBody
+        } else {
+            cleanTitle = Self.stripMarkdown(Self.displayTitle(title: title, event: event))
+            cleanBody = body.isEmpty ? nil : Self.stripMarkdown(body)
+        }
         if !cleanTitle.isEmpty { dict["title"] = cleanTitle }
-        if !body.isEmpty { dict["body"] = Self.stripMarkdown(body) }
+        if let cleanBody, !cleanBody.isEmpty { dict["body"] = cleanBody }
         if let expiresAt {
             dict["expiresAt"] = expiresAt.timeIntervalSince1970
         }
 
         let url = containerURL.appendingPathComponent("shield-state.json")
         if let data = try? JSONSerialization.data(withJSONObject: dict) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
+    // MARK: - Per-session ordering (seq)
+
+    /// `seq-state.json` in the App Group container: a flat map of
+    /// `{ "<session>": <lastAppliedSeqMs> }`. The shield only honors a
+    /// push whose seq is >= the last seq applied for its session, so an
+    /// out-of-order delivery can't re-drive the shield. Stored as a FILE,
+    /// NOT App Group UserDefaults: NSE writes to App Group UserDefaults
+    /// get stranded by iOS 26's cfprefsd persona-sandbox bug (same reason
+    /// shield-state.json / last-message.json are files). Mirrored in the
+    /// host's `ScreenTimeManager` (separate target, can't share source) —
+    /// keep the two in sync.
+    private func seqStateURL() -> URL? {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        )?.appendingPathComponent("seq-state.json")
+    }
+
+    private func loadSeqState() -> [String: Double] {
+        guard let url = seqStateURL(),
+              let data = try? Data(contentsOf: url),
+              let raw = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return [:] }
+        var out: [String: Double] = [:]
+        for (key, value) in raw {
+            if let n = value as? NSNumber { out[key] = n.doubleValue }
+        }
+        return out
+    }
+
+    /// True when this push is older than the last one applied for its
+    /// session — its shield state change must be skipped. A push with no
+    /// seq or no usable session is never stale (arrival-order fallback for
+    /// legacy/untagged pushes).
+    private func isStalePush(session: String, seq: Double?) -> Bool {
+        guard let seq, session.isUsableSessionId else { return false }
+        if let last = loadSeqState()[session] { return seq < last }
+        return false
+    }
+
+    /// Records that `seq` was applied for `session` (monotonic — never
+    /// lowers a recorded value), pruning entries older than 24h so the
+    /// file can't grow without bound. No-op without a seq/session, or when
+    /// the recorded value already meets/exceeds this seq (e.g. an
+    /// equal-seq timeout backup).
+    private func recordSeq(session: String, seq: Double?) {
+        guard let seq, session.isUsableSessionId else { return }
+        var state = loadSeqState()
+        if let last = state[session], last >= seq { return }
+        state[session] = seq
+        let cutoff = seq - 24 * 60 * 60 * 1000
+        state = state.filter { $0.value >= cutoff }
+        if let url = seqStateURL(),
+           let data = try? JSONSerialization.data(withJSONObject: state) {
             try? data.write(to: url, options: .atomic)
         }
     }

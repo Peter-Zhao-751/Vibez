@@ -89,6 +89,17 @@ describe("buildApnsPayload", () => {
     expect(p.event).toBeUndefined();
     expect(p.reason).toBeUndefined();
   });
+  it("includes seq at the top level when provided", () => {
+    const p = buildApnsPayload({title: "T", body: "B", seq: 1717999999000});
+    expect(p.seq).toBe(1717999999000);
+  });
+  it("omits seq when absent or non-finite", () => {
+    expect("seq" in buildApnsPayload({title: "T", body: "B"})).toBe(false);
+    expect("seq" in buildApnsPayload(
+      {title: "T", body: "B", seq: NaN})).toBe(false);
+    expect("seq" in buildApnsPayload(
+      {title: "T", body: "B", seq: Infinity})).toBe(false);
+  });
 });
 
 describe("APNS_HEADERS", () => {

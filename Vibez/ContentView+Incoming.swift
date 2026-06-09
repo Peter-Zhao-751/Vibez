@@ -63,6 +63,28 @@ extension ContentView {
         withAnimation(.easeInOut(duration: 0.32)) {
             _ = overlayQueue.removeFirst()
         }
+        maybePromptForReview()
+    }
+
+    /// After the user dismisses the LAST block overlay, offer the review
+    /// prompt if they're engaged + multi-day + not in a cooldown. Shown
+    /// after the overlay's 0.32s dismiss animation so we don't stack a
+    /// sheet on top of it. Only reachable post-dismiss, so onboarding (a
+    /// full-screen cover) is never up at this point.
+    private func maybePromptForReview() {
+        guard overlayQueue.isEmpty else { return }
+        // Design-doc gates (2026-06-09-auto-review-prompt): never over
+        // another modal, never before setup completed. Structurally the
+        // Dismiss tap can't happen under a sheet/cover, but the DEBUG
+        // auto-dismiss seam drives this path programmatically — keep the
+        // guards real rather than relying on reachability.
+        guard !showSettings, !pickerPresented else { return }
+        guard UserDefaults.standard.bool(forKey: "vibez.onboardingCompleted") else { return }
+        guard reviewPrompt.shouldPromptNow(pingsToday: analytics.pingsToday) else { return }
+        reviewPrompt.markPrompted()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+            showReviewPrompt = true
+        }
     }
 
     /// Countdown on the top overlay reached 0. The trigger has already
@@ -138,6 +160,8 @@ extension ContentView {
         // (user replies) and pings that arrive while Vibez is unarmed
         // both still count as activity for today's stats.
         analytics.record(message)
+        // Multi-day usage ledger for the review prompt (distinct active days).
+        reviewPrompt.recordActivity()
 
         // shield:off (the user just replied in Claude) is a control
         // signal — never surface it as a notification, and only act on

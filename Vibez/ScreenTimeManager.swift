@@ -43,6 +43,13 @@ struct ShieldState {
     var expiresAt: Date?
     var dark: Bool
 
+    /// Generic stand-ins written to the cross-app shield when the user
+    /// enables "Hide task details" (Settings → Block screen), so the
+    /// shield never shows the task title/body. Mirrored verbatim in
+    /// VibezPushService/NotificationService.swift — keep in sync.
+    static let genericTitle = "Your agent needs you"
+    static let genericBody = "Vibez is keeping you focused until you reply."
+
     var asDict: [String: Any] {
         var d: [String: Any] = [
             "agent": agent.rawValue,
@@ -118,6 +125,15 @@ final class ScreenTimeManager {
     /// layer; this is the shield decision used by init/recompute/setArmed.
     var shouldShield: Bool { isBlocking || focusMode }
     private(set) var lastError: String?
+    /// The app's effective appearance (Vibez's appearance override
+    /// resolved against the live system scheme), kept current by
+    /// ContentView via `updateEffectiveAppearance`. Drives the `dark`
+    /// flag the shield card is written with: light mode → the agent-tinted
+    /// near-white background, dark mode → the tinted near-black. Seeded at
+    /// init from the persisted mirror so the first push after a cold launch
+    /// uses the last-known appearance instead of defaulting blind. Defaults
+    /// to dark — the shield's long-standing always-dark behavior.
+    private(set) var effectiveDark: Bool = true
     /// Tracks the OS-store side so we only call apply/clear on transitions.
     private var shieldApplied: Bool = false
 
@@ -160,6 +176,13 @@ final class ScreenTimeManager {
         /// shield on a backgrounded shield:off while a hold is active.
         static let focusMode = "vibez.focusMode.v1"
         static let focusModeStartedAt = "vibez.focusModeStartedAt.v1"
+        /// Effective appearance the shield renders with (true = dark).
+        /// Mirrored to the App Group so VibezPushService (the NSE) can
+        /// match the host's light/dark choice on the background path.
+        static let shieldDark = "vibez.shieldDark"
+        /// "Hide task details" toggle (Settings → Block screen). Mirrored
+        /// to the App Group so the NSE writes generic shield text too.
+        static let genericShield = "vibez.genericShield"
     }
 
     /// Used when migrating v1 entries that don't know their original
@@ -174,6 +197,7 @@ final class ScreenTimeManager {
         loadSelection()
         loadStateAndMigrate()
         loadFocusState()
+        effectiveDark = defaults.object(forKey: Key.shieldDark) as? Bool ?? true
         mirrorAllToAppGroup()
         syncAuthState()
         // Force-sync the OS store on launch. If the previous process
@@ -293,6 +317,18 @@ final class ScreenTimeManager {
         }
     }
 
+    /// Records the app's current effective appearance — ContentView
+    /// resolves the appearance override against the live system scheme and
+    /// pushes the result here. Mirrors the resolved bool to the App Group
+    /// so VibezPushService's background shield writes match the host's
+    /// light/dark choice. Idempotent: only writes on a real change.
+    func updateEffectiveAppearance(dark: Bool) {
+        guard dark != effectiveDark else { return }
+        effectiveDark = dark
+        defaults.set(dark, forKey: Key.shieldDark)
+        sharedDefaults?.set(dark, forKey: Key.shieldDark)
+    }
+
     /// Loads the persisted focus hold on launch. A persisted `focusMode`
     /// with no timestamp is normalized to "started now" so a hold that
     /// survived a kill keeps the shield up rather than being dropped.
@@ -319,6 +355,16 @@ final class ScreenTimeManager {
     func addTrigger(sessionId: String, durationSeconds: Int) {
         guard armed else { return }
         guard sessionId.isUsableSessionId else { return }
+        // Pull in anything the NSE persisted (its own process, App Group
+        // only) BEFORE mutating, so the persist below can't clobber an
+        // NSE-added trigger with a stale in-memory view. Residual race
+        // (accepted, documented): the NSE's own read-modify-write isn't
+        // serialized against ours, so two pushes landing within the same
+        // few-ms window — one here, one in the NSE — can still lose one
+        // trigger. Cross-process locking was judged not worth the I/O in
+        // these paths for that probability; the 1 Hz tick re-adopts the
+        // App Group copy either way.
+        _ = reloadPendingTriggersFromAppGroupIfChanged()
         let duration = max(1, durationSeconds)
         pendingTriggers[sessionId] = PendingTrigger(
             sessionId: sessionId,
@@ -445,6 +491,7 @@ final class ScreenTimeManager {
             Key.armed,
             Key.focusMode,
             Key.focusModeStartedAt,
+            Key.shieldDark,
         ]
         for key in keys {
             if let value = std.object(forKey: key) {
@@ -549,6 +596,13 @@ final class ScreenTimeManager {
         if let notify = std.object(forKey: "vibez.notifyBanners") as? Bool,
            shared.object(forKey: "vibez.notifyBanners") as? Bool != notify {
             shared.set(notify, forKey: "vibez.notifyBanners")
+        }
+        // Generic-shield toggle (Settings → Block screen). Same lazy
+        // mirror as the banner toggle: absent on both sides until the
+        // user flips it, and the NSE reads `?? false` until then.
+        if let generic = std.object(forKey: Key.genericShield) as? Bool,
+           shared.object(forKey: Key.genericShield) as? Bool != generic {
+            shared.set(generic, forKey: Key.genericShield)
         }
     }
 
@@ -656,13 +710,20 @@ final class ScreenTimeManager {
         // selection change can't leave stale categories/domains behind.
         let desiredApps = apps.isEmpty ? nil : apps
         let desiredWebs = webs.isEmpty ? nil : webs
+        let desiredCats: ShieldSettings.ActivityCategoryPolicy<Application>? =
+            cats.isEmpty ? nil : .specific(cats)
         if store.shield.applications != desiredApps {
             store.shield.applications = desiredApps
         }
         if store.shield.webDomains != desiredWebs {
             store.shield.webDomains = desiredWebs
         }
-        store.shield.applicationCategories = cats.isEmpty ? nil : .specific(cats)
+        // Same guard as apps/webs — an unconditional re-assign here was
+        // the one facet that could still flash the live shield on a
+        // reconcile for users with category-based selections.
+        if store.shield.applicationCategories != desiredCats {
+            store.shield.applicationCategories = desiredCats
+        }
 
         // Deliberately do NOT write a generic shieldState here. The
         // per-message context (title / body / agent) is owned by
@@ -776,6 +837,62 @@ final class ScreenTimeManager {
         sharedDefaults?.removeObject(forKey: "shieldState")
     }
 
+    // MARK: - Per-session ordering (seq)
+
+    /// `seq-state.json` in the App Group container: `{ "<session>":
+    /// <lastAppliedSeqMs> }`. The shield honors a push only if its seq is
+    /// >= the last seq applied for its session, so a shield:on/off pair
+    /// delivered out of order (FCM/APNs give no cross-message ordering)
+    /// can't strand the block. Stored as a FILE for the same cfprefsd
+    /// reason as `writeShieldState`. Mirror of the helpers in
+    /// VibezPushService/NotificationService.swift (separate target, can't
+    /// share source) — keep the two in sync. The NSE owns the suspended
+    /// path; the host runs these for foreground (live) pushes.
+    private func seqStateURL() -> URL? {
+        FileManager.default.containerURL(
+            forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
+        )?.appendingPathComponent("seq-state.json")
+    }
+
+    private func loadSeqState() -> [String: Double] {
+        guard let url = seqStateURL(),
+              let data = try? Data(contentsOf: url),
+              let raw = try? JSONSerialization.jsonObject(with: data)
+                as? [String: Any]
+        else { return [:] }
+        var out: [String: Double] = [:]
+        for (key, value) in raw {
+            if let n = value as? NSNumber { out[key] = n.doubleValue }
+        }
+        return out
+    }
+
+    /// True when this push is older than the last one applied for its
+    /// session — its shield state change must be skipped. No seq / no
+    /// usable session → never stale (arrival-order fallback). Called by
+    /// NotifyClient on the live push path.
+    func isStalePush(session: String, seq: Double?) -> Bool {
+        guard let seq, session.isUsableSessionId else { return false }
+        if let last = loadSeqState()[session] { return seq < last }
+        return false
+    }
+
+    /// Records that `seq` was applied for `session` (monotonic), pruning
+    /// entries older than 24h. No-op when seq/session absent or the
+    /// recorded value already meets/exceeds this seq.
+    func recordSeq(session: String, seq: Double?) {
+        guard let seq, session.isUsableSessionId else { return }
+        var state = loadSeqState()
+        if let last = state[session], last >= seq { return }
+        state[session] = seq
+        let cutoff = seq - 24 * 60 * 60 * 1000
+        state = state.filter { $0.value >= cutoff }
+        if let url = seqStateURL(),
+           let data = try? JSONSerialization.data(withJSONObject: state) {
+            try? data.write(to: url, options: .atomic)
+        }
+    }
+
     /// Engages (or lifts) the shield based on a fresh push. Mirrors the
     /// shield/trigger logic that used to live in ContentView.handleIncoming
     /// but called from NotifyClient.acceptPushUserInfo so it runs at
@@ -792,18 +909,23 @@ final class ScreenTimeManager {
         let sidStr = message.sessionId ?? "nil"
         shieldLog.info("applyTriggerFor: shield=\(shieldStr, privacy: .public) armed=\(self.armed, privacy: .public) session=\(sidStr, privacy: .public) selection=\(self.selection.applicationTokens.count, privacy: .public) apps")
 
-        if message.shield == .off,
-           let sid = message.sessionId, sid.isUsableSessionId {
-            // Sync from App Group first — the NSE may have added this
-            // session's trigger in the background and host's in-memory
-            // dict hasn't picked it up yet (tick is 1Hz). Without this,
-            // resolveTrigger's `removeValue(forKey:) != nil` guard
-            // short-circuits because the in-memory dict is empty, and
-            // recomputeBlocking → clearShield never runs. Apps stay
-            // blocked.
-            _ = reloadPendingTriggersFromAppGroupIfChanged()
-            shieldLog.info("applyTriggerFor: shield=off → resolveTrigger(\(sid, privacy: .public))")
-            resolveTrigger(sessionId: sid)
+        if message.shield == .off {
+            // A reply is a control signal — it must NEVER fall through to
+            // the engage path below. A session-less shield:off used to do
+            // exactly that and overwrite shield-state.json with the
+            // reply's text (visible on a manual focus hold's shield).
+            if let sid = message.sessionId, sid.isUsableSessionId {
+                // Sync from App Group first — the NSE may have added this
+                // session's trigger in the background and host's in-memory
+                // dict hasn't picked it up yet (tick is 1Hz). Without this,
+                // resolveTrigger's `removeValue(forKey:) != nil` guard
+                // short-circuits because the in-memory dict is empty, and
+                // recomputeBlocking → clearShield never runs. Apps stay
+                // blocked.
+                _ = reloadPendingTriggersFromAppGroupIfChanged()
+                shieldLog.info("applyTriggerFor: shield=off → resolveTrigger(\(sid, privacy: .public))")
+                resolveTrigger(sessionId: sid)
+            }
             return
         }
         // shield:on or untagged → engage if armed and not ignored.
@@ -873,17 +995,29 @@ final class ScreenTimeManager {
         // render markdown there. Strip the inline markers (**bold**,
         // *italic*, `code`, etc.) so they don't show literally on the
         // shield. Matches what NotifyClient does for push notifications.
-        let cleanTitle = NotifyClient.stripMarkdown(message.displayTitle)
-        let cleanBody = message.body.isEmpty
-            ? nil
-            : NotifyClient.stripMarkdown(message.body)
+        //
+        // "Hide task details" (Settings → Block screen) swaps the real
+        // title/body for fixed generic strings so the cross-app shield
+        // never reveals what the agent is doing. Banners and the in-app
+        // overlay take separate paths and are deliberately unaffected.
+        let cleanTitle: String
+        let cleanBody: String?
+        if defaults.object(forKey: Key.genericShield) as? Bool ?? false {
+            cleanTitle = ShieldState.genericTitle
+            cleanBody = ShieldState.genericBody
+        } else {
+            cleanTitle = NotifyClient.stripMarkdown(message.displayTitle)
+            cleanBody = message.body.isEmpty
+                ? nil
+                : NotifyClient.stripMarkdown(message.body)
+        }
 
         writeShieldState(ShieldState(
             agent: agent,
             title: cleanTitle,
             body: cleanBody,
             expiresAt: expiry,
-            dark: true
+            dark: effectiveDark
         ))
     }
 

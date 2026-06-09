@@ -182,6 +182,15 @@ struct ActiveBackdrop: View {
         active && scenePhase == .active && !reduceMotion
     }
 
+    /// Bubble tint: the accent in light mode, dimmed toward black in dark
+    /// mode so the orbs read as a deep ambient glow rather than a bright
+    /// orange wash against the near-black background. Resolves from the live
+    /// trait collection (like the rest of the palette via `.dynamic`) so it
+    /// tracks the appearance override and the App Switcher snapshot passes.
+    private var bubbleTint: Color {
+        .dynamic(light: accent, dark: accent.darkened(by: 0.4))
+    }
+
     var body: some View {
         GeometryReader { proxy in
             // One clock drives all six bubbles. Pausing while faded out
@@ -234,7 +243,7 @@ struct ActiveBackdrop: View {
             // so transparent lands at 0.7·0.707 ≈ 0.495 of the diameter.
             .fill(RadialGradient(
                 stops: [
-                    .init(color: accent.opacity(spec.alpha), location: 0),
+                    .init(color: bubbleTint.opacity(spec.alpha), location: 0),
                     .init(color: .clear, location: 0.7),
                 ],
                 center: .center,

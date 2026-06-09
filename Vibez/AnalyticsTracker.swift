@@ -148,16 +148,27 @@ final class AnalyticsTracker {
 
     // MARK: - Derived views
     //
-    // Currently unread by the UI — the home screen's "Today" panel was
-    // dropped in the prototype-match redesign. Recording stays live (the
-    // tracker still counts every ping, reply, and focus interval) so a
-    // future stats surface can pick these up without losing history.
+    // `pingsToday` gates the automatic review prompt's "engaged today"
+    // check (ContentView.maybePromptForReview). The rest have no UI
+    // surface right now (the home screen's "Today" panel was dropped in
+    // the prototype-match redesign) but recording stays live so a future
+    // stats surface can pick them up without losing history.
+    //
+    // All of these are day-scoped like `focusSecondsToday`: rollover is
+    // lazy (it happens on the next recorded event), so when the persisted
+    // stats still belong to a previous day these must read as zero — a
+    // dismiss just after midnight must not pass the review prompt's gate
+    // on yesterday's ping count.
 
-    var conversationsToday: Int { stats.conversationIds.count }
-    var responsesToday: Int { stats.responseCount }
-    var pingsToday: Int { stats.pingCount }
+    private var statsAreFromToday: Bool {
+        stats.date == Calendar.current.startOfDay(for: Date())
+    }
+
+    var conversationsToday: Int { statsAreFromToday ? stats.conversationIds.count : 0 }
+    var responsesToday: Int { statsAreFromToday ? stats.responseCount : 0 }
+    var pingsToday: Int { statsAreFromToday ? stats.pingCount : 0 }
     var averageResponseLength: Double {
-        guard !stats.responseLengths.isEmpty else { return 0 }
+        guard statsAreFromToday, !stats.responseLengths.isEmpty else { return 0 }
         let sum = stats.responseLengths.reduce(0, +)
         return Double(sum) / Double(stats.responseLengths.count)
     }

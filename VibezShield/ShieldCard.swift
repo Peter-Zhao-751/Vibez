@@ -15,7 +15,11 @@ import UIKit
 import os
 
 extension Logger {
-    static let shieldExt = Logger(subsystem: "vibezlol.Vibez.Shield", category: "Extension")
+    /// nonisolated: with the project-wide MainActor default this static
+    /// would otherwise be MainActor-isolated, and every use is in the
+    /// deliberately nonisolated shield extension — a Swift 6 error in
+    /// waiting (it currently compiles as 5 warnings). Logger is Sendable.
+    nonisolated static let shieldExt = Logger(subsystem: "vibezlol.Vibez.Shield", category: "Extension")
 }
 
 enum Agent: String {

@@ -37,14 +37,17 @@ struct SettingsView: View {
     @Bindable var registrar: PushTokenRegistrar
     @Bindable var triggerStore: TriggerStore
     @Bindable var ignoreStore: IgnoreStore
+    @Bindable var reviewPrompt: ReviewPromptManager
 
     @AppStorage("vibez.appearance") private var appearanceRaw = AppearancePref.system.rawValue
     @AppStorage("vibez.blockSeconds.needsInput") private var blockSecondsNeedsInput = 900
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
+    @AppStorage("vibez.genericShield") private var genericShield = false
     @AppStorage("vibez.notifyBanners") private var notifyBanners = true
     @AppStorage("vibez.showFocusHint") private var showFocusHint = true
+    @AppStorage("vibez.gradientEffects") private var gradientEffects = true
     @AppStorage("vibez.onboardingCompleted") private var onboardingCompleted = false
 
     @State private var pickerPresented = false
@@ -53,6 +56,7 @@ struct SettingsView: View {
     @State private var vibezIdDraft: String = ""
     @State private var vibezIdError: String? = nil
     @State private var tutorial: OnboardingState?
+    @State private var showReview = false
     @State private var copiedFeedback = false
     @State private var systemColorScheme = SystemColorSchemeProbe.current
     @FocusState private var vibezIdFocused: Bool
@@ -90,10 +94,12 @@ struct SettingsView: View {
                 appsSection
                 durationSection
                 overlaySection
+                blockScreenSection
                 notificationsSection
                 vibezIdSection
                 ignoredConversationsSection
                 tutorialSection
+                reviewSection
             }
             .scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings")
@@ -146,6 +152,16 @@ struct SettingsView: View {
                     }
                 )
             }
+            // A sheet (not a cover) so swipe-down is the no-rate exit —
+            // the page has no close button; it otherwise dismisses itself
+            // only after a Rate tap resolves.
+            .sheet(isPresented: $showReview) {
+                PleaseReviewView(
+                    onClose: { showReview = false },
+                    onRated: { reviewPrompt.markRated() }
+                )
+                .presentationDragIndicator(.visible)
+            }
         }
         // Must sit on the sheet's content root (the NavigationStack), NOT
         // on the inner Form. The sheet's hosting controller reads this
@@ -182,11 +198,12 @@ struct SettingsView: View {
                 }
             }
             .pickerStyle(.segmented)
+            Toggle("Gradient effects", isOn: $gradientEffects)
             Toggle("Show focus-mode hint", isOn: $showFocusHint)
         } header: {
             Text("Appearance")
         } footer: {
-            Text("The “tap to enter focus mode” caption under the mascot on the home screen.")
+            Text("Gradient effects: the drifting background bubbles, the toggle’s accent glow, and the halo behind the mascot in focus mode — turn off for a flat, glow-free home screen. Focus-mode hint: the “tap to enter focus mode” caption under the mascot.")
         }
     }
 
@@ -382,6 +399,17 @@ struct SettingsView: View {
     }
 
     @ViewBuilder
+    private var blockScreenSection: some View {
+        Section {
+            Toggle("Hide task details", isOn: $genericShield)
+        } header: {
+            Text("Block screen")
+        } footer: {
+            Text("When on, the block screen shown over Instagram, TikTok and other blocked apps just says “Your agent needs you” instead of the task title and message from Claude or Codex. Notifications and the in-app block screen still show the full details.")
+        }
+    }
+
+    @ViewBuilder
     private var notificationsSection: some View {
         Section {
             Toggle("Show notifications", isOn: $notifyBanners)
@@ -416,6 +444,26 @@ struct SettingsView: View {
             }
         } footer: {
             Text("Replays the setup walkthrough. Steps you've already completed are skipped — fully set up, it's a quick tour of how Vibez works plus the app version.")
+        }
+    }
+
+    @ViewBuilder
+    private var reviewSection: some View {
+        Section {
+            Button {
+                showReview = true
+            } label: {
+                HStack {
+                    Label("Rate Vibez", systemImage: "star")
+                        .foregroundStyle(Color.primary)
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+        } footer: {
+            Text("Opens the review page and asks the App Store to show its rating prompt.")
         }
     }
 
@@ -915,7 +963,8 @@ private struct AddIgnoreSheet: View {
         notifyClient: NotifyClient(),
         registrar: PushTokenRegistrar.previewRegistrar(),
         triggerStore: TriggerStore(),
-        ignoreStore: IgnoreStore()
+        ignoreStore: IgnoreStore(),
+        reviewPrompt: ReviewPromptManager()
     )
 }
 #endif

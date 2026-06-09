@@ -57,8 +57,13 @@ struct BlockedOverlay: View {
         return msg.displayTitle
     }
 
-    private var bodyText: String {
-        if let msg = message, !msg.body.isEmpty { return msg.body }
+    /// nil hides the body row. The placeholder is for the no-message
+    /// preview path only — a real push with an empty body used to fall
+    /// into it too, showing fabricated text with a fake timestamp.
+    private var bodyText: String? {
+        if let msg = message {
+            return msg.body.isEmpty ? nil : msg.body
+        }
         return "Permission requested · 0:42 ago"
     }
 
@@ -132,16 +137,18 @@ struct BlockedOverlay: View {
                     .lineLimit(2)
                     .truncationMode(.tail)
                     .padding(.horizontal, 32)
-                    .padding(.bottom, 8)
+                    .padding(.bottom, bodyText == nil ? 18 : 8)
 
-                Text(.init(bodyText))
-                    .font(.system(size: 14))
-                    .foregroundStyle(theme.fgMute)
-                    .multilineTextAlignment(.center)
-                    .lineLimit(4)
-                    .truncationMode(.tail)
-                    .padding(.horizontal, 40)
-                    .padding(.bottom, 18)
+                if let bodyText {
+                    Text(.init(bodyText))
+                        .font(.system(size: 14))
+                        .foregroundStyle(theme.fgMute)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(4)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 40)
+                        .padding(.bottom, 18)
+                }
 
                 if expiresAt != nil {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
@@ -161,7 +168,12 @@ struct BlockedOverlay: View {
                     }
                 }
 
-                if allowDismiss {
+                // Trigger-less overlays (untagged pings — no countdown, so
+                // no auto-expiry either) always get Dismiss: with the button
+                // hidden they'd be stuck until app relaunch. The setting
+                // means "make me reply to the agent", and an untagged ping
+                // has no agent to reply to. (Design call 2026-06-09.)
+                if allowDismiss || expiresAt == nil {
                     Button(action: onDismiss) {
                         Text("Dismiss")
                             .font(.system(size: 14, weight: .semibold))

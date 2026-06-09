@@ -6,7 +6,7 @@ iOS app that blocks distracting apps (Instagram, TikTok, etc.) whenever Claude C
 
 - **Family Controls working on device.** Screen Time API integration via `FamilyControls` + `ManagedSettings` runs end-to-end against the iOS 26.4 SDK on Peter's iPhone. Toggle on → selected apps shielded; toggle off → unblocked. State survives app kill. Peter is enrolled in the paid Apple Developer Program, so the `com.apple.developer.family-controls` entitlement provisions cleanly.
 - **Firebase-backed push pipeline working end-to-end.** Mac plugin (Claude Code or Codex) POSTs lifecycle events to a Firebase Cloud Function (`/notify`); the function fans out via FCM to every device registered to the user's Vibez ID. Push lands while Vibez is suspended (the whole reason FCM replaces ntfy). The four-word Vibez ID pairs Mac → phone.
-- **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and shows a custom shield (host-rendered mascot PNG + push title/body, tinted accent background, "Close" button). The PNG is rendered on the host (`ShieldCardRenderer`), not in the extension.
+- **Shield Configuration Extension shipping.** `VibezShield` reads `ShieldState` from the App Group `group.vibezlol.Vibez` and shows a custom shield (host-rendered mascot PNG + push title/body, agent-tinted background that follows the app's light/dark appearance, "Close" button). The PNG is rendered on the host (`ShieldCardRenderer`), not in the extension.
 - **ntfy is gone.** WebSocket subscription, ntfy URL UI, push-vibez.py, and the topic-based plugin path are all removed. One push path: plugin → Firebase → FCM → APNs → Vibez.
 - **Shipped: live on the App Store (2026-06-06, v1.0, free).** Family Controls Distribution Request and App Store review were both approved within days. Backend runs on Peter's Firebase project; .p8 lives in Firebase Cloud Messaging, never ships to users.
 
@@ -109,7 +109,8 @@ Vibez/                        Main iOS app target.
                               pings render the codex logo + periwinkle accent; everything
                               else stays Claude.
   SettingsView.swift          Settings sheet: app picker, block durations, re-pair the Vibez
-                              ID, appearance override.
+                              ID, appearance override, generic-shield toggle ("Hide task
+                              details" — Block screen section).
   Mascots.swift               Vector mascot — Claude (pixel critter). The Codex cloud-bot
                               VECTOR stays deleted (2026-06-05), but the Codex identity is
                               back on the per-ping surfaces (2026-06-06): BlockedOverlay and
@@ -239,6 +240,40 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   is mirrored across three sites — keep them in sync: `Vibez/ScreenTimeManager.swift`
   (`ShieldState.asDict`, writer), `VibezShield/ShieldCard.swift` (`ShieldState.read`, reader),
   and `VibezPushService/NotificationService.swift` (the NSE, which also engages the shield).
+  The `dark` field carries the app's **effective appearance** (override resolved against the
+  live system scheme), not a constant — light mode renders the shield with the agent-tinted
+  near-white background (peach for Claude, periwinkle for Codex), the mirror of the dark
+  tinted-near-black. ContentView pushes the resolved bool into `ScreenTimeManager`
+  (`updateEffectiveAppearance`), which both stamps it into `shield-state.json` and mirrors it to
+  the App Group as `vibez.shieldDark` so the NSE's background write matches on the suspended
+  path. (Known gap: the extension's text-only fallback — manual focus with no recent push —
+  stays dark.) **The light/dark base is set by `ShieldConfiguration.backgroundBlurStyle`, NOT
+  `backgroundColor`** — iOS composites `backgroundColor` as a translucent *tint over the blur
+  material*, so a `nil` style (dark default material) keeps the shield dark no matter how light
+  the color is. VibezShield therefore sets `backgroundBlurStyle` to `.systemThickMaterialLight`
+  in light mode and `nil` in dark mode; the agent tint (`backgroundUIColor`) rides on top. This
+  is why an earlier attempt that only flipped `dark` recolored the labels but left the
+  background dark.
+- **Per-session push ordering (`seq`) — fixes the out-of-order shield desync.**
+  shield:on and shield:off are independent FCM/APNs messages with NO cross-message delivery
+  ordering (`APNS_HEADERS` carries no `apns-collapse-id`), so a fast permission answer (off sent
+  ~1-3s after on) could land off-then-on and strand the shield blocked until the 15-min timeout.
+  Fix: `/notify` stamps every push with `seq = Date.now()` (epoch ms) at the top level of
+  `apns.payload` (`Backend/functions/src/scheduling.ts buildApnsPayload`), and `dispatchUnblock`
+  re-emits the **original on's** seq (threaded through the Cloud Task) so a genuine re-ping
+  (higher seq) outranks a stale timeout. The phone keeps `seq-state.json` in the App Group
+  (`{ "<session>": <lastAppliedSeqMs> }`) and **ignores any push whose seq is < the last applied
+  for that session** — the late on is dropped, the shield stays correct. The seq-state helpers
+  (`isStalePush`/`recordSeq`/`loadSeqState`) are **mirrored across two targets** — keep in sync:
+  `VibezPushService/NotificationService.swift` (NSE, the suspended path) and
+  `Vibez/ScreenTimeManager.swift` (host, the foreground/live path; `NotifyClient.acceptPushUserInfo`
+  gates the live path and parses `NtfyMessage.seq`). Stored as a FILE, not App Group UserDefaults
+  (same iOS 26 cfprefsd reason as `shield-state.json`). Because seq makes the real reply
+  authoritative even when reordered, the NSE's timeout branch now SKIPS the old fragile
+  `Date() >= expiresAt` due-check when a seq is present (that check was the skew→"stuck forever"
+  bug — delivery skew > the 8s `UNBLOCK_BUFFER_SECONDS` made it no-op with no retry); it's kept
+  only as the legacy fallback for pre-seq pushes. Absent seq → arrival-order behavior (forward/
+  backward compatible during rollout).
 - **Agent accent colors are mirrored across two targets** — Codex RGB(0.29, 0.48, 1.00)
   and Claude RGB(0.95, 0.45, 0.20) live in BOTH `Vibez/ShieldCardRenderer.swift`
   (`ShieldCardTheme`) and `VibezShield/ShieldCard.swift` (`accentUIColor` /
@@ -258,7 +293,22 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   as a second blue icon on the trailing edge (tried + removed 2026-06-06; the sim
   hides attachment thumbnails, so it slipped past sim verification). Comm-context
   resolution delays the banner ~2s — screenshot probes must wait ≥4s.
+- **Generic-shield text is mirrored across two targets** — the "Hide task
+  details" toggle (Settings → Block screen, `vibez.genericShield`, default off)
+  swaps the cross-app shield's title/body for fixed generic strings ("Your agent
+  needs you" / "Vibez is keeping you focused until you reply."). The strings live
+  in BOTH `Vibez/ScreenTimeManager.swift` (`ShieldState.genericTitle` /
+  `genericBody`) and `VibezPushService/NotificationService.swift`
+  (`genericShieldTitle` / `genericShieldBody`) — separate targets can't share
+  source, keep them in sync. Substitution happens ONLY in the two
+  `publishShieldContext` writers, so banners and the in-app overlay (separate
+  paths) keep the real title/body. The toggle is mirrored to the App Group by
+  `mirrorLiveSettingsToAppGroup` so the NSE reads it (`?? false` until set).
 - Selection persists in standard `UserDefaults` via `PropertyListEncoder`. Shield store name: `vibez.shield`.
+- **`isUsableSessionId` is mirrored across two targets** — the "non-empty and
+  not `nosid`" session-id check lives in `Vibez/SessionID.swift` (host) AND as a
+  private String extension in `VibezPushService/NotificationService.swift`
+  (separate targets can't share source) — keep in sync.
 - **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
 - **Same-conversation block debounce (both plugins, mirrored):** `notify.sh` skips a
   `shield:on` send when an AGENT event (`shield:on`, sent or suppressed) for the same

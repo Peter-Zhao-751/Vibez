@@ -29,6 +29,7 @@ struct ContentView: View {
     @State var triggerStore: TriggerStore
     @State var ignoreStore: IgnoreStore
     @State var analytics: AnalyticsTracker
+    @State var reviewPrompt: ReviewPromptManager
 
     @MainActor
     init(
@@ -37,7 +38,8 @@ struct ContentView: View {
         registrar: PushTokenRegistrar? = nil,
         triggerStore: TriggerStore? = nil,
         ignoreStore: IgnoreStore? = nil,
-        analytics: AnalyticsTracker? = nil
+        analytics: AnalyticsTracker? = nil,
+        reviewPrompt: ReviewPromptManager? = nil
     ) {
         // Default-arg expressions evaluate at the caller's isolation, so
         // any defaults that touch @MainActor types (the whole project,
@@ -53,6 +55,7 @@ struct ContentView: View {
         _triggerStore = State(initialValue: triggerStore ?? TriggerStore())
         _ignoreStore = State(initialValue: ignoreStore ?? .shared)
         _analytics = State(initialValue: analytics ?? .shared)
+        _reviewPrompt = State(initialValue: reviewPrompt ?? .shared)
         // Seed the setup-presentation layout from the live pairing state
         // so frame 1 already shows the right arrangement. Hardcoded
         // "setup card up, layout compact" defaults forced a paired cold
@@ -81,12 +84,19 @@ struct ContentView: View {
     /// the hint's height as padding so the mascot doesn't drop all the way
     /// onto the toggle's gap. Default on. Mirrored in SettingsView.
     @AppStorage("vibez.showFocusHint") var showFocusHint = true
+    /// Whether the accent gradient flourishes render: the drifting
+    /// background bubbles (ActiveBackdrop), the toggle's colored glow, and
+    /// the halo behind the mascot in focus mode (FocusHalo). Off → a flat,
+    /// glow-free home screen. Default on. Mirrored in SettingsView.
+    @AppStorage("vibez.gradientEffects") var gradientEffects = true
 
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
 
     @State var overlayQueue: [NtfyMessage] = []   // order depends on overlayOrder — see enqueueOverlay
     @State var showSettings = false
+    /// Drives the automatic "Rate Vibez" sheet (post-dismiss eligibility).
+    @State var showReviewPrompt = false
     /// Drives the system app picker presented straight from the mascot
     /// tap when no apps are selected yet (instead of bouncing to
     /// Settings). See `toggleFocusMode` / `pickAppsThenFocus`.
@@ -153,7 +163,7 @@ struct ContentView: View {
 
             topGlow
 
-            ActiveBackdrop(accent: theme.accent, active: manager.armed)
+            ActiveBackdrop(accent: theme.accent, active: manager.armed && gradientEffects)
                 .ignoresSafeArea()
 
             mainScreen
@@ -181,7 +191,31 @@ struct ContentView: View {
         .animation(.easeInOut(duration: 0.4), value: effectiveDark)
         .preferredColorScheme(appearance.colorScheme)
         .onAppear {
+            #if DEBUG
+            if UserDefaults.standard.bool(forKey: "vibez.debug.seedReviewOverlay") {
+                reviewPrompt.debugSeedEligible()
+                var fake = NtfyMessage(
+                    id: "debug-review-overlay",
+                    title: "Debug block",
+                    body: "Tap Dismiss to test the review prompt.",
+                    receivedAt: Date()
+                )
+                fake.shield = .on
+                overlayQueue = [fake]
+                // Headless verification seam (no sim tap tooling): drive the
+                // real dismiss path so maybePromptForReview → sheet can be
+                // screenshotted. The Dismiss-button → dismissTopOverlay
+                // wiring itself is pre-existing and unchanged.
+                if UserDefaults.standard.bool(forKey: "vibez.debug.autoDismissReview") {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismissTopOverlay() }
+                }
+            }
+            #endif
             syncSetupPresentation(animated: false)
+            // Keep the shield card's light/dark in step with the app's
+            // effective appearance before draining a push that writes
+            // shield state.
+            manager.updateEffectiveAppearance(dark: effectiveDark)
             // Catch pushes that landed via AppDelegate while the view
             // wasn't actively observing — .onChange below won't fire
             // for those because the value was set before subscription.
@@ -211,6 +245,11 @@ struct ContentView: View {
         .onChange(of: setupNeeded) { _, _ in
             syncSetupPresentation(animated: true)
         }
+        .onChange(of: effectiveDark) { _, newDark in
+            // Appearance flipped while running (picker change or a live
+            // system light/dark switch) — keep the shield card in step.
+            manager.updateEffectiveAppearance(dark: newDark)
+        }
         .onChange(of: notifyClient.lastMessage) { _, newValue in
             processIfNew(newValue)
         }
@@ -224,6 +263,7 @@ struct ContentView: View {
         // shield in stale state.
         .onChange(of: scenePhase) { _, newPhase in
             if newPhase == .active {
+                manager.updateEffectiveAppearance(dark: effectiveDark)
                 // Drain anything the NSE wrote to the App Group while
                 // we were suspended before processing — this sets
                 // lastMessage to the most recent NSE-handled push so
@@ -271,8 +311,16 @@ struct ContentView: View {
                 notifyClient: notifyClient,
                 registrar: registrar,
                 triggerStore: triggerStore,
-                ignoreStore: ignoreStore
+                ignoreStore: ignoreStore,
+                reviewPrompt: reviewPrompt
             )
+        }
+        .sheet(isPresented: $showReviewPrompt) {
+            PleaseReviewView(
+                onClose: { showReviewPrompt = false },
+                onRated: { reviewPrompt.markRated() }
+            )
+            .presentationDragIndicator(.visible)
         }
         // Cold-launch onboarding decision + the fullScreenCover live in
         // OnboardingLaunchGate.swift.

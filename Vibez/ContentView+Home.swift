@@ -143,8 +143,16 @@ extension ContentView {
                         set: { manager.setArmed($0) }
                     ),
                     theme: theme,
-                    isInteractive: !registrar.vibezId.isEmpty,
+                    // Must match the `!setupNeeded` mask in the binding's
+                    // getter: a registration ERROR keeps the setup card up
+                    // and the knob visually off, so an interactive toggle
+                    // there silently flips `armed` with no knob movement —
+                    // and the toggle pops ON by itself once the error
+                    // clears. Locked instead: taps bounce to the setup
+                    // card, which shows the failure and its retry.
+                    isInteractive: !setupNeeded,
                     focusMode: manager.focusMode,
+                    showGlow: gradientEffects,
                     onLockedTap: bounceToShowSetup,
                     onReleaseFocus: { toggleFocusMode() }
                 )
@@ -202,7 +210,7 @@ extension ContentView {
             // The halo is decoration behind the mascot — .background so
             // its 1.9× footprint never inflates the hero's layout.
             .background {
-                if manager.focusMode {
+                if manager.focusMode && gradientEffects {
                     FocusHalo(color: theme.accent, size: mascotSize * 1.9)
                 }
             }

@@ -68,6 +68,12 @@ struct NtfyMessage: Equatable {
     /// ("cc" → Claude Code, "cx" → Codex). nil only for untagged
     /// third-party producers (e.g. a raw curl test ping).
     var agent: VibezAgent? = nil
+    /// Per-session ordering stamp (epoch millis) from the FCM payload's
+    /// `seq` field, assigned server-side. The shield honors a push only
+    /// if its seq is >= the last seq applied for the session, so an
+    /// out-of-order shield:on/off delivery can't strand the block. nil on
+    /// legacy/untagged pushes (arrival-order fallback).
+    var seq: Double? = nil
     /// True when this message was reconstituted from a file the NSE
     /// wrote while the host was suspended. The NSE has already done
     /// the model-level work (engaged the shield, persisted the
@@ -162,6 +168,7 @@ final class NotifyClient {
         if let shield  = userInfo["shield"]  as? String { msg.shield    = VibezShield(rawValue: shield) }
         if let session = userInfo["session"] as? String { msg.sessionId = session }
         if let agent   = userInfo["agent"]   as? String { msg.agent     = VibezAgent(rawValue: agent) }
+        if let seq     = userInfo["seq"]     as? NSNumber { msg.seq      = seq.doubleValue }
         msg.wasBackgroundEngaged = wasBackgroundEngaged
         // [debug] One log line per push so we can confirm parsing.
         // Enum-with-raw-value fields (event/shield/agent) decode to
@@ -185,7 +192,24 @@ final class NotifyClient {
         // addTrigger) is harmless double-fire. Skip when draining the
         // NSE-written file — the NSE already did all of this and
         // re-running addTrigger would reset the per-session timer.
+        // Per-session ordering gate (live pushes only). A push older than
+        // the last one applied for this session is stale — a reordered
+        // shield:on/off delivery that must not re-drive the shield or
+        // replay a stale overlay. The drain path is inherently fresh: a
+        // stale push never wrote last-message.json (the NSE skips that
+        // write), and the NSE already recorded the winning seq.
+        if !wasBackgroundEngaged,
+           let sid = msg.sessionId, sid.isUsableSessionId,
+           let seq = msg.seq,
+           ScreenTimeManager.shared.isStalePush(session: sid, seq: seq) {
+            log.info("acceptPushUserInfo: ignoring stale push (seq behind last applied) session=\(sid, privacy: .public)")
+            return
+        }
+
         if !wasBackgroundEngaged {
+            if let sid = msg.sessionId, sid.isUsableSessionId, let seq = msg.seq {
+                ScreenTimeManager.shared.recordSeq(session: sid, seq: seq)
+            }
             ScreenTimeManager.shared.applyTriggerFor(message: msg)
         }
 

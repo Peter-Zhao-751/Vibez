@@ -71,6 +71,17 @@ export interface VibezPushFields {
   session?: string;
   agent?: string;
   reason?: string;
+  /**
+   * Per-session ordering stamp (epoch millis). The phone applies a
+   * shield state change for a session ONLY if seq >= the last seq it
+   * applied for that session, so a shield:on/off pair delivered out of
+   * order (FCM/APNs give no cross-message ordering) can't leave the
+   * phone stuck. /notify stamps Date.now(); dispatchUnblock re-emits the
+   * ORIGINAL on's seq so a genuine re-ping (higher seq) beats the stale
+   * timeout. Absent on legacy pushes — the phone falls back to
+   * arrival-order behavior when it's missing.
+   */
+  seq?: number;
 }
 
 /** The `aps` dictionary of an APNs alert payload. */
@@ -96,6 +107,7 @@ export interface VibezApnsPayload {
   session?: string;
   agent?: string;
   reason?: string;
+  seq?: number;
 }
 
 /**
@@ -128,5 +140,6 @@ export function buildApnsPayload(f: VibezPushFields): VibezApnsPayload {
   if (f.session !== undefined) payload.session = f.session;
   if (f.agent !== undefined) payload.agent = f.agent;
   if (f.reason !== undefined) payload.reason = f.reason;
+  if (f.seq !== undefined && Number.isFinite(f.seq)) payload.seq = f.seq;
   return payload;
 }

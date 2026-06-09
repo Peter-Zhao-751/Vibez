@@ -39,6 +39,29 @@ log() {
     printf '[%s] cx %s\n' "$(date -u +%FT%TZ)" "$*" >>"${LOG_FILE}" 2>/dev/null || true
 }
 
+# Cap on the append-only log. Without one it grows forever (one line
+# per hook event). Checked once per session (session-start), not per
+# event; an oversized log is trimmed to its newest half. Mirrors the
+# Claude plugin (shared LOG_FILE — either plugin's session can trim).
+LOG_MAX_BYTES="${VIBEZ_LOG_MAX_BYTES:-1048576}"
+case "${LOG_MAX_BYTES}" in
+    ''|*[!0-9]*) LOG_MAX_BYTES=1048576 ;;
+esac
+
+rotate_log_if_needed() {
+    local size
+    [ -f "${LOG_FILE}" ] || return 0
+    size="$(wc -c <"${LOG_FILE}" 2>/dev/null | tr -d '[:space:]')"
+    case "${size}" in
+        ''|*[!0-9]*) return 0 ;;
+    esac
+    [ "${size}" -gt "${LOG_MAX_BYTES}" ] || return 0
+    if tail -c "$((LOG_MAX_BYTES / 2))" "${LOG_FILE}" >"${LOG_FILE}.tmp" 2>/dev/null; then
+        mv -f "${LOG_FILE}.tmp" "${LOG_FILE}" 2>/dev/null || rm -f "${LOG_FILE}.tmp" 2>/dev/null || true
+    fi
+    return 0
+}
+
 # Read stdin once if present, into INPUT.
 INPUT=""
 if [ ! -t 0 ]; then
@@ -201,6 +224,13 @@ post_vibez() {
         -X POST -d "${payload}" \
         "${BACKEND_URL}/notify" >/dev/null 2>&1; then
         log "sent: ${title} (event=${event})"
+        # A DELIVERED reply (shield:off) just unblocked the phone, so the
+        # next agent block for this session must re-block — not get
+        # debounced against the pre-reply stamp. Clear the stamp here so a
+        # follow-up permission/ask within the window still banners+blocks.
+        # (Fixes the burst under-block.) Success only — a failed off
+        # unblocked nothing, so leave the stamp for the real block to ride.
+        [ "${shield}" = "off" ] && clear_event "${session}" || true
         return 0
     else
         log "send failed: ${title} (event=${event})"
@@ -385,7 +415,9 @@ watch_approval_start() {
     case "${timeout}" in
         ''|*[!0-9]*) timeout=600 ;;
     esac
-    deadline="$(( $(date +%s) + timeout ))"
+    local started
+    started="$(date +%s)"
+    deadline="$(( started + timeout ))"
 
     local end_reason="timeout"
     while [ "$(date +%s)" -lt "${deadline}" ]; do
@@ -408,7 +440,14 @@ watch_approval_start() {
             rm -f "${state}" 2>/dev/null || true
             return 0
         done
-        sleep 0.1
+        # Each pass is a full `ps -axo` scan. Stay snappy while the user
+        # is likely still looking at the prompt, then back off — 10 Hz
+        # for the full 10-minute window is real CPU for no benefit.
+        if [ "$(( $(date +%s) - started ))" -lt 30 ]; then
+            sleep 0.15
+        else
+            sleep 0.75
+        fi
     done
 
     # Every non-match exit logs its reason — a watcher that never fires must
@@ -449,12 +488,20 @@ is_ephemeral_session() {
     return 1
 }
 
-# Pull a JSON field with a default, swallowing jq errors.
+# Pull a JSON field with a default, swallowing jq errors. The default
+# applies whenever the result is EMPTY — field absent, explicitly "",
+# jq failure, or no stdin — not just when jq exits nonzero (jq exits 0
+# for a missing field and even for empty input, which left defaults
+# like 'nosid' dead and "" flowing through instead).
 jq_get() {
     local query="$1"
     local default="${2:-}"
+    local out=""
     if command -v jq >/dev/null 2>&1; then
-        printf '%s' "${INPUT}" | jq -r "${query} // empty" 2>/dev/null || printf '%s' "${default}"
+        out="$(printf '%s' "${INPUT}" | jq -r "${query} // empty" 2>/dev/null)" || out=""
+    fi
+    if [ -n "${out}" ]; then
+        printf '%s' "${out}"
     else
         printf '%s' "${default}"
     fi
@@ -604,6 +651,7 @@ case "${EVENT}" in
             log "session-start (Vibez ID exists)"
         fi
         [ -f "${LEGACY_TOPIC_FILE}" ] && rm -f "${LEGACY_TOPIC_FILE}" 2>/dev/null || true
+        rotate_log_if_needed
         # Sweep stale debounce stamps so dead sessions don't pile up.
         # (BSD find: -mtime +1 deletes after ~2 days. Stamps go inert
         # seconds after the window closes anyway — this is hygiene.)
@@ -944,6 +992,20 @@ case "${EVENT}" in
         post_vibez "t" "b" "needs-input" "on" "pvB" "cx"
         check_eq "stamp-on-fail-rolls-back"    "$(stampprobe pvB)" "clean"
 
+        # Burst under-block fix: a DELIVERED reply (shield:off) clears the
+        # session stamp so the next agent block RE-BLOCKS instead of being
+        # debounced. Without this, approving a permission (reply unblocks)
+        # silently swallowed the next permission prompt that landed within
+        # the window. on → off(success) must leave the stamp clean, and a
+        # follow-up on must NOT add a 'debounced:' line.
+        curl() { return 0; }
+        post_vibez "t" "b" "needs-input" "on" "pvC" "cx"
+        post_vibez "t" "b" "replied" "off" "pvC" "cx"
+        check_eq "stamp-off-clears-on-success" "$(stampprobe pvC)" "clean"
+        dbcount_before="$(grep -c 'debounced:' "${LOG_FILE}")"
+        post_vibez "t" "b" "needs-input" "on" "pvC" "cx"
+        check_eq "reply-clears-debounce" "$(grep -c 'debounced:' "${LOG_FILE}")" "${dbcount_before}"
+
         # Full watcher path: begin with a pending session, start a matching
         # process after the watch loop is active, and verify the successful
         # shield-off clears pending before PostToolUse would run.
@@ -983,6 +1045,34 @@ case "${EVENT}" in
 
         DEBOUNCE_SECONDS="${saved_debounce}"
         rm -rf "${CONFIG_DIR}"
+
+        # jq_get — the default must apply when the field is absent or
+        # empty, not only when jq itself fails (it silently returned ""
+        # for missing fields, leaving 'nosid'-style defaults dead).
+        saved_input="${INPUT}"
+        INPUT='{"present":"val","empty":""}'
+        check_eq "jqget-present-field"   "$(jq_get '.present' 'fb')" "val"
+        check_eq "jqget-missing-default" "$(jq_get '.missing' 'fb')" "fb"
+        check_eq "jqget-empty-default"   "$(jq_get '.empty' 'fb')"   "fb"
+        INPUT=''
+        check_eq "jqget-noinput-default" "$(jq_get '.x' 'fb')" "fb"
+        INPUT="${saved_input}"
+
+        # Log rotation — an oversized log keeps its newest half; a log
+        # under the cap is untouched.
+        saved_log="${LOG_FILE}"
+        saved_logmax="${LOG_MAX_BYTES:-}"
+        LOG_FILE="$(mktemp)"
+        LOG_MAX_BYTES=10000
+        head -c 20000 /dev/zero | tr '\0' 'x' >"${LOG_FILE}"
+        rotate_log_if_needed
+        check_eq "logrotate-trims-oversized" "$(wc -c <"${LOG_FILE}" | tr -d '[:space:]')" "5000"
+        head -c 400 /dev/zero | tr '\0' 'x' >"${LOG_FILE}"
+        rotate_log_if_needed
+        check_eq "logrotate-keeps-small"     "$(wc -c <"${LOG_FILE}" | tr -d '[:space:]')" "400"
+        rm -f "${LOG_FILE}"
+        LOG_FILE="${saved_log}"
+        LOG_MAX_BYTES="${saved_logmax}"
 
         printf '%d passed, %d failed\n' "$pass" "$fail"
         if [ "$fail" = "0" ]; then exit 0; else exit 1; fi

@@ -78,10 +78,16 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         let icon: UIImage? = loadCachedShieldImage(for: state.agent)
         Logger.shieldExt.info("Icon: \(icon == nil ? "none" : "loaded") agent=\(state.agent.rawValue)")
 
-        // No blur — backgroundColor is the tamed-down agent tint (warm
-        // brown for Claude, cool navy for Codex).
+        // The base light/dark appearance is set by `backgroundBlurStyle`,
+        // NOT backgroundColor: iOS composites backgroundColor as a
+        // translucent TINT over the blur material. A `nil` style resolves
+        // to a dark default material, so a light (near-white) tint over it
+        // still reads dark — which is why flipping `dark` recolored the
+        // labels (drawn opaque on top) but left the background dark. Dark
+        // mode keeps the known-good `nil` default; light mode uses a light
+        // frosted material so the near-white agent tint reads light.
         return ShieldConfiguration(
-            backgroundBlurStyle: nil,
+            backgroundBlurStyle: state.dark ? nil : .systemThickMaterialLight,
             backgroundColor: state.backgroundUIColor,
             icon: icon,
             title: ShieldConfiguration.Label(

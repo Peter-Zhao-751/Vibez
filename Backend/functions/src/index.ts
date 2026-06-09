@@ -477,6 +477,13 @@ export const notify = onRequest(
     // pushes, even with content-available:1. Silent (apns-push-type:
     // background) pushes also do NOT invoke the NSE, which is why
     // shield:off has to ride on an alert push.
+    // Per-session ordering stamp. nowMs is this request's processing time;
+    // because shield:on (prompt) and shield:off (the user's answer) are
+    // emitted seconds apart by sequential hooks, their seqs always order
+    // correctly even across function instances. The phone rejects any push
+    // older than the last it applied for the session, so an out-of-order
+    // delivery can no longer strand the shield. (Design: per-session seq.)
+    const seq = nowMs;
     const apnsPayload = buildApnsPayload({
       title,
       body: bodyText,
@@ -484,6 +491,7 @@ export const notify = onRequest(
       shield,
       session,
       agent,
+      seq,
     });
     const apnsHeaders = APNS_HEADERS;
 
@@ -565,6 +573,11 @@ export const notify = onRequest(
             agent,
             title,
             body: bodyText,
+            // Carry THIS on's seq so the timeout unblock re-emits it. A
+            // later re-ping (higher seq) then outranks the stale timeout
+            // on the phone, while an un-re-pinged block still unblocks
+            // (timeout seq == last applied seq).
+            seq,
           },
           {scheduleDelaySeconds: t.delaySeconds}
         ).catch((err) => logger.warn("enqueue unblock failed", {
@@ -626,6 +639,9 @@ export const dispatchUnblock = onTaskDispatched(
       session: typeof d.session === "string" ? d.session : undefined,
       agent: typeof d.agent === "string" ? d.agent : undefined,
       reason: "timeout",
+      // Re-emit the original on's seq (the phone uses it to ignore this
+      // timeout if the session was re-pinged after that on).
+      seq: typeof d.seq === "number" ? d.seq : undefined,
     });
 
     try {
@@ -643,6 +659,11 @@ export const dispatchUnblock = onTaskDispatched(
       if (code === "messaging/registration-token-not-registered") {
         await tokensDb.collection(DEVICES).doc(fcmToken).delete()
           .catch(() => undefined);
+        // Drop this instance's cached device list too, so the next
+        // /notify re-queries instead of re-failing on the swept token
+        // for up to the cache TTL.
+        const vibezId = typeof d.vibezId === "string" ? d.vibezId : "";
+        if (vibezId) deviceCache.delete(vibezId);
       }
     }
   }

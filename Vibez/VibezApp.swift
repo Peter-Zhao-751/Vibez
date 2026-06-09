@@ -61,7 +61,8 @@ private struct DebugSettingsLaunchView: View {
             notifyClient: .shared,
             registrar: .shared,
             triggerStore: TriggerStore(),
-            ignoreStore: .shared
+            ignoreStore: .shared,
+            reviewPrompt: .shared
         )
     }
 }
@@ -96,12 +97,14 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
         // this no-ops and didFailToRegisterForRemoteNotifications fires.
         application.registerForRemoteNotifications()
 
-        // If we were launched directly from a remote push tap, process the
-        // payload now so the shield extension can read fresh state on the
-        // next tap.
-        if let userInfo = launchOptions?[.remoteNotification] as? [AnyHashable: Any] {
-            NotifyClient.shared.acceptPushUserInfo(userInfo)
-        }
+        // Banner taps (cold launch included) arrive via
+        // userNotificationCenter(_:didReceive:) below — iOS delivers the
+        // launch notification's response after this method returns as long
+        // as the delegate is already set. The old
+        // launchOptions[.remoteNotification] path (deprecated in iOS 26)
+        // re-fed the payload through the LIVE pipeline, re-running
+        // addTrigger and resetting the per-session block timer the NSE had
+        // already started when the push first landed.
         return true
     }
 
@@ -212,5 +215,32 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
             return
         }
         completionHandler([.banner, .sound, .list])
+    }
+
+    // The user tapped a banner / Notification Center entry. Fires for warm
+    // taps AND cold launches (delivered after didFinishLaunching when the
+    // delegate is set there) — this replaces the deprecated
+    // launchOptions[.remoteNotification] path. Every Vibez push is
+    // mutable-content:1, so by the time a tappable banner exists the NSE
+    // has already done the model-level work (trigger, shield, seq,
+    // last-message.json). Route as background-engaged so only view-level
+    // replay happens — re-running addTrigger here is what used to reset
+    // the session's block timer to the moment of the tap. Stamping the
+    // system identifier (the same id the NSE's request carried) lets
+    // processIfNew dedupe this against the App Group drain and against a
+    // foreground willPresent delivery of the same push. Local banners
+    // (no "aps" key) pass through untouched, same as willPresent.
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        var userInfo = response.notification.request.content.userInfo
+        if userInfo["aps"] != nil {
+            pushLog.info("didReceive response: banner tap, replaying as background-engaged")
+            userInfo["id"] = response.notification.request.identifier
+            NotifyClient.shared.acceptPushUserInfo(userInfo, wasBackgroundEngaged: true)
+        }
+        completionHandler()
     }
 }

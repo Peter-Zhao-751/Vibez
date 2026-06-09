@@ -30,6 +30,19 @@ export function triggerKey(t: TriggerRecord): string {
   return makeSessionKey(t.sessionId, t.id);
 }
 
+/// Prepend `trigger` to the Recent Triggers list, replacing any prior
+/// record with the same id and capping the result. The id-dedupe makes
+/// applyEvent replay-safe: events are processed at-least-once (a crash
+/// after partial apply re-delivers), so a re-applied event must update
+/// its existing row, not duplicate it.
+export function insertRecent(
+  recents: TriggerRecord[],
+  trigger: TriggerRecord,
+  max: number,
+): TriggerRecord[] {
+  return [trigger, ...recents.filter((t) => t.id !== trigger.id)].slice(0, max);
+}
+
 export function prune(sessions: PendingSessions, now = Date.now()): PendingSessions {
   const out: PendingSessions = {};
   for (const [k, exp] of Object.entries(sessions)) if (exp > now) out[k] = exp;

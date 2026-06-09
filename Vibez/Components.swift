@@ -15,7 +15,8 @@ import ManagedSettings
 // MARK: - Big WARP-style toggle
 //
 // Slim pill with a plain white knob and an accent glow while on.
-// Locked (not paired) → dim, taps bounce. In focus mode the switch
+// Locked (setup needed: unpaired, or pairing failed) → dim, taps
+// bounce. In focus mode the switch
 // morphs into the focus banner — "tap to release". One persistent
 // capsule animates its size inside a constant-height layout box, so
 // the vertical center never shifts and the pill melts into the banner
@@ -26,8 +27,33 @@ struct BigToggle: View {
     let theme: Theme
     let isInteractive: Bool
     let focusMode: Bool
+    /// Whether the track casts its accent-colored glow/shadow. Off → a
+    /// flat pill (gated by the Settings "Gradient effects" toggle). The
+    /// gradient fill itself stays; only the colored drop-shadow goes.
+    let showGlow: Bool
     var onLockedTap: () -> Void = {}
     var onReleaseFocus: () -> Void = {}
+
+    /// Accent visibility. Driven imperatively (see `syncAccentOpacity`) so the
+    /// off path can fade the residual out on its own delayed timeline — which a
+    /// value-derived implicit animation can't express cleanly against the
+    /// slide animation that's also in scope.
+    @State private var accentOpacity: Double
+
+    init(enabled: Binding<Bool>, theme: Theme, isInteractive: Bool,
+         focusMode: Bool,
+         showGlow: Bool = true,
+         onLockedTap: @escaping () -> Void = {},
+         onReleaseFocus: @escaping () -> Void = {}) {
+        _enabled = enabled
+        self.theme = theme
+        self.isInteractive = isInteractive
+        self.focusMode = focusMode
+        self.showGlow = showGlow
+        self.onLockedTap = onLockedTap
+        self.onReleaseFocus = onReleaseFocus
+        _accentOpacity = State(initialValue: (enabled.wrappedValue || focusMode) ? 1 : 0)
+    }
 
     private static let pillW: CGFloat = 168
     /// Resting pill height — also the constant outer layout box, which
@@ -37,8 +63,47 @@ struct BigToggle: View {
     private static let knobSize: CGFloat = 50
     private static let knobPad: CGFloat = 8
 
+    static let slideDuration: Double = 0.5
     /// Knob slide — the reference's `cubic-bezier(.7,.1,.2,1)` over .5s.
-    static let slideAnimation = Animation.timingCurve(0.7, 0.1, 0.2, 1, duration: 0.5)
+    static let slideAnimation = Animation.timingCurve(0.7, 0.1, 0.2, 1, duration: slideDuration)
+    /// Off fade-out of the fill — runs immediately (no delay) so it reads as a
+    /// prompt fade, not a wait-then-vanish.
+    static let offFadeAnimation = Animation.easeInOut(duration: 0.2)
+
+    private static let knobTravel = pillW - knobSize - 2 * knobPad
+
+    /// Knob center X within the pillW track for an eased slide `progress`
+    /// (0 = off → 1 = on). Linear; the knob and the accent fill both read it,
+    /// so they travel in parallel (same rate — no racing) and reach their
+    /// finals together.
+    static func knobCenterX(at progress: CGFloat) -> CGFloat {
+        knobPad + knobTravel * progress + knobSize / 2
+    }
+
+    /// Leading (front) edge X of the knob for slide `progress`.
+    static func knobFrontX(at progress: CGFloat) -> CGFloat {
+        knobCenterX(at: progress) + knobSize / 2
+    }
+
+    /// X the accent cap's apex tracks during the slide: the knob's front pulled
+    /// back by `knobPad`, so the orange keeps the same margin off the circle
+    /// that the circle keeps off the pill edge — the front trails the circle by
+    /// a steady gap instead of touching it.
+    static func accentApexX(at progress: CGFloat) -> CGFloat {
+        knobFrontX(at: progress) - knobPad
+    }
+
+    /// Max lead of the accent cap's apex over its tracked point (reached only
+    /// at progress 1), so the fill hits the pill's right edge exactly as the
+    /// knob lands on the right (`accentApexX(1) + accentLead == pillW`). The
+    /// mask scales it by progress, so for nearly the whole travel the orange's
+    /// front keeps its margin off the circle and only pulls past it at the very
+    /// end to close the edge gap — otherwise the fill would either trail the
+    /// circle by too much or stop short of the pill edge at rest-on.
+    static let accentLead = pillW - (knobTravel + knobSize)
+
+    /// Whether the accent should be shown at all (drives its opacity).
+    private var accentLit: Bool { enabled || focusMode }
 
     var body: some View {
         Button {
@@ -87,11 +152,26 @@ struct BigToggle: View {
         .accessibilityLabel(focusMode
             ? "Release focus mode"
             : (enabled ? "Disable Vibez" : "Enable Vibez"))
+        .onChange(of: enabled) { _, _ in syncAccentOpacity() }
+        .onChange(of: focusMode) { _, _ in syncAccentOpacity() }
     }
 
-    /// Track — the accent layer reveals from left to right with the knob,
-    /// then retracts along the same path when switched off. Keeping the
-    /// neutral track underneath avoids recoloring the whole pill at once.
+    /// Lit → show the accent at once (the seed pops in with the slide). Unlit
+    /// → fade the whole fill out promptly via `offFadeAnimation`.
+    private func syncAccentOpacity() {
+        if accentLit {
+            accentOpacity = 1
+        } else {
+            withAnimation(Self.offFadeAnimation) { accentOpacity = 0 }
+        }
+    }
+
+    /// Track — a neutral capsule under the accent capsule; the accent is
+    /// revealed by `AccentRevealMask` (geometry) gated by an opacity fade.
+    /// Turning on, the fill seeds at the knob, stays pinned to it (no racing),
+    /// and pulls to full as the knob lands on the right. Turning off, the fill
+    /// fades out promptly (0.2s) as the knob slides back. Fully orange at
+    /// rest-on, empty at rest-off.
     private var track: some View {
         ZStack {
             Capsule()
@@ -102,34 +182,36 @@ struct BigToggle: View {
                 .fill(theme.pillGradient.shadow(
                     .inner(color: .white.opacity(0.18), radius: 0.5, y: 1)))
                 .mask {
-                    Rectangle()
-                        .scaleEffect(
-                            x: enabled || focusMode ? 1 : 0,
-                            y: 1,
-                            anchor: .leading
-                        )
+                    // Geometry only: fill pinned to the knob (seed → full).
+                    // Same path both ways — off's disappearance is the opacity
+                    // fade below, not the geometry. Animatable on `progress`.
+                    AccentRevealMask(progress: (enabled || focusMode) ? 1 : 0)
                 }
+                // Opacity (not geometry) takes the fill to empty: ON shows it
+                // at once (seed pops with the slide); OFF fades the whole fill
+                // out promptly. Driven by syncAccentOpacity() on enabled /
+                // focusMode change.
+                .opacity(accentOpacity)
         }
         .shadow(
-            color: theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)),
+            color: showGlow ? theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)) : .clear,
             radius: focusMode ? 12 : (enabled ? 14 : 7)
         )
         .shadow(
-            color: enabled || focusMode ? theme.accentDeep.opacity(0.667) : .clear,
+            color: showGlow && (enabled || focusMode) ? theme.accentDeep.opacity(0.667) : .clear,
             radius: 12,
             y: focusMode ? 10 : 12
         )
         .animation(Self.slideAnimation, value: enabled)
     }
 
-    /// Knob — plain white, slides edge to edge.
+    /// Knob — plain white, slides edge to edge on the shared slide curve.
     private var knob: some View {
         Circle()
             .fill(.white)
             .frame(width: Self.knobSize, height: Self.knobSize)
             .shadow(color: .black.opacity(0.25), radius: 6, y: 4)
             .overlay(Circle().strokeBorder(.black.opacity(0.04), lineWidth: 1))
-            // The slide runs on its snappier bezier.
             .animation(Self.slideAnimation, value: enabled)
     }
 
@@ -152,6 +234,60 @@ struct BigToggle: View {
 
     private var knobX: CGFloat {
         enabled ? (Self.pillW - Self.knobSize - Self.knobPad) : Self.knobPad
+    }
+}
+
+/// Mask for the accent capsule: a solid body with a **rounded leading cap**,
+/// pinned to the knob. The cap uses the pill's own corner radius (`pillH/2`),
+/// so the orange's front curves exactly like the knob and the pill's rounded
+/// ends instead of cutting a flat vertical line — and at rest-on the cap lands
+/// flush on the track's own right cap. The lead over the knob center grows
+/// 0 → accentLead, so the fill sits at the knob (seed ≈ 0.2, nothing races
+/// ahead) and only pulls past it near the end to reach full. The geometry
+/// never empties (progress 0 = the seed at the knob); the host's opacity fade
+/// takes it to empty on the way off. `Animatable` on `progress` so it shares
+/// the knob's slide curve.
+private struct AccentRevealMask: View, Animatable {
+    var progress: CGFloat
+
+    var animatableData: CGFloat {
+        get { progress }
+        set { progress = newValue }
+    }
+
+    /// Apex (rightmost point) of the rounded cap. (A plain func, not inline in
+    /// `body` — a top-level if/else there would be parsed as ViewBuilder
+    /// content.)
+    private static func solidEdge(progress: CGFloat, width: CGFloat) -> CGFloat {
+        if progress >= 1 { return width }          // full
+        // Apex trails the circle's front by a steady `knobPad` margin; the
+        // lead grows 0 → accentLead, so the orange's front keeps that margin
+        // off the circle (nothing races ahead) and only pulls the last few px
+        // past it near the end to reach the pill edge. At progress 0 this is
+        // the seed behind the knob front — the OPACITY (not the geometry) takes
+        // it to empty, so off can retract here and then fade rather than
+        // popping off-screen.
+        return BigToggle.accentApexX(at: progress)
+             + BigToggle.accentLead * progress
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            let w = geo.size.width
+            let solid = Self.solidEdge(progress: progress, width: w)
+            // Flat on the left (meets the track's own left cap), rounded on the
+            // right with the pill's radius. Both trailing radii sum to the full
+            // height, so the right edge is a true semicircle — a convex cap
+            // matching the knob's curve — whose apex lands on `solid`.
+            UnevenRoundedRectangle(
+                topLeadingRadius: 0,
+                bottomLeadingRadius: 0,
+                bottomTrailingRadius: BigToggle.pillH / 2,
+                topTrailingRadius: BigToggle.pillH / 2
+            )
+            .frame(width: solid, height: geo.size.height)
+            .frame(width: w, height: geo.size.height, alignment: .leading)
+        }
     }
 }
 
