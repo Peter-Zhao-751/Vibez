@@ -20,8 +20,8 @@ LOCKUPS (vibez-assets/lockup/)
   Icon + wordmark, horizontal. Light + dark.
 
 PALETTE
-  Orange       #dd7a52
-  Orange deep  #b85a36
+  Orange       #d97757
+  Orange deep  #bf694d
   Ink          #1a0e08
   Paper        #fbf8f4
   Cream        #fff5e8

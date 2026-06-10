@@ -18,7 +18,7 @@
 //      (snapshot of the user's blockSeconds at arrival) and is removed
 //      when ANY of these happen:
 //        1. the matching `_vibez:shield:off` push lands (user replied),
-//        2. the user taps Dismiss on the overlay for that session,
+//        2. the user taps Dismiss for that session, or uses dismiss-all,
 //        3. its individual timer elapses,
 //        4. the toggle flips OFF.
 //      `isBlocking` = `!pendingTriggers.isEmpty`. Shield follows it 1:1.
@@ -291,8 +291,8 @@ final class ScreenTimeManager {
         shieldApplied = shouldShield
     }
 
-    /// Toggles the manual focus hold. Requires `armed` (the UI only
-    /// enables the mascot tap when armed; this guard is defensive).
+    /// Toggles the manual focus hold. Requires `armed`; the activation UI
+    /// is currently unavailable, but the state transition remains intact.
     /// Reconciles the OS shield via `recomputeBlocking`, which now reads
     /// `shouldShield`. Turning focus off while triggers remain leaves the
     /// shield up for them.
@@ -375,8 +375,8 @@ final class ScreenTimeManager {
         recomputeBlocking()
     }
 
-    /// Removes a single trigger by sessionId. Same code path is used by:
-    /// reply (shield:off push), Dismiss button, and timer expiry.
+    /// Removes a single trigger by sessionId. Used by matching replies
+    /// (shield:off pushes) and timer expiry.
     func resolveTrigger(sessionId: String) {
         guard sessionId.isUsableSessionId else { return }
         guard pendingTriggers.removeValue(forKey: sessionId) != nil else { return }
@@ -384,9 +384,11 @@ final class ScreenTimeManager {
         recomputeBlocking()
     }
 
-    /// Drop everything pending — useful as an escape hatch.
+    /// Drop everything pending. Used when the overlay's dismiss-all setting
+    /// is enabled.
+    /// Recompute even when the in-memory dictionary is already empty so a
+    /// shield applied by the NSE cannot remain stranded.
     func clearTriggers() {
-        guard !pendingTriggers.isEmpty else { return }
         pendingTriggers.removeAll()
         persistPendingTriggers()
         recomputeBlocking()
@@ -503,8 +505,8 @@ final class ScreenTimeManager {
     }
 
     /// The per-agent mascot PNGs, written to the App Group container.
-    /// VibezShield (extension) reads `shield-<agent>.png` and slots it
-    /// into `ShieldConfiguration.icon` — Claude pixel critter or Codex
+    /// VibezShield (extension) reads `shield-<agent>-v2.png` and slots
+    /// it into `ShieldConfiguration.icon` — sprite Clawd or Codex
     /// logo + blue glow, picked by the agent that engaged the shield
     /// (untagged pings fall back to the Claude card in the extension).
     /// Pre-rendering here means the extension never has to run
@@ -515,22 +517,25 @@ final class ScreenTimeManager {
     ///
     /// Idempotent: skips PNGs that already exist. Bump the filenames
     /// (or wipe the App Group container) when the visuals change.
+    /// v2 (2026-06-09): sprite-Clawd artwork + official #d97757 accent.
     private func prerenderAgentShieldsIfNeeded() {
         guard let container = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: "group.vibezlol.Vibez"
         ) else { return }
 
-        // Legacy files: the pre-per-agent single PNG, and the renders
-        // for agents that no longer get their own card (both/none use
-        // the extension's Claude fallback).
-        for stale in ["shield.png", "shield-both.png", "shield-none.png"] {
+        // Legacy files: the pre-per-agent single PNG, the renders for
+        // agents that no longer get their own card (both/none use the
+        // extension's Claude fallback), and the v1 cards (vector critter,
+        // pre-standardization orange).
+        for stale in ["shield.png", "shield-both.png", "shield-none.png",
+                      "shield-claude.png", "shield-codex.png"] {
             try? FileManager.default.removeItem(
                 at: container.appendingPathComponent(stale)
             )
         }
 
         for agent in [ShieldState.Agent.claude, .codex] {
-            let url = container.appendingPathComponent("shield-\(agent.rawValue).png")
+            let url = container.appendingPathComponent("shield-\(agent.rawValue)-v2.png")
             guard !FileManager.default.fileExists(atPath: url.path) else { continue }
             let state = ShieldState(
                 agent: agent,
@@ -541,7 +546,7 @@ final class ScreenTimeManager {
             )
             if let png = renderShieldCardPNG(state: state) {
                 try? png.write(to: url)
-                shieldLog.info("prerendered shield-\(agent.rawValue, privacy: .public).png")
+                shieldLog.info("prerendered shield-\(agent.rawValue, privacy: .public)-v2.png")
             }
         }
     }

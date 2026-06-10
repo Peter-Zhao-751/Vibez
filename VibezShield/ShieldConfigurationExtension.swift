@@ -4,8 +4,8 @@
 //
 //  Replaces iOS's default "App is Restricted, OK" shield. Reads the
 //  latest ShieldState from the App Group and a host-rendered per-agent
-//  PNG card (shield-claude.png / shield-codex.png) from the App Group
-//  container. If a PNG is present, slots it into
+//  PNG card (shield-claude-v2.png / shield-codex-v2.png) from the App
+//  Group container. If a PNG is present, slots it into
 //  ShieldConfiguration.icon for the rich visual. Otherwise falls back
 //  to a Vibez-branded text-only shield.
 //
@@ -115,12 +115,20 @@ nonisolated final class ShieldConfigurationExtension: ShieldConfigurationDataSou
         // pings (both/none) — and a missing Codex render (host hasn't
         // relaunched since the update that introduced it) — fall back
         // to the Claude card; text-only shield only if that's gone too.
-        if agent == .codex,
-           let codex = UIImage(contentsOfFile:
-               containerURL.appendingPathComponent("shield-codex.png").path) {
-            return codex
+        // The v1 names cover the background-app-update window: iOS can
+        // update the app (and this extension) without launching the
+        // host, so the v2 renders don't exist until its next cold
+        // start — a stale-art card beats the text-only fallback.
+        let names = agent == .codex
+            ? ["shield-codex-v2.png", "shield-codex.png",
+               "shield-claude-v2.png", "shield-claude.png"]
+            : ["shield-claude-v2.png", "shield-claude.png"]
+        for name in names {
+            if let image = UIImage(contentsOfFile:
+                containerURL.appendingPathComponent(name).path) {
+                return image
+            }
         }
-        let claudeURL = containerURL.appendingPathComponent("shield-claude.png")
-        return UIImage(contentsOfFile: claudeURL.path)
+        return nil
     }
 }

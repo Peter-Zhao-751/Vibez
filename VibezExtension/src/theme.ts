@@ -22,8 +22,10 @@ export interface Theme {
   dark: boolean;
 }
 
-export const CLAUDE_ORANGE = "#dd7a52";
-export const CLAUDE_DEEP = "#b85a36";
+// Anthropic's official Claude orange — the Clawd sprite body color; deep is
+// the sprites' shading color. Mirrors the iOS Theme.swift values.
+export const CLAUDE_ORANGE = "#d97757";
+export const CLAUDE_DEEP = "#bf694d";
 export const CODEX_BLUE = "#8c9ce8";
 export const CODEX_DEEP = "#5d6fbc";
 

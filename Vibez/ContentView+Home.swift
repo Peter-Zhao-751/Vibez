@@ -4,7 +4,7 @@
 //
 //  The home screen's layout half of ContentView: top bar + glow, the
 //  mascot hero, the big toggle, the setup card, and the Recent triggers
-//  sheet — plus the focus-mode tap flow and its app-picker detour.
+//  sheet — plus the dormant focus-mode tap flow and picker detour.
 //  Push routing lives in ContentView+Incoming.swift; shared state in
 //  ContentView.swift.
 //
@@ -152,9 +152,9 @@ extension ContentView {
                     // card, which shows the failure and its retry.
                     isInteractive: !setupNeeded,
                     focusMode: manager.focusMode,
-                    showGlow: gradientEffects,
+                    depthEffectsEnabled: threeDButtons,
                     onLockedTap: bounceToShowSetup,
-                    onReleaseFocus: { toggleFocusMode() }
+                    onReleaseFocus: releaseFocusMode
                 )
                 .padding(.top, unlockedLayoutExpanded ? Self.heroToggleGap : 14)
                 .padding(.bottom, unlockedLayoutExpanded ? 0 : 14)
@@ -182,7 +182,10 @@ extension ContentView {
     /// VStack spacing between the mascot frame and the hint. Negative:
     /// the mascot frames carry empty space below the feet, so the hint
     /// is pulled up into it to sit close under the mascot.
-    private static let captionGap: CGFloat = -6
+    // DEMO (2026-06-09): was -6, tuned for ClaudeMascot's empty space
+    // below the feet. The Clawd sprite frames end at the feet, so the
+    // hint needs real air instead of a tuck-under.
+    private static let captionGap: CGFloat = 6
     /// Fixed hint line height so the hero's height is deterministic.
     private static let captionHeight: CGFloat = 12
 
@@ -191,21 +194,23 @@ extension ContentView {
     /// against this gap, so shrinking it drops mascot + hint together.
     private static let heroToggleGap: CGFloat = 26
 
-    /// Mascot + focus halo + the "tap to enter focus mode" hint.
-    /// Desaturated and dimmed while disarmed; tapping toggles a manual
-    /// focus hold. Mascot and hint live in the SAME stack: every move,
-    /// size change, and filter applies to both as one rigid unit. The
-    /// hint is always rendered (visibility is opacity-only), so the
-    /// stack's height never changes and the hint can't pop in late.
+    /// Mascot + the retained focused-state halo. The manual activation
+    /// gesture and its hint stay gated off while Focus Mode activation is
+    /// unavailable; an already-persisted hold can still render here.
     private var hero: some View {
-        VStack(spacing: showFocusHint ? Self.captionGap : 0) {
+        VStack(spacing: focusHintEnabled ? Self.captionGap : 0) {
+            // The Clawd sprite mascot (ClaudeMascot → ClawdTheater), the
+            // canonical mascot shared across the app. Mostly at rest while
+            // armed, with a dice-roll act every few seconds; frozen with
+            // sleepy eyes when disarmed; persistent > < squint in focus
+            // mode. ClaudeMascot frames it to the mascotSize × mascotSize*0.9
+            // footprint — feet at the bottom, head room overflowing upward —
+            // so heroHeight stays true.
             ClaudeMascot(
                 listening: manager.armed,
                 size: mascotSize,
                 focused: manager.focusMode,
-                // The reference hero passes animate={false} — no body
-                // bob on the home screen; eyes still cycle.
-                animate: false
+                squintTrigger: clawdSquintTrigger
             )
             // The halo is decoration behind the mascot — .background so
             // its 1.9× footprint never inflates the hero's layout.
@@ -218,9 +223,9 @@ extension ContentView {
             // the shown layout. Shown below-mascot space is
             // captionGap + captionHeight; removing captionHeight/2 of it
             // lowers the mascot by that much.
-            .padding(.bottom, showFocusHint ? 0 : Self.captionGap + Self.captionHeight / 2)
+            .padding(.bottom, focusHintEnabled ? 0 : Self.captionGap + Self.captionHeight / 2)
 
-            if showFocusHint {
+            if focusHintEnabled {
                 Text("tap to enter focus mode")
                     .font(.system(size: 10, weight: .bold, design: .monospaced))
                     .tracking(0.8)
@@ -246,14 +251,28 @@ extension ContentView {
         .opacity(manager.armed ? 1 : 0.7)
         .animation(.easeInOut(duration: 0.5), value: manager.armed)
         .contentShape(Rectangle())
-        .onTapGesture { toggleFocusMode() }
+        .onTapGesture {
+            clawdSquintTrigger &+= 1
+        }
+        .accessibilityLabel("Clawd")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction {
+            clawdSquintTrigger &+= 1
+        }
+    }
+
+    private var focusHintEnabled: Bool {
+        Self.manualFocusModeActivationEnabled && showFocusHint
     }
 
     /// Hint visibility: paired (animated layout state, so show/hide
     /// rides the same transactions that move the mascot), armed (toggle
     /// off → invisible), and not already in focus mode.
     private var captionVisible: Bool {
-        unlockedLayoutExpanded && manager.armed && !manager.focusMode
+        Self.manualFocusModeActivationEnabled
+            && unlockedLayoutExpanded
+            && manager.armed
+            && !manager.focusMode
     }
 
     /// The hero's layout height — the mascot frame plus the
@@ -264,17 +283,16 @@ extension ContentView {
         // (negative gap + caption height); without it, that same space
         // minus half the caption height — so the mascot sits half a
         // text-height lower when the hint is gone.
-        let belowMascot = showFocusHint
+        let belowMascot = focusHintEnabled
             ? Self.captionGap + Self.captionHeight
             : Self.captionGap + Self.captionHeight / 2
         return mascotFrame + belowMascot
     }
 
-    /// Tap the mascot to start/stop a manual focus hold. Only meaningful
-    /// while armed. With no apps selected, open the system app picker
-    /// directly (an empty shield would block nothing) and engage focus
-    /// once the user has picked something — see `pickAppsThenFocus`.
+    /// Retained activation flow for a future re-enable. The availability
+    /// gate prevents this path from starting a new manual hold.
     private func toggleFocusMode() {
+        guard Self.manualFocusModeActivationEnabled else { return }
         guard manager.armed else { return }
         guard manager.hasSelection else {
             pickAppsThenFocus()
@@ -283,6 +301,16 @@ extension ContentView {
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
         withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
             manager.setFocusMode(!manager.focusMode)
+        }
+    }
+
+    /// Keep a release path for users who already had a persisted manual
+    /// hold when activation was disabled.
+    private func releaseFocusMode() {
+        guard manager.focusMode else { return }
+        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
+            manager.setFocusMode(false)
         }
     }
 
@@ -311,7 +339,11 @@ extension ContentView {
             manager.updateSelection(draftSelection)
         }
 
-        if wantsFocus && manager.armed && manager.hasSelection && !manager.focusMode {
+        if Self.manualFocusModeActivationEnabled
+            && wantsFocus
+            && manager.armed
+            && manager.hasSelection
+            && !manager.focusMode {
             UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
             withAnimation(.spring(response: 0.4, dampingFraction: 0.82)) {
                 manager.setFocusMode(true)

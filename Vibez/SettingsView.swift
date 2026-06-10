@@ -44,10 +44,11 @@ struct SettingsView: View {
     @AppStorage("vibez.blockSeconds.done") private var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
+    @AppStorage("vibez.dismissAllOverlays") private var dismissAllOverlays = true
     @AppStorage("vibez.genericShield") private var genericShield = false
     @AppStorage("vibez.notifyBanners") private var notifyBanners = true
-    @AppStorage("vibez.showFocusHint") private var showFocusHint = true
     @AppStorage("vibez.gradientEffects") private var gradientEffects = true
+    @AppStorage("vibez.threeDButtons") private var threeDButtons = true
     @AppStorage("vibez.onboardingCompleted") private var onboardingCompleted = false
 
     @State private var pickerPresented = false
@@ -111,7 +112,7 @@ struct SettingsView: View {
                 }
             }
             .familyActivityPicker(
-                title: "Select apps to block",
+                headerText: "Select apps to block",
                 isPresented: $pickerPresented,
                 selection: $draftSelection
             )
@@ -199,11 +200,11 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             Toggle("Gradient effects", isOn: $gradientEffects)
-            Toggle("Show focus-mode hint", isOn: $showFocusHint)
+            Toggle("3D buttons", isOn: $threeDButtons)
         } header: {
             Text("Appearance")
         } footer: {
-            Text("Gradient effects: the drifting background bubbles, the toggle’s accent glow, and the halo behind the mascot in focus mode — turn off for a flat, glow-free home screen. Focus-mode hint: the “tap to enter focus mode” caption under the mascot.")
+            Text("Gradient effects control the drifting background bubbles and accent treatments. 3D buttons add pixel highlights and shadows to the main toggle.")
         }
     }
 
@@ -391,10 +392,12 @@ struct SettingsView: View {
             }
             .pickerStyle(.segmented)
             Toggle("Show dismiss button", isOn: $allowDismiss)
+            Toggle("Dismiss all popups", isOn: $dismissAllOverlays)
+                .disabled(!allowDismiss)
         } header: {
             Text("Block overlay")
         } footer: {
-            Text("Order: \"Newest first\" puts the latest ping on top and reveals older blocks as you dismiss; \"Oldest first\" keeps the earliest unresolved block visible until you dismiss it. Dismiss button: when off, the only ways out are replying in Claude/Codex or letting the countdown expire.")
+            Text("Order controls which unresolved ping appears on top. “Dismiss all popups” clears every active block and lifts the shield; when off, Dismiss clears only the visible conversation. Hiding the button means you must reply in Claude/Codex or let each countdown expire.")
         }
     }
 

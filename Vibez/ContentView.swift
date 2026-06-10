@@ -18,6 +18,10 @@ import SwiftUI
 import FamilyControls
 
 struct ContentView: View {
+    /// Manual Focus Mode remains implemented so an already-persisted hold
+    /// can render and be released, but new holds are not user-activatable.
+    static let manualFocusModeActivationEnabled = false
+
     @State var manager: ScreenTimeManager
     // @State-wrapped on purpose. With a plain `private let`, SwiftUI
     // doesn't reliably hook the @Observable into this view's render
@@ -74,21 +78,23 @@ struct ContentView: View {
     @AppStorage("vibez.blockSeconds.done") var blockSecondsDone = 30
     @AppStorage("vibez.overlayOrder") private var overlayOrderRaw = OverlayOrder.stack.rawValue
     @AppStorage("vibez.allowDismiss") private var allowDismiss = true
+    @AppStorage("vibez.dismissAllOverlays") var dismissAllOverlays = true
     /// Whether agent pings surface as an OS banner + sound. When off,
     /// blocks still engage; the push just arrives silently (passive) in
     /// Notification Center. Mirrored to the App Group by ScreenTimeManager
     /// so VibezPushService honors it on the background path too.
     @AppStorage("vibez.notifyBanners") var notifyBanners = true
-    /// Whether the "tap to enter focus mode" hint shows under the mascot.
-    /// Off → the hint is removed (not just faded) and the hero keeps half
-    /// the hint's height as padding so the mascot doesn't drop all the way
-    /// onto the toggle's gap. Default on. Mirrored in SettingsView.
+    /// Retained with the dormant Focus Mode UI so the old presentation can
+    /// be restored without rebuilding its preference plumbing.
     @AppStorage("vibez.showFocusHint") var showFocusHint = true
     /// Whether the accent gradient flourishes render: the drifting
     /// background bubbles (ActiveBackdrop), the toggle's colored glow, and
     /// the halo behind the mascot in focus mode (FocusHalo). Off → a flat,
     /// glow-free home screen. Default on. Mirrored in SettingsView.
     @AppStorage("vibez.gradientEffects") var gradientEffects = true
+    /// Adds pixel bevels and a hard shadow to the main toggle. Mirrored in
+    /// SettingsView.
+    @AppStorage("vibez.threeDButtons") var threeDButtons = true
 
     @Environment(\.colorScheme) private var systemColorScheme
     @Environment(\.scenePhase) private var scenePhase
@@ -97,15 +103,12 @@ struct ContentView: View {
     @State var showSettings = false
     /// Drives the automatic "Rate Vibez" sheet (post-dismiss eligibility).
     @State var showReviewPrompt = false
-    /// Drives the system app picker presented straight from the mascot
-    /// tap when no apps are selected yet (instead of bouncing to
-    /// Settings). See `toggleFocusMode` / `pickAppsThenFocus`.
+    /// Retained state for the dormant Focus Mode picker detour.
     @State var pickerPresented = false
     @State var draftSelection = FamilyActivitySelection()
-    /// True while the picker was opened by a focus-mode tap, so once the
-    /// user actually selects apps we engage focus mode for them rather
-    /// than making them tap the mascot a second time.
+    /// Retained state for engaging Focus Mode after its picker detour.
     @State var focusAfterPick = false
+    @State var clawdSquintTrigger = 0
     @State var toggleShake = 0
     @State var setupShake = 0
     // Seeded in init from the pairing state — see the note there.
@@ -169,6 +172,13 @@ struct ContentView: View {
             mainScreen
                 .ignoresSafeArea(edges: .bottom)
 
+            // Above the screen content so it also dithers the toggle's
+            // glow shadows, below the sheet/overlays. Gated on the same
+            // setting that owns every gradient it exists to smooth.
+            if gradientEffects {
+                GrainDither()
+            }
+
             recentTriggersSheet
                 .ignoresSafeArea(edges: .bottom)
                 .zIndex(2)
@@ -180,7 +190,8 @@ struct ContentView: View {
                     expiresAt: msg.sessionId.flatMap { manager.pendingTriggers[$0]?.expiresAt },
                     stackDepth: overlayQueue.count,
                     allowDismiss: allowDismiss,
-                    onDismiss: dismissTopOverlay,
+                    dismissesAll: dismissAllOverlays,
+                    onDismiss: dismissOverlays,
                     onExpire: expireTopOverlay
                 )
                 .id(msg.id)
@@ -204,10 +215,10 @@ struct ContentView: View {
                 overlayQueue = [fake]
                 // Headless verification seam (no sim tap tooling): drive the
                 // real dismiss path so maybePromptForReview → sheet can be
-                // screenshotted. The Dismiss-button → dismissTopOverlay
+                // screenshotted. The Dismiss button → dismissOverlays
                 // wiring itself is pre-existing and unchanged.
                 if UserDefaults.standard.bool(forKey: "vibez.debug.autoDismissReview") {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismissTopOverlay() }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { dismissOverlays() }
                 }
             }
             #endif

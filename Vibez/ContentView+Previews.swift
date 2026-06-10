@@ -130,8 +130,8 @@ private func previewContent(
 
 #Preview("Armed · listening · dark") {
     // Toggle flipped ON: bubbles drifting, top glow on, mascot in its
-    // listening pose with the "tap to enter focus mode" hint. No pings
-    // have landed yet, so the Recent triggers sheet is blank.
+    // listening pose. No pings have landed yet, so the Recent triggers
+    // sheet is blank.
     previewContent(
         armed: true
     )

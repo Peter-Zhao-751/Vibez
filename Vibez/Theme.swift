@@ -76,6 +76,7 @@ struct Theme {
     let bg: Color
     let bgPanel: Color
     let bgWidget: Color
+    let bgTrigger: Color
     let bgChip: Color
     let fg: Color
     let fgMute: Color
@@ -83,13 +84,15 @@ struct Theme {
     let hairline: Color
     let accent: Color
     let accentDeep: Color
-    let pillGradient: LinearGradient
     /// Track color of the big toggle when it's off.
     let pillOff: Color
     let onAccent: Color
 
-    static let claudeOrange = Color(hex: 0xdd7a52)
-    static let claudeDeep   = Color(hex: 0xb85a36)
+    /// Anthropic's official Claude orange — the exact body color of the
+    /// Clawd sprite sheets (claude.ai artwork), so the mascot and every
+    /// accent surface share one orange. Deep = the sprites' shading color.
+    static let claudeOrange = Color(hex: 0xd97757)
+    static let claudeDeep   = Color(hex: 0xbf694d)
     /// Codex periwinkle — used by BlockedOverlay's per-message accent
     /// and the recent-trigger "cx" chip. The app theme stays Claude
     /// (Theme.make() has no agent param on purpose); per-ping surfaces
@@ -100,19 +103,14 @@ struct Theme {
         let accent = claudeOrange
         let accentDeep = claudeDeep
 
-        let pillGradient = LinearGradient(
-            colors: [accent, accentDeep],
-            startPoint: .topLeading,
-            endPoint: .bottomTrailing
-        )
-
         // Every neutral resolves its own light/dark variant from the live
-        // trait collection. accent/accentDeep/pillGradient are identical
-        // in both schemes, so they stay static.
+        // trait collection. accent/accentDeep are identical in both
+        // schemes, so they stay static.
         return Theme(
             bg:       .dynamic(light: Color(hex: 0xfbf8f4), dark: Color(hex: 0x0c0d12)),
             bgPanel:  .dynamic(light: .white,               dark: Color(hex: 0x15161c)),
             bgWidget: .dynamic(light: .white,               dark: Color(hex: 0x1c1f27)),
+            bgTrigger: .dynamic(light: Color(hex: 0xe6dfd5), dark: Color(hex: 0x1c1f27)),
             bgChip:   .dynamic(light: Color(hex: 0xf1ede5), dark: Color(hex: 0x16181f)),
             fg:       .dynamic(light: Color(hex: 0x1a0e08), dark: Color(hex: 0xf5f1ec)),
             fgMute:   .dynamic(light: Color(hex: 0x6e655c), dark: Color(hex: 0x8d8a96)),
@@ -120,7 +118,6 @@ struct Theme {
             hairline: .dynamic(light: Color(hex: 0xece4d8), dark: Color(hex: 0x272832)),
             accent: accent,
             accentDeep: accentDeep,
-            pillGradient: pillGradient,
             pillOff:  .dynamic(light: Color(hex: 0xe6dfd5), dark: Color(hex: 0x1d1f27)),
             onAccent: .white
         )

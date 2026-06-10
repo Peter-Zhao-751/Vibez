@@ -315,6 +315,23 @@ jq_get() {
     fi
 }
 
+# Harness-managed pending work advertised in the Stop hook payload
+# (Claude Code ≥ 2.1.145): in-flight background tasks (workflows,
+# background shells, subagents) and session-scoped scheduled wakeups
+# (/loop, ScheduleWakeup, CronCreate). Either one non-empty means the
+# turn ended as a pause — the harness will re-invoke the session by
+# itself — not as the agent being done. Prints "<tasks> <crons>".
+# Absent fields (older Claude Code, task registry unreachable) and
+# non-array junk read as 0, failing open to the pre-gate behavior.
+stop_pending_work() {
+    local bg cron
+    bg="$(jq_get '(.background_tasks // []) | if type == "array" then length else 0 end' '0')"
+    cron="$(jq_get '(.session_crons // []) | if type == "array" then length else 0 end' '0')"
+    case "${bg}" in ''|*[!0-9]*) bg=0 ;; esac
+    case "${cron}" in ''|*[!0-9]*) cron=0 ;; esac
+    printf '%s %s' "${bg}" "${cron}"
+}
+
 # Look up the desktop Claude app's own conversation title. The desktop
 # app stores per-session metadata under
 #   ~/Library/Application Support/Claude/claude-code-sessions/<workspace>/<some>/local_<uuid>.json
@@ -592,6 +609,22 @@ case "${EVENT}" in
     stop)
         cwd="$(jq_get '.cwd')"
         sid="$(jq_get '.session_id' 'nosid')"
+        # Stop fires at every turn boundary, including one the session
+        # ends while a background workflow/task is still running or a
+        # /loop-style wakeup is scheduled ("Waiting for N dynamic
+        # workflows to finish"). The harness resumes the session by
+        # itself then — pushing done/shield:on there blocks the phone
+        # mid-task and tells the user the agent finished when it
+        # didn't. Skip; the eventual real stop (both arrays empty)
+        # still pushes.
+        pending="$(stop_pending_work)"
+        pending_tasks="${pending%% *}"
+        pending_crons="${pending##* }"
+        if [ "$((pending_tasks + pending_crons))" -gt 0 ]; then
+            log "stop: skip — session resumes itself (background_tasks=${pending_tasks} session_crons=${pending_crons} sid=${sid})"
+            clear_pending "${sid}"
+            exit 0
+        fi
         proj="$(basename "${cwd:-unknown}")"
         transcript="$(jq_get '.transcript_path')"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
@@ -914,6 +947,30 @@ case "${EVENT}" in
         check_eq "jqget-empty-default"   "$(jq_get '.empty' 'fb')"   "fb"
         INPUT=''
         check_eq "jqget-noinput-default" "$(jq_get '.x' 'fb')" "fb"
+        INPUT="${saved_input}"
+
+        # stop_pending_work — a Stop that fires while the harness still
+        # owns work that will resume the session (background workflow /
+        # shell / subagent, or a /loop-ScheduleWakeup-CronCreate wakeup)
+        # is a pause, not a stop, and must not push done/shield:on.
+        # Output is "<tasks> <crons>". Absent fields (Claude Code
+        # < 2.1.145, or task registry unreachable) and malformed values
+        # must read "0 0" — fail open to the pre-gate behavior.
+        saved_input="${INPUT}"
+        INPUT='{}'
+        check_eq "pendwork-absent-fails-open" "$(stop_pending_work)" "0 0"
+        INPUT='{"background_tasks":[],"session_crons":[]}'
+        check_eq "pendwork-both-empty"        "$(stop_pending_work)" "0 0"
+        INPUT='{"background_tasks":[{"id":"bt1","type":"shell","status":"running","command":"sleep 30"}],"session_crons":[]}'
+        check_eq "pendwork-bg-task"           "$(stop_pending_work)" "1 0"
+        INPUT='{"background_tasks":[],"session_crons":[{"id":"19759f27","schedule":"53 14 * * *","recurring":false,"prompt":"probe"}]}'
+        check_eq "pendwork-cron"              "$(stop_pending_work)" "0 1"
+        INPUT='{"background_tasks":[{"id":"a"},{"id":"b"}],"session_crons":[{"id":"c"}]}'
+        check_eq "pendwork-both-kinds"        "$(stop_pending_work)" "2 1"
+        INPUT='{"background_tasks":"junk","session_crons":42}'
+        check_eq "pendwork-malformed"         "$(stop_pending_work)" "0 0"
+        INPUT=''
+        check_eq "pendwork-no-stdin"          "$(stop_pending_work)" "0 0"
         INPUT="${saved_input}"
 
         # Log rotation — an oversized log keeps its newest half; a log

@@ -88,15 +88,17 @@ Vibez/                        Main iOS app target.
                               keep in sync.
   ScreenTimeManager.swift     @Observable; auth, persisted FamilyActivitySelection,
                               ManagedSettingsStore shield apply/remove, App Group writer.
-                              Pre-renders the per-agent shield PNGs (shield-claude.png,
-                              shield-codex.png) AND the Codex notification avatar
+                              Pre-renders the per-agent shield PNGs (shield-claude-v2.png,
+                              shield-codex-v2.png — v2 = sprite-Clawd art + official orange,
+                              2026-06-09) AND the Codex notification avatar
                               (notif-codex-v2.png) into the App Group at init; prunes
                               legacy renders (shield.png, shield-both.png, shield-none.png,
-                              notif-codex.png).
+                              shield-claude.png, shield-codex.png, notif-codex.png).
   ShieldCardRenderer.swift    Host-side SwiftUI→UIImage renderer for the shield card. Writes
-                              the per-agent PNGs (Claude pixel critter / Codex logo + blue
-                              glow) into the App Group container so VibezShield (and the NSE)
-                              can engage the shield without running ImageRenderer. Also owns
+                              the per-agent PNGs (Clawd resting-sprite frame + drawn-on eyes /
+                              Codex logo + blue glow) into the App Group container so
+                              VibezShield (and the NSE) can engage the shield without
+                              running ImageRenderer. Also owns
                               renderNotificationIconPNG — rasterizes the codex-blue asset
                               (light variant forced) INSCRIBED in the avatar's circle mask on
                               a transparent canvas, so the visible shape stays a rounded
@@ -123,6 +125,11 @@ Vibez/                        Main iOS app target.
                               agent param; the Agent enum is gone). Theme.codexBlue (#8c9ce8)
                               is the one Codex constant — BlockedOverlay's per-message accent
                               + the recent-trigger cx chip.
+  GrainDither.swift           Full-screen static ±1-step noise overlay (.overlay blend,
+                              deterministic seed) layered above mainScreen in ContentView's
+                              ZStack, gated on vibez.gradientEffects. Exists to break up
+                              8-bit banding in the dark-mode glow gradients (toggle glow +
+                              ActiveBackdrop orbs) — don't remove it as "decoration".
   AnalyticsTracker.swift      Per-day usage stats (conversations, replies, ping counts);
                               resets at local midnight. Feeds ContentView's analytics panel.
   TriggerStore.swift          Persists recent triggers (capped at 100) for the Recent
@@ -138,8 +145,10 @@ Vibez/                        Main iOS app target.
   GoogleService-Info.plist    Firebase config for bundle vibezlol.Vibez, project vibez-backend.
 VibezShield/                  Shield Configuration Extension (separate target). Reads
                               ShieldState from the App Group and loads the host-rendered
-                              per-agent PNG (shield-claude.png / shield-codex.png) into
-                              ShieldConfiguration.icon; the dict's `agent` field drives icon,
+                              per-agent PNG (shield-claude-v2.png / shield-codex-v2.png;
+                              the v1 names still load as a fallback for the background-
+                              app-update window, until the host's next launch prerenders
+                              + prunes) into ShieldConfiguration.icon; the dict's `agent` field drives icon,
                               Close-button accent, and background wash again (Codex = blue/navy,
                               2026-06-06). A missing Codex PNG or an untagged ping falls back
                               to the Claude card. Deliberately NO SwiftUI/ImageRenderer here
@@ -234,6 +243,7 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
 ## Conventions
 
 - `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` is on — assume MainActor by default; only add `nonisolated` deliberately.
+- **Min deployment target is iOS 18.0** (all three targets + project level; lowered from 26.4 on 2026-06-09 — the original v1.0 shipped with a 26.4 floor). The SDK stays 26.x, so the compiler gates 26-only APIs now: anything iOS 26+ needs `if #available`. Known trap: `familyActivityPicker(title:...)` is iOS 26.2+ — use the iOS 16 `headerText:` overload instead (SettingsView does). The true code floor is ~iOS 17 (`@Observable`, two-param `onChange`); Screen Time APIs in use are iOS 15–16.
 - Bundle ID: `vibezlol.Vibez`. Team: `QW64TZKUAF`. Firebase project: `vibez-backend`.
 - App Group: `group.vibezlol.Vibez`. Carries the live shield context (agent, push title/body,
   expiry, dark/light) plus the host-rendered shield PNGs. The `"shieldState"` plist dict schema
@@ -274,12 +284,32 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   bug — delivery skew > the 8s `UNBLOCK_BUFFER_SECONDS` made it no-op with no retry); it's kept
   only as the legacy fallback for pre-seq pushes. Absent seq → arrival-order behavior (forward/
   backward compatible during rollout).
+- **One Claude orange everywhere (standardized 2026-06-09): #d97757, deep #bf694d** —
+  Anthropic's official brand orange, the exact body/shading colors of the Clawd sprite
+  sheets. Used by `Theme.claudeOrange`/`claudeDeep`, the app icon + every wordmark/lockup
+  SVG under `assets/`, the Chrome extension (`theme.ts` CLAUDE_ORANGE/CLAUDE_DEEP), and
+  the shield card. Don't reintroduce the retired oranges (#dd7a52/#b85a36 pre-2026-06-09
+  theme, #f27333 old shield accent, #d46d4b webm-shifted laptop sheet).
+- **Two Clawd sheets carry dark-appearance variants (2026-06-09):** `clawd-laptop` and
+  `clawd-magnifier` — the only sheets with non-body accessories — have `*-dark.png`
+  asset-catalog variants (luminosity=dark) so the black laptop and ink hat don't vanish
+  on the dark background. Dark recolors: laptop `#000000` → `#c8ccd5` silver (the laptop
+  shares pure black with the EYES — recolor by connected component, not color map,
+  classified by the fraction of the component's non-black 4-neighbors that are body vs
+  air: laptop ≤ 0.15, face features ≥ 0.44, threshold 0.35. "Touches transparency =
+  accessory" is WRONG — the far eye rides the silhouette edge in side-view frames 17–34
+  and the snout outline in frame 36 also touches air; the first cut shipped those silver
+  = white-eye flicker, fixed same day), hat ink `#141413` → `#e9e2d3` bone + band
+  `#61380a` → `#9c6b2e` amber (exact color map; ink/band are hat-exclusive — verified
+  the lens interior is white/black, untouched).
+  Eyes stay black in both modes; light mode keeps the original art. Regenerating either
+  sheet's art means regenerating its dark variant too.
 - **Agent accent colors are mirrored across two targets** — Codex RGB(0.29, 0.48, 1.00)
-  and Claude RGB(0.95, 0.45, 0.20) live in BOTH `Vibez/ShieldCardRenderer.swift`
-  (`ShieldCardTheme`) and `VibezShield/ShieldCard.swift` (`accentUIColor` /
-  `backgroundUIColor`). Separate targets can't share source — keep them in sync when
-  changing either. (`Theme.codexBlue` #8c9ce8 is deliberately different: the in-app
-  overlay's softer periwinkle.)
+  and Claude RGB(0.851, 0.467, 0.341) (= #d97757) live in BOTH
+  `Vibez/ShieldCardRenderer.swift` (`ShieldCardTheme`) and `VibezShield/ShieldCard.swift`
+  (`accentUIColor` / `backgroundUIColor`). Separate targets can't share source — keep them
+  in sync when changing either. (`Theme.codexBlue` #8c9ce8 is deliberately different: the
+  in-app overlay's softer periwinkle.)
 - **Codex banner identity is mirrored across two targets** —
   `codexCommunicationContent` (INSendMessageIntent restyle; the blue pixel-Z avatar
   takes the banner's app-icon slot, iOS badges the real app icon on its corner)
@@ -322,6 +352,18 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   the `stamp-*` cases.) First ask of a burst still blocks + banners with the full
   timer. Known accepted edge: concurrent shield:on hooks can race the claim (worst
   case = one extra banner).
+- **Stop pushes are gated on pending harness work (Claude plugin, 2026-06-09).**
+  Claude Code fires the Stop hook at every turn boundary — including a turn that ends while a
+  background Workflow/task is still running or a /loop-`ScheduleWakeup` wakeup is scheduled
+  ("Waiting for N dynamic workflows to finish"), after which the harness resumes the session by
+  itself. Claude Code ≥ 2.1.145 advertises that state in the Stop payload (`background_tasks` +
+  `session_crons` arrays); `notify.sh stop` (`stop_pending_work`) skips its done/needs-input
+  `shield:on` push when either is non-empty — that turn end is a pause, not a stop (the false
+  "done" was shielding the phone mid-workflow). Absent fields (older CLI / task registry
+  unreachable) fail open; the eventual real stop (both arrays empty) still pushes. The Codex
+  plugin deliberately has NO such gate: codex (verified 0.137.0) never auto-resumes an idle
+  parent (child-agent completion notifications are injected with `trigger_turn: false`), so its
+  turn end genuinely means "waiting on you", and its Stop payload carries no such fields anyway.
 - **Firestore database is named "tokens" (non-default).** Always use `getFirestore("tokens")` on the server; the iOS app never touches Firestore directly — it goes through `registerPushToken`.
 - **All Cloud Functions are deployed with `{invoker: "public"}`.** Gen-2 functions are Cloud Run services that default to authenticated; we explicitly open them.
 - **Backend abuse limits (design spec 2026-06-04):** `/notify` and

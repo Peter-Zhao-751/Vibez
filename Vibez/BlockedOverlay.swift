@@ -20,7 +20,7 @@ struct BlockedOverlay: View {
     var expiresAt: Date?
     /// Total number of overlays in the queue (including this one).
     /// When > 1 a "+N more" pill appears in the corner so the user
-    /// understands that dismissing this one will reveal another.
+    /// understands that the Dismiss All action clears multiple blocks.
     let stackDepth: Int
     /// When false, the Dismiss button is hidden — the only ways out
     /// of the overlay are replying in Claude/Codex (which sends a
@@ -28,6 +28,9 @@ struct BlockedOverlay: View {
     /// to true so previews and any other call sites get the standard
     /// behavior without opting in.
     var allowDismiss: Bool = true
+    /// When true, the button clears the full stack instead of only this
+    /// overlay. The label reflects the broader action when a stack exists.
+    var dismissesAll: Bool = true
     let onDismiss: () -> Void
     /// Fired exactly once when the countdown reaches 0. Parent is
     /// expected to pop this overlay off the queue.
@@ -119,7 +122,7 @@ struct BlockedOverlay: View {
                         .frame(width: 130, height: 130)
                         .padding(.bottom, 18)
                 } else {
-                    ClaudeMascot(listening: true, size: 130)
+                    ClaudeMascot(listening: true, size: 130, oneShot: true)
                         .padding(.bottom, 18)
                 }
 
@@ -175,7 +178,7 @@ struct BlockedOverlay: View {
                 // has no agent to reply to. (Design call 2026-06-09.)
                 if allowDismiss || expiresAt == nil {
                     Button(action: onDismiss) {
-                        Text("Dismiss")
+                        Text(dismissesAll && stackDepth > 1 ? "Dismiss All" : "Dismiss")
                             .font(.system(size: 14, weight: .semibold))
                             .foregroundStyle(theme.fgMute)
                             .padding(.vertical, 12)

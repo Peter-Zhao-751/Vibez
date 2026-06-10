@@ -44,24 +44,32 @@ extension ContentView {
         )
     }
 
-    /// Tap Dismiss on the top overlay: resolve its trigger and pop.
-    /// The next-most-recent unresolved block (if any) takes its place.
-    func dismissTopOverlay() {
-        guard let msg = overlayQueue.first else { return }
-        if let sid = msg.sessionId, sid.isUsableSessionId {
-            // Sync from App Group first — the NSE may have engaged
-            // the shield for this session in the background, but
-            // host's in-memory pendingTriggers is empty until the
-            // tick reloads. Without this, resolveTrigger no-ops
-            // (removeValue returns nil) and recomputeBlocking →
-            // clearShield never fires, so the apps stay blocked
-            // even though the user explicitly dismissed.
-            manager.reloadFromAppGroup()
-            manager.resolveTrigger(sessionId: sid)
-            triggerStore.clearNeedsReply(forSession: sid)
-        }
-        withAnimation(.easeInOut(duration: 0.32)) {
-            _ = overlayQueue.removeFirst()
+    /// Tap Dismiss on the visible overlay. Depending on the user's setting,
+    /// either resolve every pending trigger or only the visible session.
+    func dismissOverlays() {
+        guard let topMessage = overlayQueue.first else { return }
+        // Sync first so both modes see sessions the NSE engaged while the
+        // host was suspended.
+        manager.reloadFromAppGroup()
+        if dismissAllOverlays {
+            let sessionIds = Set(manager.pendingTriggers.keys).union(
+                overlayQueue.compactMap(\.sessionId).filter(\.isUsableSessionId)
+            )
+            manager.clearTriggers()
+            for sid in sessionIds {
+                triggerStore.clearNeedsReply(forSession: sid)
+            }
+            withAnimation(.easeInOut(duration: 0.32)) {
+                overlayQueue.removeAll()
+            }
+        } else {
+            if let sid = topMessage.sessionId, sid.isUsableSessionId {
+                manager.resolveTrigger(sessionId: sid)
+                triggerStore.clearNeedsReply(forSession: sid)
+            }
+            withAnimation(.easeInOut(duration: 0.32)) {
+                _ = overlayQueue.removeFirst()
+            }
         }
         maybePromptForReview()
     }

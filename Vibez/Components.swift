@@ -2,7 +2,7 @@
 //  Components.swift
 //  Vibez
 //
-//  Building blocks for the main screen: slim WARP-style pill toggle
+//  Building blocks for the main screen: pixel-art pill toggle
 //  (which morphs into the focus-mode banner), top bar, blocked-app
 //  card, recent-trigger row.
 //
@@ -12,13 +12,14 @@ import UIKit
 import FamilyControls
 import ManagedSettings
 
-// MARK: - Big WARP-style toggle
+// MARK: - Big pixel toggle
 //
-// Slim pill with a plain white knob and an accent glow while on.
-// Locked (setup needed: unpaired, or pairing failed) → dim, taps
-// bounce. In focus mode the switch
+// Pixel-art pill — stepped corners and flat fills, matching the sprite
+// mascot and wordmark — with a chamfered-square knob. Locked (setup
+// needed: unpaired, or pairing failed) → dim,
+// taps bounce. In focus mode the switch
 // morphs into the focus banner — "tap to release". One persistent
-// capsule animates its size inside a constant-height layout box, so
+// pill animates its size inside a constant-height layout box, so
 // the vertical center never shifts and the pill melts into the banner
 // instead of crossfading.
 
@@ -27,10 +28,7 @@ struct BigToggle: View {
     let theme: Theme
     let isInteractive: Bool
     let focusMode: Bool
-    /// Whether the track casts its accent-colored glow/shadow. Off → a
-    /// flat pill (gated by the Settings "Gradient effects" toggle). The
-    /// gradient fill itself stays; only the colored drop-shadow goes.
-    let showGlow: Bool
+    let depthEffectsEnabled: Bool
     var onLockedTap: () -> Void = {}
     var onReleaseFocus: () -> Void = {}
 
@@ -42,14 +40,14 @@ struct BigToggle: View {
 
     init(enabled: Binding<Bool>, theme: Theme, isInteractive: Bool,
          focusMode: Bool,
-         showGlow: Bool = true,
+         depthEffectsEnabled: Bool = false,
          onLockedTap: @escaping () -> Void = {},
          onReleaseFocus: @escaping () -> Void = {}) {
         _enabled = enabled
         self.theme = theme
         self.isInteractive = isInteractive
         self.focusMode = focusMode
-        self.showGlow = showGlow
+        self.depthEffectsEnabled = depthEffectsEnabled
         self.onLockedTap = onLockedTap
         self.onReleaseFocus = onReleaseFocus
         _accentOpacity = State(initialValue: (enabled.wrappedValue || focusMode) ? 1 : 0)
@@ -58,10 +56,39 @@ struct BigToggle: View {
     private static let pillW: CGFloat = 168
     /// Resting pill height — also the constant outer layout box, which
     /// ContentView centers on the screen.
-    static let pillH: CGFloat = 66
+    static let pillH: CGFloat = 64
     private static let bannerH: CGFloat = 42
-    private static let knobSize: CGFloat = 50
+    private static let knobSize: CGFloat = 48
     private static let knobPad: CGFloat = 8
+
+    /// The pixel grid. Chunky on purpose: at rest the track (64pt / 8),
+    /// the knob (48pt / 6), AND the knob's padding (one unit) all share
+    /// one 8pt "pixel" raster — so the knob's rows, its full-pixel drop
+    /// shadow, and the track's shading stripes land on the SAME grid
+    /// lines. (The old 66pt/9pt sizing put the knob 1pt off the track's
+    /// grid: 1pt shadow slivers above/below the bottom row read as dirt.)
+    /// PixelPill derives its unit from the live rect height, so the
+    /// focus-banner morph scales the steps with the pill instead of
+    /// letting them outgrow it.
+    fileprivate static let trackSteps: [CGFloat] = [2, 1]
+    fileprivate static let trackUnits: CGFloat = 8
+    private static let knobUnits: CGFloat = 6
+    /// One track pixel row at rest — the shading-stripe thickness.
+    private static let pixel: CGFloat = pillH / trackUnits
+
+    /// Track silhouette — a pixel pill: corner rows cut 2-then-1 units
+    /// deep (three visible facets per corner), the raster of a rounded
+    /// cap. AccentRevealMask reuses the same steps for its trailing
+    /// cap — keep them reading trackSteps.
+    private static let trackShape = PixelPill(
+        steps: trackSteps, unitsPerHeight: trackUnits
+    )
+    /// Knob silhouette — "a square with the corners cut out": a 6×6
+    /// pixel square with a single one-unit chamfer per corner (two
+    /// visible facets), mostly flat edges.
+    private static let knobShape = PixelPill(
+        steps: [1], unitsPerHeight: knobUnits
+    )
 
     static let slideDuration: Double = 0.5
     /// Knob slide — the reference's `cubic-bezier(.7,.1,.2,1)` over .5s.
@@ -69,6 +96,18 @@ struct BigToggle: View {
     /// Off fade-out of the fill — runs immediately (no delay) so it reads as a
     /// prompt fade, not a wait-then-vanish.
     static let offFadeAnimation = Animation.easeInOut(duration: 0.2)
+
+    /// The fill's lead over the knob's front: one track pixel. The cap's
+    /// apex rides exactly this far AHEAD of the circle for the whole
+    /// slide — a one-pixel orange lip plowed in front of the knob — and
+    /// because `knobFrontX(1) + fillLead == pillW`, the lip compresses
+    /// into the right pad and seats flush on the pill's edge at the same
+    /// instant the knob lands. One rigid unit, no tail stage, no pause.
+    static let fillLead = pixel
+
+    /// The apex's rest-on position (== pillW). The mask measures its live
+    /// width against this to stretch the fill over the wider focus banner.
+    static let fillRestApexX = knobFrontX(at: 1) + fillLead
 
     private static let knobTravel = pillW - knobSize - 2 * knobPad
 
@@ -84,23 +123,6 @@ struct BigToggle: View {
     static func knobFrontX(at progress: CGFloat) -> CGFloat {
         knobCenterX(at: progress) + knobSize / 2
     }
-
-    /// X the accent cap's apex tracks during the slide: the knob's front pulled
-    /// back by `knobPad`, so the orange keeps the same margin off the circle
-    /// that the circle keeps off the pill edge — the front trails the circle by
-    /// a steady gap instead of touching it.
-    static func accentApexX(at progress: CGFloat) -> CGFloat {
-        knobFrontX(at: progress) - knobPad
-    }
-
-    /// Max lead of the accent cap's apex over its tracked point (reached only
-    /// at progress 1), so the fill hits the pill's right edge exactly as the
-    /// knob lands on the right (`accentApexX(1) + accentLead == pillW`). The
-    /// mask scales it by progress, so for nearly the whole travel the orange's
-    /// front keeps its margin off the circle and only pulls past it at the very
-    /// end to close the edge gap — otherwise the fill would either trail the
-    /// circle by too much or stop short of the pill edge at rest-on.
-    static let accentLead = pillW - (knobTravel + knobSize)
 
     /// Whether the accent should be shown at all (drives its opacity).
     private var accentLit: Bool { enabled || focusMode }
@@ -166,25 +188,93 @@ struct BigToggle: View {
         }
     }
 
-    /// Track — a neutral capsule under the accent capsule; the accent is
+    /// Track — a neutral pixel pill under the accent fill; the accent is
     /// revealed by `AccentRevealMask` (geometry) gated by an opacity fade.
-    /// Turning on, the fill seeds at the knob, stays pinned to it (no racing),
-    /// and pulls to full as the knob lands on the right. Turning off, the fill
-    /// fades out promptly (0.2s) as the knob slides back. Fully orange at
-    /// rest-on, empty at rest-off.
+    /// Turning on, the fill's apex rides exactly one pixel AHEAD of the
+    /// knob's front edge (`fillLead`) — an orange lip the circle plows
+    /// across the track — and seats flush on the right edge at the same
+    /// instant the knob lands. One rigid unit, no end-of-slide pause.
+    /// Turning off, the fill fades out promptly (0.2s) as the knob slides
+    /// back. Fully orange at rest-on, empty at rest-off.
+    ///
+    /// Fills are solid — no gradients, no glow shadows; anything soft
+    /// reads as a gradient against the pixel raster. Depth comes from
+    /// ONE sprite idiom in BOTH states: a raised bevel of a light top
+    /// pixel row + a dark bottom pixel row (light from above), matching
+    /// the knob's shading and Clawd's own sprite shading. The on state
+    /// shades with accentDeep; the off state uses gentler low-contrast
+    /// rows of the same structure — a lone dark TOP row (the first
+    /// attempt) read as a stray line, not depth. The stripes are
+    /// full-width rectangles clipped by the shape mask, so they follow
+    /// the steps. The hairline border draws UNDER the stripes: on top it
+    /// sliced the bottom row's last 2pt off into a lighter sliver, so the
+    /// "shadow" row didn't fill its pixel.
     private var track: some View {
         ZStack {
-            Capsule()
-                .fill(theme.pillOff.shadow(
-                    .inner(color: .black.opacity(0.18), radius: 3, y: 2)))
+            Self.trackShape
+                .fill(theme.pillOff)
+                .overlay {
+                    // Hairline rim, masked OUT of the top and bottom pixel
+                    // rows: the shading stripes there must read as single
+                    // solid rows, and a border ghosts through the
+                    // translucent stripes as a 2pt lighter lip at the
+                    // pill's bottom edge — the "shadow line doesn't fill
+                    // its pixel" artifact (worst in dark mode, where the
+                    // hairline is lighter than the fill).
+                    Self.trackShape
+                        .strokeBorder(theme.hairline, lineWidth: 2)
+                        .mask {
+                            Rectangle().padding(.vertical, Self.pixel)
+                        }
+                }
+                .overlay(alignment: .top) {
+                    if depthEffectsEnabled {
+                        Rectangle()
+                            .fill(Color.dynamic(
+                                light: Color(hex: 0xebe5dc),
+                                dark: Color(hex: 0x24262e)
+                            ))
+                            .frame(height: Self.pixel)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if depthEffectsEnabled {
+                        // Keep the unchecked bevel close to pillOff in both
+                        // schemes. Solid colors avoid the dark-mode highlight
+                        // jumping toward white and the light-mode shadow reading
+                        // as a second outline.
+                        Rectangle()
+                            .fill(Color.dynamic(
+                                light: Color(hex: 0xded9d0),
+                                dark: Color(hex: 0x191b22)
+                            ))
+                            .frame(height: Self.pixel)
+                    }
+                }
+                .mask { Self.trackShape }
 
-            Capsule()
-                .fill(theme.pillGradient.shadow(
-                    .inner(color: .white.opacity(0.18), radius: 0.5, y: 1)))
+            Self.trackShape
+                .fill(theme.accent)
+                .overlay(alignment: .top) {
+                    if depthEffectsEnabled {
+                        Rectangle()
+                            .fill(.white.opacity(0.16))
+                            .frame(height: Self.pixel)
+                    }
+                }
+                .overlay(alignment: .bottom) {
+                    if depthEffectsEnabled {
+                        Rectangle()
+                            .fill(theme.accentDeep)
+                            .frame(height: Self.pixel)
+                    }
+                }
+                .mask { Self.trackShape }
                 .mask {
                     // Geometry only: fill pinned to the knob (seed → full).
                     // Same path both ways — off's disappearance is the opacity
-                    // fade below, not the geometry. Animatable on `progress`.
+                    // fade below, not the geometry. Animatable on `progress`,
+                    // sharing the knob's slide animation.
                     AccentRevealMask(progress: (enabled || focusMode) ? 1 : 0)
                 }
                 // Opacity (not geometry) takes the fill to empty: ON shows it
@@ -193,25 +283,32 @@ struct BigToggle: View {
                 // focusMode change.
                 .opacity(accentOpacity)
         }
-        .shadow(
-            color: showGlow ? theme.accent.opacity(focusMode ? 0.33 : (enabled ? 0.4 : 0.12)) : .clear,
-            radius: focusMode ? 12 : (enabled ? 14 : 7)
-        )
-        .shadow(
-            color: showGlow && (enabled || focusMode) ? theme.accentDeep.opacity(0.667) : .clear,
-            radius: 12,
-            y: focusMode ? 10 : 12
-        )
         .animation(Self.slideAnimation, value: enabled)
     }
 
-    /// Knob — plain white, slides edge to edge on the shared slide curve.
+    /// Knob — flat white chamfered square, slides edge to edge on the
+    /// shared slide curve. The drop shadow is a hard FULL-pixel offset
+    /// (radius 0, one knob unit down), the sprite idiom for the old soft
+    /// blur — a sub-unit offset leaves detached shadow slivers in the
+    /// step notches that read as rendering dirt, not shading. The dark
+    /// bottom pixel row grounds it like the mascot's sprite shading.
     private var knob: some View {
-        Circle()
+        Self.knobShape
             .fill(.white)
+            .overlay(alignment: .bottom) {
+                if depthEffectsEnabled {
+                    Rectangle()
+                        .fill(.black.opacity(0.12))
+                        .frame(height: Self.knobSize / Self.knobUnits)
+                }
+            }
+            .mask { Self.knobShape }
             .frame(width: Self.knobSize, height: Self.knobSize)
-            .shadow(color: .black.opacity(0.25), radius: 6, y: 4)
-            .overlay(Circle().strokeBorder(.black.opacity(0.04), lineWidth: 1))
+            .shadow(
+                color: depthEffectsEnabled ? .black.opacity(0.18) : .clear,
+                radius: 0,
+                y: Self.knobSize / Self.knobUnits
+            )
             .animation(Self.slideAnimation, value: enabled)
     }
 
@@ -237,16 +334,17 @@ struct BigToggle: View {
     }
 }
 
-/// Mask for the accent capsule: a solid body with a **rounded leading cap**,
-/// pinned to the knob. The cap uses the pill's own corner radius (`pillH/2`),
-/// so the orange's front curves exactly like the knob and the pill's rounded
-/// ends instead of cutting a flat vertical line — and at rest-on the cap lands
-/// flush on the track's own right cap. The lead over the knob center grows
-/// 0 → accentLead, so the fill sits at the knob (seed ≈ 0.2, nothing races
-/// ahead) and only pulls past it near the end to reach full. The geometry
-/// never empties (progress 0 = the seed at the knob); the host's opacity fade
-/// takes it to empty on the way off. `Animatable` on `progress` so it shares
-/// the knob's slide curve.
+/// Mask for the accent fill: a solid body with a **stepped trailing cap**,
+/// plowed by the knob. The cap reuses the track's own pixel corner steps,
+/// so the orange's front is rasterized exactly like the knob and the pill's
+/// stepped ends instead of cutting a flat vertical line — and at rest-on the
+/// cap lands flush on the track's own right cap. The cap's apex rides one
+/// pixel ahead of the knob's front for the whole slide (`fillLead`) — a
+/// visible orange lip leading the circle — and seats flush exactly as the
+/// knob lands. The geometry never empties (progress 0 = the seed at the
+/// knob); the host's opacity fade takes it to empty on the way off.
+/// `Animatable` on `progress`, sharing the knob's slide curve — one
+/// animated value drives knob and fill, so they can never drift.
 private struct AccentRevealMask: View, Animatable {
     var progress: CGFloat
 
@@ -255,39 +353,110 @@ private struct AccentRevealMask: View, Animatable {
         set { progress = newValue }
     }
 
-    /// Apex (rightmost point) of the rounded cap. (A plain func, not inline in
-    /// `body` — a top-level if/else there would be parsed as ViewBuilder
-    /// content.)
+    /// Apex (rightmost point) of the rounded cap: the knob's front edge
+    /// plus a one-pixel lead — an orange lip the circle plows in front
+    /// of itself for the whole slide, which seats flush on the pill's
+    /// right edge at the same instant the knob lands (`fillLead`). The
+    /// `width - fillRestApexX` term is zero on the pill and stretches the
+    /// fill over the focus banner's extra width, so a fully-lit capsule
+    /// is always covered edge to edge through the morph. At progress 0
+    /// this is the seed at the knob's resting front — the OPACITY (not
+    /// the geometry) takes it to empty, so off can retract here and then
+    /// fade rather than popping off-screen.
     private static func solidEdge(progress: CGFloat, width: CGFloat) -> CGFloat {
-        if progress >= 1 { return width }          // full
-        // Apex trails the circle's front by a steady `knobPad` margin; the
-        // lead grows 0 → accentLead, so the orange's front keeps that margin
-        // off the circle (nothing races ahead) and only pulls the last few px
-        // past it near the end to reach the pill edge. At progress 0 this is
-        // the seed behind the knob front — the OPACITY (not the geometry) takes
-        // it to empty, so off can retract here and then fade rather than
-        // popping off-screen.
-        return BigToggle.accentApexX(at: progress)
-             + BigToggle.accentLead * progress
+        return min(width, BigToggle.knobFrontX(at: progress)
+                        + BigToggle.fillLead
+                        + max(0, width - BigToggle.fillRestApexX))
     }
 
     var body: some View {
         GeometryReader { geo in
             let w = geo.size.width
             let solid = Self.solidEdge(progress: progress, width: w)
-            // Flat on the left (meets the track's own left cap), rounded on the
-            // right with the pill's radius. Both trailing radii sum to the full
-            // height, so the right edge is a true semicircle — a convex cap
-            // matching the knob's curve — whose apex lands on `solid`.
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: 0,
-                bottomTrailingRadius: BigToggle.pillH / 2,
-                topTrailingRadius: BigToggle.pillH / 2
+            // Flat on the left (meets the track's own left cap), stepped on
+            // the right with the track's own pixel corner steps — a convex
+            // cap matching the pill's raster — whose apex lands on `solid`.
+            PixelPill(
+                steps: BigToggle.trackSteps,
+                unitsPerHeight: BigToggle.trackUnits,
+                roundLeading: false
             )
             .frame(width: solid, height: geo.size.height)
             .frame(width: w, height: geo.size.height, alignment: .leading)
         }
+    }
+}
+
+/// A pixel-art rounded rect: a rectangle whose corners are cut away in
+/// unit steps — the rasterized look of the sprite mascot and wordmark.
+/// `steps` lists each corner row's horizontal cut depth in pixel units,
+/// outermost row first (e.g. `[3, 2, 1]`: the top row is inset 3 units,
+/// the next 2, the next 1, then the straight edge). Each row is one unit
+/// tall. The unit is derived from the live rect height (`height /
+/// unitsPerHeight`), so the silhouette keeps its proportions while the
+/// pill morphs into the focus banner. `roundLeading`/`roundTrailing`
+/// square off one side — the accent reveal mask uses a trailing-only cap.
+private struct PixelPill: InsettableShape {
+    var steps: [CGFloat]
+    var unitsPerHeight: CGFloat
+    var roundLeading = true
+    var roundTrailing = true
+    var insetAmount: CGFloat = 0
+
+    func inset(by amount: CGFloat) -> PixelPill {
+        var copy = self
+        copy.insetAmount += amount
+        return copy
+    }
+
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: insetAmount, dy: insetAmount)
+        guard r.width > 0, r.height > 0, !steps.isEmpty else {
+            return Path(r)
+        }
+        let u = r.height / unitsPerHeight
+
+        // One stepped corner, top-trailing, walked clockwise: enters along
+        // the top edge, staircases down-and-out, exits onto the trailing
+        // edge. The other three corners are mirrors of this list.
+        var topTrailing: [CGPoint] = [
+            CGPoint(x: r.maxX - steps[0] * u, y: r.minY)
+        ]
+        for (i, cut) in steps.enumerated() {
+            let y = r.minY + CGFloat(i + 1) * u
+            let nextCut = i + 1 < steps.count ? steps[i + 1] : 0
+            topTrailing.append(CGPoint(x: r.maxX - cut * u, y: y))
+            topTrailing.append(CGPoint(x: r.maxX - nextCut * u, y: y))
+        }
+
+        func mirrorX(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: r.minX + (r.maxX - p.x), y: p.y)
+        }
+        func mirrorY(_ p: CGPoint) -> CGPoint {
+            CGPoint(x: p.x, y: r.minY + (r.maxY - p.y))
+        }
+
+        let trailingTop = roundTrailing
+            ? topTrailing
+            : [CGPoint(x: r.maxX, y: r.minY)]
+        let trailingBottom = roundTrailing
+            ? topTrailing.reversed().map(mirrorY)
+            : [CGPoint(x: r.maxX, y: r.maxY)]
+        let leadingBottom = roundLeading
+            ? topTrailing.map(mirrorX).map(mirrorY)
+            : [CGPoint(x: r.minX, y: r.maxY)]
+        let leadingTop = roundLeading
+            ? topTrailing.reversed().map(mirrorX)
+            : [CGPoint(x: r.minX, y: r.minY)]
+
+        var path = Path()
+        path.move(to: trailingTop[0])
+        for p in trailingTop.dropFirst() { path.addLine(to: p) }
+        for p in trailingBottom { path.addLine(to: p) }
+        for p in leadingBottom { path.addLine(to: p) }
+        for p in leadingTop { path.addLine(to: p) }
+        path.closeSubpath()
+        return path
     }
 }
 
@@ -800,7 +969,7 @@ struct TriggerRow: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 12)
-                .fill(theme.bgWidget)
+                .fill(theme.bgTrigger)
         )
         .opacity(isIgnored ? 0.55 : 1.0)
 
@@ -837,12 +1006,12 @@ private struct TriggerSourceBadge: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 8)
-                .fill(source == .codex ? Color.white : Theme.claudeOrange)
+                .fill(Color.white)
 
             if source == .codex {
                 StaticCodexBadgeLogo(size: 24)
             } else {
-                StaticClaudeBadgeMascot(size: 18)
+                StaticClaudeBadgeMascot(size: 22)
             }
         }
         .frame(width: 28, height: 28)
@@ -918,29 +1087,16 @@ private struct CodexBadgeCloudShape: Shape {
     }
 }
 
+/// The Claude recent-trigger badge — the real `clawd-resting` sprite
+/// frame (the same art the home hero and shield card show), cropped to
+/// the critter and drawn on a white tile so the orange body reads.
+/// `size` is the critter width. Replaced the old hand-traced
+/// ClaudeBodyShape vector (2026-06-09).
 private struct StaticClaudeBadgeMascot: View {
     let size: CGFloat
 
     var body: some View {
-        let height = size * 0.9
-        let unit = size / 100
-
-        ZStack(alignment: .topLeading) {
-            ClaudeBodyShape()
-                .fill(.white)
-                .frame(width: size, height: height)
-
-            Rectangle()
-                .fill(Theme.claudeOrange)
-                .frame(width: 12 * unit, height: 14 * unit)
-                .offset(x: 22 * unit, y: 28 * unit)
-
-            Rectangle()
-                .fill(Theme.claudeOrange)
-                .frame(width: 12 * unit, height: 14 * unit)
-                .offset(x: 66 * unit, y: 28 * unit)
-        }
-        .frame(width: size, height: height, alignment: .topLeading)
+        ClawdRestingSprite(critterWidth: size)
     }
 }
 

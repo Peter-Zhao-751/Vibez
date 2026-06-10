@@ -88,7 +88,7 @@ struct ShieldState {
     nonisolated var accentUIColor: UIColor {
         switch agent {
         case .codex: UIColor(red: 0.29, green: 0.48, blue: 1.00, alpha: 1.0)
-        default:     UIColor(red: 0.95, green: 0.45, blue: 0.20, alpha: 1.0)
+        default:     UIColor(red: 0.851, green: 0.467, blue: 0.341, alpha: 1.0)
         }
     }
 
@@ -104,7 +104,7 @@ struct ShieldState {
         case .codex:
             (ar, ag, ab) = (0.29, 0.48, 1.00)
         default:
-            (ar, ag, ab) = (0.95, 0.45, 0.20)
+            (ar, ag, ab) = (0.851, 0.467, 0.341)
         }
         let dr: CGFloat = dark ? 0.047 : 0.984
         let dg: CGFloat = dark ? 0.051 : 0.973

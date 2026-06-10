@@ -5,7 +5,7 @@
 import { deflateSync } from "node:zlib";
 import { mkdir, writeFile } from "node:fs/promises";
 
-const ORANGE: RGB = [0xdd, 0x7a, 0x52];
+const ORANGE: RGB = [0xd9, 0x77, 0x57];
 const CREAM: RGB = [0xf5, 0xf1, 0xec];
 type RGB = [number, number, number];
 

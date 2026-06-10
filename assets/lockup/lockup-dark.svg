@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 460 120">
   <rect width="460" height="120" fill="#1a0e08"></rect>
   <g transform="translate(20 20)">
-    <rect width="80" height="80" rx="18" ry="18" fill="#dd7a52"></rect>
+    <rect width="80" height="80" rx="18" ry="18" fill="#d97757"></rect>
     <g transform="translate(8 8)">
       <g transform="scale(0.64)">
         <g fill="#fff5e8" shape-rendering="crispEdges">
@@ -14,7 +14,7 @@
   </g>
   <text x="125" y="83" font-family="-apple-system, &#39;SF Pro Display&#39;, &#39;Helvetica Neue&#39;, Helvetica, Arial, sans-serif" font-style="italic" font-weight="900" font-size="72" letter-spacing="-3.5" fill="#fff5e8">vibe</text>
   <g transform="translate(230 36)">
-    <g fill="#dd7a52" shape-rendering="crispEdges">
+    <g fill="#d97757" shape-rendering="crispEdges">
       <rect x="0" y="0" width="7.5" height="7.5"></rect><rect x="7.5" y="0" width="7.5" height="7.5"></rect><rect x="15" y="0" width="7.5" height="7.5"></rect><rect x="22.5" y="0" width="7.5" height="7.5"></rect><rect x="30" y="0" width="7.5" height="7.5"></rect><rect x="37.5" y="0" width="7.5" height="7.5"></rect>
       <rect x="30" y="7.5" width="7.5" height="7.5"></rect><rect x="22.5" y="15" width="7.5" height="7.5"></rect><rect x="15" y="22.5" width="7.5" height="7.5"></rect><rect x="7.5" y="30" width="7.5" height="7.5"></rect>
       <rect x="0" y="37.5" width="7.5" height="7.5"></rect><rect x="7.5" y="37.5" width="7.5" height="7.5"></rect><rect x="15" y="37.5" width="7.5" height="7.5"></rect><rect x="22.5" y="37.5" width="7.5" height="7.5"></rect><rect x="30" y="37.5" width="7.5" height="7.5"></rect><rect x="37.5" y="37.5" width="7.5" height="7.5"></rect>

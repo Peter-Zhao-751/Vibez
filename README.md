@@ -14,9 +14,9 @@ Vibez connects Claude Code and Codex lifecycle events to an iOS Screen Time shie
 
 <br><br>
 
-<a href="ClaudePlugin/README.md"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
-<a href="CodexPlugin/README.md"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-dd7a52?style=flat-square&labelColor=1a0e08"></a>
-<a href="https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780"><img alt="iOS app on the App Store" src="https://img.shields.io/badge/iOS_app-App_Store-dd7a52?style=flat-square&labelColor=1a0e08"></a>
+<a href="ClaudePlugin/README.md"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square&labelColor=1a0e08"></a>
+<a href="CodexPlugin/README.md"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-d97757?style=flat-square&labelColor=1a0e08"></a>
+<a href="https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780"><img alt="iOS app on the App Store" src="https://img.shields.io/badge/iOS_app-App_Store-d97757?style=flat-square&labelColor=1a0e08"></a>
 
 <br><br>
 

@@ -11,7 +11,8 @@
 //  Visual mirrors BlockedOverlay within ShieldConfiguration's fixed
 //  layout: mascot + "BLOCKING IN PROGRESS" eyebrow + title + body.
 //  No animations, no countdown — the icon is rasterized once per
-//  state update.
+//  state update. The Claude card draws the real Clawd sprite (the
+//  resting frame, same art as the home screen) since 2026-06-09.
 //
 
 import SwiftUI
@@ -63,12 +64,13 @@ private enum ShieldCardTheme {
     static let fgMuteOnDark  = Color.white.opacity(0.65)
     static let fgMuteOnLight = Color.black.opacity(0.55)
 
-    /// Per-agent accent: vivid blue behind the Codex logo, Claude
-    /// orange for everything else (claude/both/none).
+    /// Per-agent accent: vivid blue behind the Codex logo, the official
+    /// Claude orange (#d97757 — the Clawd sprite body color, same as
+    /// Theme.claudeOrange) for everything else (claude/both/none).
     static func accent(_ agent: ShieldState.Agent) -> Color {
         switch agent {
         case .codex: Color(red: 0.29, green: 0.48, blue: 1.00)
-        default:     Color(red: 0.95, green: 0.45, blue: 0.20)
+        default:     Color(red: 0.851, green: 0.467, blue: 0.341)
         }
     }
 }
@@ -102,8 +104,8 @@ private struct ShieldCardView: View {
     }
 }
 
-/// Codex renders the logo asset; everything else renders the Claude
-/// pixel critter. Mirrors BlockedOverlay's per-message mascot pick.
+/// Codex renders the logo asset; everything else renders Clawd, the
+/// sprite critter. Mirrors BlockedOverlay's per-message mascot pick.
 private struct ShieldCardMascot: View {
     let agent: ShieldState.Agent
     var size: CGFloat = 110
@@ -116,40 +118,57 @@ private struct ShieldCardMascot: View {
                 .aspectRatio(contentMode: .fit)
                 .frame(width: size, height: size)
         case .claude, .both, .none:
-            ShieldCardClaudePixel(size: size)
+            // The sprite critter is wide and low (3:2), unlike the square
+            // Codex logo; drawing it slightly wider than the square slot
+            // (280 → 300) keeps its visual weight matched to the glow.
+            ClawdRestingSprite(critterWidth: size * 15 / 14)
         }
     }
 }
 
-/// Static, frame-accurate copy of `Vibez/Mascots.swift`'s `ClaudeMascot`
-/// in the neutral "open eyes" pose. Geometry copied verbatim from
-/// `ClaudeBodyShape.path(in:)` and `ClaudeEyes.eye(at:scale:)` — same
-/// 100×90 viewBox, same rectangular body parts (main body, two side
-/// wings, four feet) and rectangular eyes. The shadow band and
-/// breathing animation are intentionally dropped for the still icon.
-private struct ShieldCardClaudePixel: View {
-    let size: CGFloat
-    private static let eyeColor = Color(red: 0.102, green: 0.055, blue: 0.031)
+/// The resting-sprite Clawd — the real `clawd-resting` frame (the same
+/// eyeless art the home hero plays through ClawdTheater) with the
+/// open-pose eyes drawn on top, cropped to the critter's opaque box.
+/// Shared by the shield card (host-side rasterization, below) and the
+/// recent-trigger badge (Components.swift's StaticClaudeBadgeMascot) —
+/// both render the new sprite, so the old hand-traced ClaudeBodyShape
+/// vector is gone everywhere (2026-06-09).
+struct ClawdRestingSprite: View {
+    /// Width the critter itself (not the padded sprite cell) renders at.
+    var critterWidth: CGFloat = 300
+
+    /// clawd-resting cell geometry (see SpriteSheetView.swift) and the
+    /// critter's opaque bounding box, measured from the asset.
+    private static let cell = CGSize(width: 330, height: 226)
+    private static let critterBox = CGRect(x: 88, y: 128, width: 144, height: 96)
+    /// Open-pose eyes in cell coordinates — mirrors ClawdTheater's
+    /// eyeBoxes (the resting art ships eyeless; expressions draw on top).
+    private static let eyeBoxes = [
+        CGRect(x: 124, y: 140, width: 12, height: 12),
+        CGRect(x: 184, y: 140, width: 12, height: 12),
+    ]
 
     var body: some View {
+        let k = critterWidth / Self.critterBox.width
         ZStack(alignment: .topLeading) {
-            ClaudeBodyShape()
-                .fill(ShieldCardTheme.accent(.claude))
-            ClaudeEyesShape()
-                .fill(Self.eyeColor)
+            Image("clawd-resting")
+                .resizable()
+                .interpolation(.none) // nearest-neighbor keeps the pixel art crisp
+                .frame(width: Self.cell.width * k, height: Self.cell.height * k)
+            ForEach(0..<Self.eyeBoxes.count, id: \.self) { i in
+                let box = Self.eyeBoxes[i]
+                Rectangle()
+                    .fill(.black)
+                    .frame(width: box.width * k, height: box.height * k)
+                    .offset(x: box.minX * k, y: box.minY * k)
+            }
         }
-        .frame(width: size, height: size * 0.9)
-    }
-}
-
-private struct ClaudeEyesShape: Shape {
-    func path(in rect: CGRect) -> Path {
-        let s = rect.width / 100
-        var p = Path()
-        // Two rectangular eyes in the open/neutral pose
-        p.addRect(CGRect(x: 22 * s, y: 28 * s, width: 12 * s, height: 14 * s))
-        p.addRect(CGRect(x: 66 * s, y: 28 * s, width: 12 * s, height: 14 * s))
-        return p
+        .frame(width: Self.cell.width * k, height: Self.cell.height * k, alignment: .topLeading)
+        // Crop the padded cell down to the critter: shift the cell so the
+        // critter's box lands at the origin, window to the box, clip.
+        .offset(x: -Self.critterBox.minX * k, y: -Self.critterBox.minY * k)
+        .frame(width: Self.critterBox.width * k, height: Self.critterBox.height * k, alignment: .topLeading)
+        .clipped()
     }
 }
 

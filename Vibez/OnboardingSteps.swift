@@ -596,10 +596,6 @@ struct OnboardingFinishStep: View {
                         text: "Your picked apps shield until you reply on the Mac, dismiss, or the timer runs out."
                     )
                     bullet(
-                        icon: "hand.tap.fill",
-                        text: "Tap the mascot anytime for a manual focus hold."
-                    )
-                    bullet(
                         icon: "switch.2",
                         text: "The big toggle arms Vibez; Settings picks apps and block durations."
                     )
