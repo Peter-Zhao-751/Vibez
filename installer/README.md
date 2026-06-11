@@ -3,7 +3,7 @@
 One-command installer for the [Vibez](https://github.com/Peter-Zhao-751/Vibez) agent plugins — push Claude Code and Codex session events (permission prompts, questions, task completion) to your iPhone, and shield your distracting apps until you come back.
 
 ```sh
-npx vibez
+npx @vibez/cli
 ```
 
 Detects which agent CLIs you have (`claude`, `codex`), asks which to install for, and runs each CLI's own plugin manager:

@@ -56,7 +56,7 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 One command installs for every agent CLI on your machine (requires Node ≥ 18):
 
 ```sh
-npx vibez
+npx @vibez/cli
 ```
 
 It detects Claude Code and Codex, asks which to install for, and runs each CLI's plugin manager. Safe to re-run. Prefer doing it by hand? The per-agent commands are below — either way, both plugins pair to the same Vibez ID automatically.

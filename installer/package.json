@@ -1,9 +1,12 @@
 {
-  "name": "vibez",
+  "name": "@vibez/cli",
   "version": "0.1.0",
+  "publishConfig": {
+    "access": "public"
+  },
   "description": "One-command installer for the Vibez plugin — push Claude Code and Codex session events to your iPhone.",
   "bin": {
-    "vibez": "./cli.mjs"
+    "vibez": "cli.mjs"
   },
   "type": "module",
   "files": [

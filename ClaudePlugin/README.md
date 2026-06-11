@@ -19,7 +19,7 @@ A Claude Code plugin that pushes session events to your phone via Firebase Cloud
 3. Add this plugin — quickest is the installer (also covers Codex if you have it):
 
    ```
-   npx vibez
+   npx @vibez/cli
    ```
 
    Or by hand in Claude Code:
