@@ -300,3 +300,47 @@ export const Slide4Setup: React.FC = () => (
     />
   </Canvas>
 );
+
+// ---- 6.5" (1242×2688) variants -------------------------------------------
+// App Store Connect's 6.5-inch slot. Same approved comps, uniformly scaled
+// by 1242/1320; the ~10.6px of lost height comes out of the bottom bleed
+// (phones already overflow the bottom edge), nothing visible changes.
+const SCALE_65 = 1242 / 1320;
+
+const ScaleWrap: React.FC<{ wide?: boolean; children: React.ReactNode }> = ({
+  wide,
+  children,
+}) => (
+  <div
+    style={{
+      position: "absolute",
+      width: wide ? 2706 : 1320,
+      height: 2868,
+      transform: `scale(${SCALE_65})`,
+      transformOrigin: "top left",
+    }}
+  >
+    {children}
+  </div>
+);
+
+export const Slide1Pitch65: React.FC = () => (
+  <ScaleWrap>
+    <Slide1Pitch />
+  </ScaleWrap>
+);
+export const Slide2Ping65: React.FC = () => (
+  <ScaleWrap>
+    <Slide2Ping />
+  </ScaleWrap>
+);
+export const Slide3Spread65: React.FC = () => (
+  <ScaleWrap wide>
+    <Slide3Spread />
+  </ScaleWrap>
+);
+export const Slide4Setup65: React.FC = () => (
+  <ScaleWrap>
+    <Slide4Setup />
+  </ScaleWrap>
+);
