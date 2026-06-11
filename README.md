@@ -53,7 +53,13 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 
 ## Install Agent Plugins
 
-Install either plugin, or install both. They pair to the same Vibez ID automatically.
+One command installs for every agent CLI on your machine (requires Node ≥ 18):
+
+```sh
+npx vibez
+```
+
+It detects Claude Code and Codex, asks which to install for, and runs each CLI's plugin manager. Safe to re-run. Prefer doing it by hand? The per-agent commands are below — either way, both plugins pair to the same Vibez ID automatically.
 
 ### Claude Code
 
@@ -70,7 +76,7 @@ Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md)
 
 ```sh
 codex plugin marketplace add Peter-Zhao-751/Vibez
-codex plugin install vibez@vibez
+codex plugin add vibez@vibez
 ```
 
 Then open Codex. The first session prints your private 4-word Vibez ID. You can later ask Codex to show your Vibez ID or send a test push.

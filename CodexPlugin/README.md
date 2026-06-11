@@ -26,11 +26,17 @@ MCP calls, and commands that complete too quickly to observe.
 
 1. Get the Vibez iOS app on your iPhone — [free on the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 2. Make sure `jq` and `curl` are on your Mac — the hook needs them to build and POST events. `brew install jq` if missing.
-3. Add the marketplace and install:
+3. Add the marketplace and install — quickest is the installer (also covers Claude Code if you have it):
+
+   ```
+   npx vibez
+   ```
+
+   Or by hand:
 
    ```
    codex plugin marketplace add Peter-Zhao-751/Vibez
-   codex plugin install vibez@vibez
+   codex plugin add vibez@vibez
    ```
 
    `codex plugin marketplace add` also accepts full Git HTTPS/SSH URLs or a local directory if you're hacking on the plugin (`codex plugin marketplace add /path/to/Vibez`).

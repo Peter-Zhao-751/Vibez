@@ -1,0 +1,36 @@
+{
+  "name": "vibez",
+  "version": "0.1.0",
+  "description": "One-command installer for the Vibez plugin — push Claude Code and Codex session events to your iPhone.",
+  "bin": {
+    "vibez": "./cli.mjs"
+  },
+  "type": "module",
+  "files": [
+    "cli.mjs",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node test.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Peter-Zhao-751/Vibez.git",
+    "directory": "installer"
+  },
+  "homepage": "https://github.com/Peter-Zhao-751/Vibez#readme",
+  "author": "Peter Zhao",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "codex",
+    "notifications",
+    "push",
+    "fcm",
+    "plugin",
+    "installer"
+  ]
+}

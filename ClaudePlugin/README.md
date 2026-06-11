@@ -16,7 +16,13 @@ A Claude Code plugin that pushes session events to your phone via Firebase Cloud
 
 1. Get the Vibez iOS app on your iPhone — [free on the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 2. Make sure `jq` and `curl` are on your Mac — the hook needs them to build and POST events. `brew install jq` if missing.
-3. Add this plugin in Claude Code:
+3. Add this plugin — quickest is the installer (also covers Codex if you have it):
+
+   ```
+   npx vibez
+   ```
+
+   Or by hand in Claude Code:
 
    ```
    /plugin marketplace add Peter-Zhao-751/Vibez
