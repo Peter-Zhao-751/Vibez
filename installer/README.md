@@ -6,12 +6,9 @@ One-command installer for the [Vibez](https://github.com/Peter-Zhao-751/Vibez) a
 npx getvibez
 ```
 
-Detects which agent CLIs you have (`claude`, `codex`), asks which to install for, and runs each CLI's own plugin manager:
+Detects which agent CLIs you have (`claude`, `codex`), asks which to install for, and runs each CLI's own plugin manager (marketplace add + refresh, then install).
 
-- **Claude Code** → `claude plugin marketplace add Peter-Zhao-751/Vibez` + `claude plugin install vibez@plugin`
-- **Codex** → `codex plugin marketplace add Peter-Zhao-751/Vibez` + `codex plugin add vibez@vibez`
-
-Safe to re-run; already-installed plugins are detected and skipped.
+**Re-run it anytime to update**: already-installed plugins are refreshed from the marketplace and updated to the latest version.
 
 ## Options
 

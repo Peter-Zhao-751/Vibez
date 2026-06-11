@@ -25,13 +25,15 @@ function run(...args) {
   assert.match(out, /^\d+\.\d+\.\d+/m);
 }
 
-// dry-run with no flags: all detected CLIs, both command pairs, nothing executed
+// dry-run with no flags: all detected CLIs, full command sets, nothing executed
 {
   const { out, status } = run("--dry-run");
   assert.equal(status, 0);
   assert.match(out, /claude plugin marketplace add Peter-Zhao-751\/Vibez/);
+  assert.match(out, /claude plugin marketplace update plugin/);
   assert.match(out, /claude plugin install vibez@plugin/);
   assert.match(out, /codex plugin marketplace add Peter-Zhao-751\/Vibez/);
+  assert.match(out, /codex plugin marketplace upgrade vibez/);
   assert.match(out, /codex plugin add vibez@vibez/);
   assert.match(out, /dry-run/i);
 }

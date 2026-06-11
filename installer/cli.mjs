@@ -10,21 +10,33 @@ const VERSION = createRequire(import.meta.url)("./package.json").version;
 const REPO = "Peter-Zhao-751/Vibez";
 const APP_STORE = "https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780";
 
+// Each target lists its CLI's own plugin-manager invocations:
+// setup (register + refresh the marketplace), install, and — when the
+// plugin is already present — update. Codex has no separate update verb;
+// its `plugin add` reinstalls from the freshly upgraded snapshot.
 const TARGETS = [
   {
     flag: "--claude",
     name: "Claude Code",
     bin: "claude",
-    installVerb: "install",
-    spec: "vibez@plugin",
+    setup: [
+      ["plugin", "marketplace", "add", REPO],
+      ["plugin", "marketplace", "update", "plugin"],
+    ],
+    install: ["plugin", "install", "vibez@plugin"],
+    update: ["plugin", "update", "vibez@plugin"],
     installHint: "https://code.claude.com/docs — npm install -g @anthropic-ai/claude-code",
   },
   {
     flag: "--codex",
     name: "Codex",
     bin: "codex",
-    installVerb: "add",
-    spec: "vibez@vibez",
+    setup: [
+      ["plugin", "marketplace", "add", REPO],
+      ["plugin", "marketplace", "upgrade", "vibez"],
+    ],
+    install: ["plugin", "add", "vibez@vibez"],
+    update: null,
     installHint: "https://developers.openai.com/codex — npm install -g @openai/codex",
   },
 ];
@@ -34,7 +46,8 @@ const HELP = `vibez ${VERSION} — install the Vibez plugin for your agent CLIs
 Usage: npx getvibez [options]
 
 Detects Claude Code and Codex on this machine and installs the Vibez
-notification plugin into each via its own plugin manager.
+notification plugin into each via its own plugin manager. Re-run it
+anytime to update already-installed plugins to the latest version.
 
 Options:
   --claude        Install for Claude Code only (skips the prompt)
@@ -53,28 +66,36 @@ function onPath(bin) {
 }
 
 function commandsFor(target) {
-  return [
-    [target.bin, "plugin", "marketplace", "add", REPO],
-    [target.bin, "plugin", target.installVerb, target.spec],
-  ];
+  return [...target.setup, target.install].map((args) => [target.bin, ...args]);
 }
 
-// Runs both plugin commands for a target. "Already added/installed" counts
-// as success so re-runs are harmless.
+function run(bin, args) {
+  const r = spawnSync(bin, args, { encoding: "utf8" });
+  const out = (r.stdout ?? "") + (r.stderr ?? "");
+  return {
+    ok: r.status === 0,
+    already: /already/i.test(out),
+    detail: out.trim() || `${bin} ${args.join(" ")} exited ${r.status}`,
+  };
+}
+
+// Register + refresh the marketplace, then install — or update when the
+// plugin is already present. "Already added/installed" counts as success
+// per step, so re-running is both harmless and how users pull updates.
 function install(target) {
-  let already = false;
-  for (const [bin, ...args] of commandsFor(target)) {
-    const r = spawnSync(bin, args, { encoding: "utf8" });
-    const out = (r.stdout ?? "") + (r.stderr ?? "");
-    // "already added/installed" is success, but only for this step — the
-    // marketplace may exist while the plugin itself is uninstalled, so the
-    // install command must still run.
-    already = /already/i.test(out);
-    if (r.status !== 0 && !already) {
-      return { ok: false, detail: out.trim() || `${bin} ${args.join(" ")} exited ${r.status}` };
-    }
+  for (const args of target.setup) {
+    const r = run(target.bin, args);
+    if (!r.ok && !r.already) return { ok: false, detail: r.detail };
   }
-  return { ok: true, already };
+  const installed = run(target.bin, target.install);
+  if (installed.already && target.update) {
+    const updated = run(target.bin, target.update);
+    return updated.ok || updated.already
+      ? { ok: true, updated: true }
+      : { ok: false, detail: updated.detail };
+  }
+  if (!installed.ok && !installed.already) return { ok: false, detail: installed.detail };
+  return { ok: true };
 }
 
 // Race the question against readline closing: piped stdin hitting EOF
@@ -160,7 +181,7 @@ async function main() {
     process.stdout.write(`Installing for ${t.name}... `);
     const result = install(t);
     if (result.ok) {
-      console.log(result.already ? "already installed ✓" : "done ✓");
+      console.log(result.updated ? "updated to latest ✓" : "done ✓");
     } else {
       failed = true;
       console.log("failed ✗");

@@ -266,32 +266,48 @@ struct OnboardingPluginStep: View {
         OnboardingPage(
             theme: theme,
             headline: "Install the plugin",
-            subtitle: "On your Mac, in whichever agent you use. Once the plugin is installed, your 4-word Vibez ID prints automatically the moment a session starts — the setup command just shows it again. Keep it handy for the next step.",
+            subtitle: "One command on your Mac installs Vibez for Claude Code and Codex. Once installed, your 4-word Vibez ID prints automatically the moment a session starts. Keep it handy for the next step.",
             ctaTitle: "I have my Vibez ID",
             ctaAction: onAdvance
         ) {
             VStack(spacing: 18) {
+                primaryCommand("npx getvibez")
                 commandGroup(
-                    label: "Claude Code",
+                    label: "Then grab your Vibez ID",
                     accent: Theme.claudeOrange,
                     rows: [
-                        CommandRow(text: "/plugin marketplace add Peter-Zhao-751/Vibez"),
-                        CommandRow(text: "/plugin install vibez@plugin"),
+                        CommandRow(text: "start a new agent session — it prints your Vibez ID", copyable: false),
                         CommandRow(text: "/vibez:setup"),
-                    ]
-                )
-                commandGroup(
-                    label: "Codex",
-                    accent: theme.fgMute,
-                    rows: [
-                        CommandRow(text: "codex plugin marketplace add Peter-Zhao-751/Vibez"),
-                        CommandRow(text: "codex plugin install vibez@vibez"),
-                        CommandRow(text: "start a new session — it prints your Vibez ID", copyable: false),
                     ]
                 )
             }
             .padding(.horizontal, 24)
         }
+    }
+
+    /// The headline install command: one big copyable chip, visually
+    /// louder than the numbered rows below it.
+    private func primaryCommand(_ text: String) -> some View {
+        Button {
+            markCopied(text)
+        } label: {
+            HStack(spacing: 12) {
+                Text(text)
+                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .foregroundStyle(theme.fg)
+                Image(systemName: copiedCommand == text ? "checkmark" : "doc.on.doc")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(copiedCommand == text ? Theme.claudeOrange : theme.fgMute)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 20)
+            .background(RoundedRectangle(cornerRadius: 16).fill(theme.bgPanel))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16)
+                    .strokeBorder(Theme.claudeOrange.opacity(0.55), lineWidth: 1.5)
+            )
+        }
+        .buttonStyle(.plain)
     }
 
     private func commandGroup(

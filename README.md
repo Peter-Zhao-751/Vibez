@@ -53,35 +53,32 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 
 ## Install Agent Plugins
 
-One command installs for every agent CLI on your machine (requires Node ≥ 18):
+One command — it detects Claude Code and Codex and installs for both:
 
-```sh
-npx getvibez
-```
+> ## `npx getvibez`
 
-It detects Claude Code and Codex, asks which to install for, and runs each CLI's plugin manager. Safe to re-run. Prefer doing it by hand? The per-agent commands are below — either way, both plugins pair to the same Vibez ID automatically.
+Then open a new agent session: it prints your private 4-word Vibez ID — enter it once in the iOS app and you're paired (one ID covers both agents). In Claude Code, `/vibez:setup` shows the ID again and `/vibez:setup test` sends a test push. **Re-run `npx getvibez` anytime to update.** Requires Node ≥ 18; Codex asks you to trust the plugin's hooks on first launch — that's expected.
 
-### Claude Code
+Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md) · [`CodexPlugin/README.md`](CodexPlugin/README.md)
+
+<details>
+<summary>Manual install (without npx)</summary>
+
+**Claude Code**
 
 ```sh
 /plugin marketplace add Peter-Zhao-751/Vibez
 /plugin install vibez@plugin
 ```
 
-Then open Claude Code. The first session prints your private 4-word Vibez ID. Run `/vibez:setup` to show it again, or `/vibez:setup test` to send a test push.
-
-Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md)
-
-### Codex
+**Codex**
 
 ```sh
 codex plugin marketplace add Peter-Zhao-751/Vibez
 codex plugin add vibez@vibez
 ```
 
-Then open Codex. The first session prints your private 4-word Vibez ID. You can later ask Codex to show your Vibez ID or send a test push.
-
-Full details: [`CodexPlugin/README.md`](CodexPlugin/README.md)
+</details>
 
 ## iOS App
 
