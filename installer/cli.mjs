@@ -62,15 +62,19 @@ function commandsFor(target) {
 // Runs both plugin commands for a target. "Already added/installed" counts
 // as success so re-runs are harmless.
 function install(target) {
+  let already = false;
   for (const [bin, ...args] of commandsFor(target)) {
     const r = spawnSync(bin, args, { encoding: "utf8" });
     const out = (r.stdout ?? "") + (r.stderr ?? "");
-    if (r.status !== 0 && !/already/i.test(out)) {
+    // "already added/installed" is success, but only for this step — the
+    // marketplace may exist while the plugin itself is uninstalled, so the
+    // install command must still run.
+    already = /already/i.test(out);
+    if (r.status !== 0 && !already) {
       return { ok: false, detail: out.trim() || `${bin} ${args.join(" ")} exited ${r.status}` };
     }
-    if (/already/i.test(out)) return { ok: true, already: true };
   }
-  return { ok: true };
+  return { ok: true, already };
 }
 
 // Race the question against readline closing: piped stdin hitting EOF
