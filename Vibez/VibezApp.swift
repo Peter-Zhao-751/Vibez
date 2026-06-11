@@ -22,6 +22,8 @@ struct VibezApp: App {
             #if DEBUG
             if ProcessInfo.processInfo.arguments.contains("-vibez.debug.settingsOnly") {
                 DebugSettingsLaunchView()
+            } else if ProcessInfo.processInfo.arguments.contains("-vibez.debug.shieldReplica") {
+                ShieldReplicaView()
             } else {
                 ContentView()
             }
