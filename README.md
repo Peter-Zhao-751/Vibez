@@ -152,6 +152,6 @@ TBD.
 
 <br>
 
-<sub>Built by <a href="https://github.com/Peter-Zhao-751">@Peter-Zhao-751</a>.</sub>
+<sub>Built by <a href="https://github.com/Peter-Zhao-751">@Peter-Zhao-751</a>. Original idea by <a href="https://github.com/yiguozhang822">@yiguozhang822</a>.</sub>
 
 </div>
