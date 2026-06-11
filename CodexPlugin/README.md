@@ -29,7 +29,7 @@ MCP calls, and commands that complete too quickly to observe.
 3. Add the marketplace and install — quickest is the installer (also covers Claude Code if you have it):
 
    ```
-   npx @vibez/cli
+   npx getvibez
    ```
 
    Or by hand:

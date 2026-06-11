@@ -31,7 +31,7 @@ const TARGETS = [
 
 const HELP = `vibez ${VERSION} — install the Vibez plugin for your agent CLIs
 
-Usage: npx @vibez/cli [options]
+Usage: npx getvibez [options]
 
 Detects Claude Code and Codex on this machine and installs the Vibez
 notification plugin into each via its own plugin manager.

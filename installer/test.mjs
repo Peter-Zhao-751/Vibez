@@ -16,7 +16,7 @@ function run(...args) {
 {
   const { out, status } = run("--help");
   assert.equal(status, 0);
-  assert.match(out, /npx @vibez\/cli/);
+  assert.match(out, /npx getvibez/);
   assert.match(out, /--dry-run/);
 }
 {

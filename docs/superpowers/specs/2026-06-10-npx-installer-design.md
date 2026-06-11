@@ -1,22 +1,22 @@
-# `npx @vibez/cli` installer — design
+# `npx getvibez` installer — design
 
 **Date:** 2026-06-10
 **Status:** approved
 
 ## Goal
 
-One command — `npx @vibez/cli` — installs the Vibez plugin into every supported agent CLI
+One command — `npx getvibez` — installs the Vibez plugin into every supported agent CLI
 (Claude Code, Codex) on the machine. The npm package is a thin wrapper that shells out
 to the official plugin commands; the plugins in `ClaudePlugin/` and `CodexPlugin/`
 remain the single source of truth. The installer never duplicates hook logic.
 
 ## Package
 
-- npm name: **`@vibez/cli`** (bare `vibez` was rejected by npm's typosquat filter as too similar to `vite`/`viem`; published under the free `vibez` org scope instead), published from `installer/` in this repo.
+- npm name: **`getvibez`** (bare `vibez` was rejected by npm's typosquat filter as too similar to `vite`/`viem`, and the `vibez` org scope was already taken), published from `installer/` in this repo.
 - Zero runtime dependencies, single ESM file `cli.mjs`, `bin: { vibez: "./cli.mjs" }`,
   Node >= 18, MIT.
 
-## Behavior of `npx @vibez/cli`
+## Behavior of `npx getvibez`
 
 1. **Detect** agent CLIs on PATH: `claude`, `codex`. Also check prereqs `jq` and `curl`
    (the hooks' `notify.sh` needs them) and warn if missing — non-fatal.
@@ -55,5 +55,5 @@ remain the single source of truth. The installer never duplicates hook logic.
 
 ## Docs
 
-`npx @vibez/cli` becomes the headline install in the root README and both plugin READMEs;
+`npx getvibez` becomes the headline install in the root README and both plugin READMEs;
 manual `/plugin` commands stay as the fallback.
