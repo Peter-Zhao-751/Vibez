@@ -98,6 +98,11 @@ describe("validateNotifyBody", () => {
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.fields.session).toBe("abc-123_DEF.x:9");
   });
+  it("accepts every known agent tag", () => {
+    for (const agent of ["cc", "cx", "cu"]) {
+      expect(validateNotifyBody({...VALID, agent}).ok).toBe(true);
+    }
+  });
   it("rejects bad vibezId / missing title / missing body", () => {
     expect(validateNotifyBody({...VALID, vibezId: "nope"}).ok).toBe(false);
     expect(validateNotifyBody({...VALID, title: ""}).ok).toBe(false);

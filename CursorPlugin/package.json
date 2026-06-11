@@ -1,0 +1,43 @@
+{
+  "name": "vibez-cursor",
+  "version": "0.1.0",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "description": "Cursor companion for the Vibez iOS app — blocks distracting apps on your phone while the Cursor agent works, unblocks the moment it needs you. Installs Cursor agent hooks that push lifecycle events to your phone.",
+  "bin": {
+    "vibez-cursor": "bin/install.js"
+  },
+  "files": [
+    "bin",
+    "scripts",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "keywords": [
+    "cursor",
+    "vibez",
+    "focus",
+    "screen-time",
+    "agent",
+    "hooks"
+  ],
+  "author": "Peter Zhao",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Peter-Zhao-751/Vibez.git",
+    "directory": "CursorPlugin"
+  },
+  "homepage": "https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780",
+  "scripts": {
+    "test": "node --test \"test/*.test.js\" && bash test/hooks.e2e.sh && bash scripts/notify.sh _selftest"
+  }
+}

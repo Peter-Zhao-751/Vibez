@@ -8,14 +8,15 @@
 
 **Block distracting apps when your coding agent needs you back.**
 
-Vibez connects Claude Code and Codex lifecycle events to an iOS Screen Time shield. When your agent stops, asks for permission, or needs a reply, your selected apps lock until you return.
+Vibez connects Claude Code, Codex, and Cursor lifecycle events to an iOS Screen Time shield. When your agent stops, asks for permission, or needs a reply, your selected apps lock until you return.
 
-<sub>iOS Screen Time API · Claude Code plugin · Codex plugin · Firebase Cloud Messaging</sub>
+<sub>iOS Screen Time API · Claude Code plugin · Codex plugin · Cursor plugin · Firebase Cloud Messaging</sub>
 
 <br><br>
 
 <a href="ClaudePlugin/README.md"><img alt="Claude Code plugin" src="https://img.shields.io/badge/Claude_Code-plugin-d97757?style=flat-square&labelColor=1a0e08"></a>
 <a href="CodexPlugin/README.md"><img alt="Codex plugin" src="https://img.shields.io/badge/Codex-plugin-d97757?style=flat-square&labelColor=1a0e08"></a>
+<a href="CursorPlugin/README.md"><img alt="Cursor plugin" src="https://img.shields.io/badge/Cursor-plugin-d97757?style=flat-square&labelColor=1a0e08"></a>
 <a href="https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780"><img alt="iOS app on the App Store" src="https://img.shields.io/badge/iOS_app-App_Store-d97757?style=flat-square&labelColor=1a0e08"></a>
 
 <br><br>
@@ -38,7 +39,7 @@ Coding agents create a weird failure mode: the work is automated, but your atten
 | Agent stops after a response | Sends a `done` push with a short assistant excerpt and `shield:on`. | Keeps selected apps blocked for the configured window. |
 | You submit the next prompt | Sends a `replied` push with `shield:off`. | Clears that session's trigger and lifts the shield when no triggers remain. |
 
-The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-id`, so a single pairing on your phone covers both agents.
+The Claude Code, Codex, and Cursor plugins share one Vibez ID at `~/.config/vibez/vibez-id`, so a single pairing on your phone covers every agent.
 
 ## Components
 
@@ -46,6 +47,7 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 |---|---|---|
 | [`ClaudePlugin/`](ClaudePlugin/) | Working | Claude Code plugin for `SessionStart`, `Notification`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
 | [`CodexPlugin/`](CodexPlugin/) | Working | Codex plugin for `SessionStart`, `PermissionRequest`, `PreToolUse`, `PostToolUse`, `Stop`, and `UserPromptSubmit` hooks. |
+| [`CursorPlugin/`](CursorPlugin/) | Working | Cursor agent hooks (`sessionStart`, `beforeSubmitPrompt`, `afterAgentResponse`, `stop`, `sessionEnd`), installed via `npx vibez-cursor`. |
 | [`Vibez/`](Vibez/) | [On the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780) | SwiftUI iOS app that receives FCM pushes, records recent triggers, and applies Family Controls / Managed Settings shields. |
 | [`Backend/`](Backend/) | Working | Firebase Cloud Functions (`registerPushToken`, `notify`, `dispatchUnblock`) that pair devices and fan out pushes via FCM. |
 | [`VibezExtension/`](VibezExtension/) | Local build | Chrome (MV3) extension that mirrors the block on desktop browsers. |
@@ -53,13 +55,13 @@ The Claude Code and Codex plugins share one Vibez ID at `~/.config/vibez/vibez-i
 
 ## Install Agent Plugins
 
-One command — it detects Claude Code and Codex and installs for both:
+One command — it detects Claude Code, Codex, and Cursor and installs for each:
 
 > ## `npx getvibez`
 
-Then open a new agent session: it prints your private 4-word Vibez ID — enter it once in the iOS app and you're paired (one ID covers both agents). To see the ID again, run `/vibez:setup` in Claude Code or `$vibez-setup` in Codex; `/vibez:setup test` sends a test push. **Re-run `npx getvibez` anytime to update.** Requires Node ≥ 18; Codex asks you to trust the plugin's hooks on first launch — that's expected.
+Then open a new agent session: it prints your private 4-word Vibez ID — enter it once in the iOS app and you're paired (one ID covers every agent). To see the ID again, run `/vibez:setup` in Claude Code, `$vibez-setup` in Codex, or `npx vibez-cursor --id`; `/vibez:setup test` sends a test push. **Re-run `npx getvibez` anytime to update.** Requires Node ≥ 18; Codex asks you to trust the plugin's hooks on first launch — that's expected.
 
-Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md) · [`CodexPlugin/README.md`](CodexPlugin/README.md)
+Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md) · [`CodexPlugin/README.md`](CodexPlugin/README.md) · [`CursorPlugin/README.md`](CursorPlugin/README.md)
 
 <details>
 <summary>Manual install (without npx)</summary>
@@ -77,6 +79,14 @@ Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md) · [`CodexPlugi
 codex plugin marketplace add Peter-Zhao-751/Vibez
 codex plugin add vibez@vibez
 ```
+
+**Cursor**
+
+```sh
+npx vibez-cursor
+```
+
+(Cursor has no plugin manager — the installer registers the hooks in `~/.cursor/hooks.json` directly; `npx vibez-cursor --uninstall` removes them.)
 
 </details>
 
@@ -96,7 +106,7 @@ Building from source instead needs a paid Apple Developer Program team because A
 
 ## Configuration
 
-Both plugins read the same optional environment overrides:
+All plugins read the same optional environment overrides:
 
 | Variable | Default | Purpose |
 |---|---|---|
@@ -122,6 +132,7 @@ Vibez/
 ├── VibezPushService/       Notification Service Extension (engages the shield pre-banner)
 ├── ClaudePlugin/           Claude Code plugin
 ├── CodexPlugin/            Codex plugin
+├── CursorPlugin/           Cursor hooks plugin (npm: vibez-cursor)
 ├── Backend/                Firebase Cloud Functions (push fan-out + scheduling)
 ├── VibezExtension/         Chrome (MV3) browser companion
 ├── assets/                 Logos, icons, lockups, glyphs, app mockups
@@ -134,6 +145,7 @@ Vibez/
 
 - Claude Code plugin: working.
 - Codex plugin: working.
+- Cursor plugin: working.
 - iOS app: [free on the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 
 ## License

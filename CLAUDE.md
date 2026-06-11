@@ -1,6 +1,6 @@
 # Vibez
 
-iOS app that blocks distracting apps (Instagram, TikTok, etc.) whenever Claude Code or Codex finishes a task or asks for input — turning agent idle time into focus time instead of doomscroll time. Live on the App Store, free, as **"AI Coding Focus - Vibez"** (https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
+iOS app that blocks distracting apps (Instagram, TikTok, etc.) whenever Claude Code, Codex, or Cursor finishes a task or asks for input — turning agent idle time into focus time instead of doomscroll time. Live on the App Store, free, as **"AI Coding Focus - Vibez"** (https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 
 ## Status
 
@@ -226,6 +226,30 @@ CodexPlugin/                  Codex plugin source. Parallel structure to ClaudeP
   scripts/notify.sh           Codex-flavored hook script — adds permission-request,
                               ephemeral-session detection, "cx" agent tag.
   skills/vibez-setup/SKILL.md Codex skill that surfaces/tests/regenerates the Vibez ID.
+CursorPlugin/                 Cursor plugin source + the `vibez-cursor` npm package
+                              (2026-06-11). Cursor has no plugin marketplace — `npx
+                              vibez-cursor` (bin/install.js, zero-dep ESM) copies the
+                              scripts to ~/.cursor/vibez/ and merges five hook
+                              registrations into ~/.cursor/hooks.json (foreign hooks
+                              preserved, backup, idempotent, --uninstall). ONE argless
+                              command for all events; notify.sh dispatches on the
+                              payload's hook_event_name. Agent tag "cu" (iOS renders it
+                              with the Claude-theme fallback — no app change).
+  scripts/notify.sh           sessionStart (bg-agent mute marker + first-run ID +
+                              hygiene), beforeSubmitPrompt (shield:off; ALWAYS answers
+                              {"continue":true} — it can block prompts), afterAgentResponse
+                              (stashes text per session — Cursor's stop payload has no
+                              text), stop (aborted→silent, else done/needs-input via
+                              last_turn_is_asking over the stash), sessionEnd (cleanup).
+  scripts/setup.sh            Same shared Vibez ID generator ("cu" test push).
+  test/hooks.e2e.sh           Realistic payloads → real dispatch path → stub /notify
+                              capture (17 cases). install.test.js: sandbox-HOME installer
+                              tests (node --test). `npm test` runs all three layers.
+installer/                    `getvibez` npm package — one-command installer that detects
+                              Claude Code / Codex / Cursor and installs each (thin
+                              wrapper over `claude plugin` / `codex plugin` / delegation
+                              to `npx vibez-cursor --yes`). Design spec:
+                              docs/superpowers/specs/2026-06-10-npx-installer-design.md.
 .claude-plugin/marketplace.json  Claude Code plugin marketplace manifest (→ ClaudePlugin).
 .agents/plugins/marketplace.json Codex plugin marketplace manifest (→ CodexPlugin).
 Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swift into a target
@@ -339,8 +363,9 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   not `nosid`" session-id check lives in `Vibez/SessionID.swift` (host) AND as a
   private String extension in `VibezPushService/NotificationService.swift`
   (separate targets can't share source) — keep in sync.
-- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash).
-- **Same-conversation block debounce (both plugins, mirrored):** `notify.sh` skips a
+- **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash — three near-identical copies: ClaudePlugin/, CodexPlugin/, CursorPlugin/).
+- **Agent tags:** `cc` (Claude Code), `cx` (Codex), `cu` (Cursor, 2026-06-11) — whitelisted server-side in `Backend/functions/src/validation.ts` `AGENTS`. The iOS app only themes `cc`/`cx`; unknown tags (`VibezAgent(rawValue:)` → nil) deliberately fall back to the Claude card/banner, which is how `cu` renders today — Cursor-specific theming would be an iOS-side addition, not a backend one.
+- **Same-conversation block debounce (all three plugins, mirrored):** `notify.sh` skips a
   `shield:on` send when an AGENT event (`shield:on`, sent or suppressed) for the same
   session landed within `VIBEZ_BLOCK_DEBOUNCE_SECONDS` (default 5s, rolling window, `0`
   disables; stamp file `~/.config/vibez/lastevent.<sid>`, claimed before the curl,

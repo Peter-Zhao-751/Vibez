@@ -35,6 +35,7 @@ function run(...args) {
   assert.match(out, /codex plugin marketplace add Peter-Zhao-751\/Vibez/);
   assert.match(out, /codex plugin marketplace upgrade vibez/);
   assert.match(out, /codex plugin add vibez@vibez/);
+  assert.match(out, /npx -y vibez-cursor@latest --yes/);
   assert.match(out, /dry-run/i);
 }
 
@@ -50,6 +51,16 @@ function run(...args) {
   assert.equal(status, 0);
   assert.match(out, /codex plugin add vibez@vibez/);
   assert.doesNotMatch(out, /claude plugin/);
+  assert.doesNotMatch(out, /vibez-cursor/);
+}
+
+// dry-run narrowed to Cursor (detected via ~/.cursor or `cursor` on PATH)
+{
+  const { out, status } = run("--dry-run", "--cursor");
+  assert.equal(status, 0);
+  assert.match(out, /npx -y vibez-cursor@latest --yes/);
+  assert.doesNotMatch(out, /claude plugin/);
+  assert.doesNotMatch(out, /codex plugin/);
 }
 
 // unknown flag fails loudly

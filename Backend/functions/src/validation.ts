@@ -35,7 +35,7 @@ export const MAX_DEVICES_PER_VIBEZ_ID = 10;
 
 const EVENTS = new Set(["needs-input", "done", "replied"]);
 const SHIELDS = new Set(["on", "off"]);
-const AGENTS = new Set(["cc", "cx"]);
+const AGENTS = new Set(["cc", "cx", "cu"]);
 const PLATFORMS = new Set(["ios", "web"]);
 
 /**

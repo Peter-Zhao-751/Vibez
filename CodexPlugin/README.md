@@ -2,7 +2,7 @@
 
 A Codex plugin that pushes session events to your phone via Firebase Cloud Messaging — so you can step away while Codex works and get pinged the moment it needs you or finishes a task. When it pings you, the Vibez iOS app raises a Screen Time shield over your distracting apps until you come back.
 
-Sibling plugin: the Claude Code version lives in [`ClaudePlugin/`](../ClaudePlugin/). Both plugins share the same Vibez ID file at `~/.config/vibez/vibez-id` (one pairing on your phone covers both agents); the iOS app distinguishes them by the `agent` field in each push (`cx` for Codex, `cc` for Claude Code).
+Sibling plugins: the Claude Code version lives in [`ClaudePlugin/`](../ClaudePlugin/) and the Cursor version in [`CursorPlugin/`](../CursorPlugin/). All three share the same Vibez ID file at `~/.config/vibez/vibez-id` (one pairing on your phone covers every agent); the iOS app distinguishes them by the `agent` field in each push (`cx` for Codex, `cc` for Claude Code, `cu` for Cursor).
 
 ## What it does
 
@@ -26,7 +26,7 @@ MCP calls, and commands that complete too quickly to observe.
 
 1. Get the Vibez iOS app on your iPhone — [free on the App Store](https://apps.apple.com/us/app/ai-coding-focus-vibez/id6775433780).
 2. Make sure `jq` and `curl` are on your Mac — the hook needs them to build and POST events. `brew install jq` if missing.
-3. Add the marketplace and install — quickest is the installer (also covers Claude Code if you have it):
+3. Add the marketplace and install — quickest is the installer (also covers Claude Code and Cursor if you have them):
 
    ```
    npx getvibez

@@ -5,6 +5,9 @@
 import { spawnSync } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { createRequire } from "node:module";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { homedir } from "node:os";
 
 const VERSION = createRequire(import.meta.url)("./package.json").version;
 const REPO = "Peter-Zhao-751/Vibez";
@@ -39,19 +42,35 @@ const TARGETS = [
     update: null,
     installHint: "https://developers.openai.com/codex — npm install -g @openai/codex",
   },
+  {
+    flag: "--cursor",
+    name: "Cursor",
+    bin: "cursor",
+    // Cursor has no plugin-manager CLI; the vibez-cursor npm package owns
+    // the real install (copies hook scripts into ~/.cursor/vibez, merges
+    // ~/.cursor/hooks.json). Re-running it is the update path. Detection
+    // accepts the IDE's config dir too — many Cursor installs never add
+    // the `cursor` shell command to PATH. Hooks are bash, so no Windows.
+    detect: () =>
+      process.platform !== "win32" &&
+      (onPath("cursor") || existsSync(join(homedir(), ".cursor"))),
+    commands: [["npx", "-y", "vibez-cursor@latest", "--yes"]],
+    installHint: "https://cursor.com",
+  },
 ];
 
 const HELP = `vibez ${VERSION} — install the Vibez plugin for your agent CLIs
 
 Usage: npx getvibez [options]
 
-Detects Claude Code and Codex on this machine and installs the Vibez
-notification plugin into each via its own plugin manager. Re-run it
-anytime to update already-installed plugins to the latest version.
+Detects Claude Code, Codex, and Cursor on this machine and installs the
+Vibez notification plugin into each. Re-run it anytime to update
+already-installed plugins to the latest version.
 
 Options:
   --claude        Install for Claude Code only (skips the prompt)
   --codex         Install for Codex only (skips the prompt)
+  --cursor        Install for Cursor only (skips the prompt)
   -y, --yes       Install for every detected CLI without prompting
   --dry-run       Print the commands that would run, run nothing
   -v, --version   Print version
@@ -65,7 +84,12 @@ function onPath(bin) {
   return spawnSync(probe, [bin], { stdio: "ignore" }).status === 0;
 }
 
+function detectTarget(target) {
+  return target.detect ? target.detect() : onPath(target.bin);
+}
+
 function commandsFor(target) {
+  if (target.commands) return target.commands;
   return [...target.setup, target.install].map((args) => [target.bin, ...args]);
 }
 
@@ -83,6 +107,18 @@ function run(bin, args) {
 // plugin is already present. "Already added/installed" counts as success
 // per step, so re-running is both harmless and how users pull updates.
 function install(target) {
+  // Delegated targets (Cursor): one self-contained command owns the whole
+  // install. Surface its output on success too — vibez-cursor prints the
+  // user's Vibez ID and pairing steps, which getvibez must not swallow.
+  if (target.commands) {
+    let output = "";
+    for (const [bin, ...args] of target.commands) {
+      const r = run(bin, args);
+      if (!r.ok) return { ok: false, detail: r.detail };
+      output += (output ? "\n" : "") + r.detail;
+    }
+    return { ok: true, output };
+  }
   for (const args of target.setup) {
     const r = run(target.bin, args);
     if (!r.ok && !r.already) return { ok: false, detail: r.detail };
@@ -110,7 +146,7 @@ async function confirm(rl, closed, question) {
 async function main() {
   const args = process.argv.slice(2);
   for (const a of args) {
-    if (!["--claude", "--codex", "-y", "--yes", "--dry-run", "-v", "--version", "-h", "--help"].includes(a)) {
+    if (!["--claude", "--codex", "--cursor", "-y", "--yes", "--dry-run", "-v", "--version", "-h", "--help"].includes(a)) {
       console.error(`unknown option: ${a}\n\n${HELP}`);
       process.exit(2);
     }
@@ -122,11 +158,11 @@ async function main() {
   const yes = args.includes("-y") || args.includes("--yes");
   const narrowed = TARGETS.filter((t) => args.includes(t.flag));
 
-  const detected = TARGETS.filter((t) => onPath(t.bin));
-  const missing = TARGETS.filter((t) => !onPath(t.bin));
+  const detected = TARGETS.filter(detectTarget);
+  const missing = TARGETS.filter((t) => !detectTarget(t));
 
-  for (const t of narrowed.filter((t) => !onPath(t.bin))) {
-    console.error(`${t.name}: \`${t.bin}\` not found on PATH.\n  Install it first: ${t.installHint}`);
+  for (const t of narrowed.filter((t) => !detectTarget(t))) {
+    console.error(`${t.name}: not found on this machine.\n  Install it first: ${t.installHint}`);
     process.exit(1);
   }
   if (detected.length === 0) {
@@ -142,7 +178,7 @@ async function main() {
   }
 
   console.log(`Detected: ${detected.map((t) => t.name).join(", ")}`);
-  for (const t of missing) console.log(`Skipping ${t.name} (\`${t.bin}\` not on PATH)`);
+  for (const t of missing) console.log(`Skipping ${t.name} (not found on this machine)`);
   console.log();
 
   let selected;
@@ -182,6 +218,7 @@ async function main() {
     const result = install(t);
     if (result.ok) {
       console.log(result.updated ? "updated to latest ✓" : "done ✓");
+      if (result.output) console.log(result.output.replace(/^/gm, "  "));
     } else {
       failed = true;
       console.log("failed ✗");
@@ -193,8 +230,9 @@ async function main() {
 Next steps:
   1. Get the Vibez iOS app: ${APP_STORE}
   2. Open a new agent session — it prints your private 4-word Vibez ID.
-     (In Claude Code, /vibez:setup shows it again.)
-  3. Enter the ID in the app's Setup card. One ID covers both agents.`);
+     (In Claude Code, /vibez:setup shows it again; the Cursor install
+     prints the ID right above.)
+  3. Enter the ID in the app's Setup card. One ID covers all your agents.`);
   if (selected.some((t) => t.bin === "codex")) {
     console.log(`
 Note: on first launch, Codex will ask you to review and trust the Vibez

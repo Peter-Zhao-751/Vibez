@@ -360,7 +360,7 @@ export const registerPushToken = onCall(
  *     "event":   "needs-input" | "done" | "replied",   // optional
  *     "shield":  "on" | "off",                          // optional
  *     "session": "<cli session id>",                    // optional
- *     "agent":   "cc" | "cx"                            // optional
+ *     "agent":   "cc" | "cx" | "cu"                     // optional
  *   }
  *
  * We look up every device registered to that Vibez ID and fan an FCM
