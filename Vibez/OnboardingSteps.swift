@@ -276,10 +276,9 @@ struct OnboardingPluginStep: View {
             VStack(spacing: 18) {
                 primaryCommand("npx getvibez")
                 commandGroup(
-                    label: "Then grab your Vibez ID",
+                    label: "Didn't catch your Vibez ID? Print it again",
                     accent: Theme.claudeOrange,
                     rows: [
-                        CommandRow(text: "start a new agent session — it prints your Vibez ID", copyable: false),
                         CommandRow(text: "/vibez:setup", tag: "Claude Code"),
                         CommandRow(text: "$vibez-setup", tag: "Codex"),
                     ]
