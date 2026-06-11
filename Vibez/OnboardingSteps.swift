@@ -259,6 +259,9 @@ struct OnboardingPluginStep: View {
     private struct CommandRow: Identifiable {
         let text: String
         var copyable = true
+        /// Which agent the command applies to, shown as a trailing chip
+        /// (nil = applies everywhere).
+        var tag: String?
         var id: String { text }
     }
 
@@ -277,7 +280,8 @@ struct OnboardingPluginStep: View {
                     accent: Theme.claudeOrange,
                     rows: [
                         CommandRow(text: "start a new agent session — it prints your Vibez ID", copyable: false),
-                        CommandRow(text: "/vibez:setup"),
+                        CommandRow(text: "/vibez:setup", tag: "Claude Code"),
+                        CommandRow(text: "$vibez-setup", tag: "Codex"),
                     ]
                 )
             }
@@ -328,6 +332,7 @@ struct OnboardingPluginStep: View {
                     number: i + 1,
                     text: row.text,
                     copyable: row.copyable,
+                    tag: row.tag,
                     copied: copiedCommand == row.text,
                     onCopy: { markCopied(row.text) }
                 )
@@ -358,6 +363,7 @@ private struct CommandRowView: View {
     let number: Int
     let text: String
     let copyable: Bool
+    var tag: String?
     let copied: Bool
     let onCopy: () -> Void
 
@@ -375,55 +381,74 @@ private struct CommandRowView: View {
             Text("\(number)")
                 .font(.system(size: 11, weight: .bold, design: .monospaced))
                 .foregroundStyle(theme.fgFaint)
-            // Long commands (the Codex marketplace add) overflow the
-            // row width — scroll horizontally instead of shrinking or
-            // truncating, so the whole command stays readable at full
-            // size. Taps inside the scroller still reach the row's
-            // copy gesture (a tap is never claimed by the pan).
-            ScrollView(.horizontal) {
+            if copyable {
+                // Long commands (the Codex marketplace add) overflow the
+                // row width — scroll horizontally instead of shrinking or
+                // truncating, so the whole command stays readable at full
+                // size. Taps inside the scroller still reach the row's
+                // copy gesture (a tap is never claimed by the pan).
+                ScrollView(.horizontal) {
+                    Text(text)
+                        .font(.system(size: 12, design: .monospaced))
+                        .foregroundStyle(theme.fg)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: ScrollHint.self) { geo in
+                    ScrollHint(
+                        overflows: geo.contentSize.width > geo.containerSize.width + 1,
+                        // Small tolerance so the hint clears as the tail
+                        // lands, not only at the exact final pixel.
+                        atEnd: geo.contentOffset.x + geo.containerSize.width
+                            >= geo.contentSize.width - 8
+                    )
+                } action: { _, new in
+                    hint = new
+                }
+                // Fade the clipped command first, then draw the "…" on an
+                // opaque chip-colored segment so text cannot show through it.
+                // Disappears once the end is reached.
+                .overlay(alignment: .trailing) {
+                    if hint.overflows && !hint.atEnd {
+                        HStack(spacing: 0) {
+                            LinearGradient(
+                                colors: [theme.bgChip.opacity(0), theme.bgChip],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                                .frame(width: 16)
+
+                            Text("…")
+                                .font(.system(size: 12, weight: .bold, design: .monospaced))
+                                .foregroundStyle(theme.fgMute)
+                                .padding(.horizontal, 2)
+                                .background(theme.bgChip)
+                        }
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                    }
+                }
+                .animation(.easeInOut(duration: 0.18), value: hint)
+            } else {
+                // Prose rows ("start a new session…") aren't commands —
+                // wrap them naturally instead of clipping behind a
+                // scroll hint that reads as truncation.
                 Text(text)
                     .font(.system(size: 12, design: .monospaced))
-                    .foregroundStyle(copyable ? theme.fg : theme.fgMute)
-                    .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .foregroundStyle(theme.fgMute)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .scrollIndicators(.hidden)
-            .onScrollGeometryChange(for: ScrollHint.self) { geo in
-                ScrollHint(
-                    overflows: geo.contentSize.width > geo.containerSize.width + 1,
-                    // Small tolerance so the hint clears as the tail
-                    // lands, not only at the exact final pixel.
-                    atEnd: geo.contentOffset.x + geo.containerSize.width
-                        >= geo.contentSize.width - 8
-                )
-            } action: { _, new in
-                hint = new
-            }
-            // Fade the clipped command first, then draw the "…" on an
-            // opaque chip-colored segment so text cannot show through it.
-            // Disappears once the end is reached.
-            .overlay(alignment: .trailing) {
-                if hint.overflows && !hint.atEnd {
-                    HStack(spacing: 0) {
-                        LinearGradient(
-                            colors: [theme.bgChip.opacity(0), theme.bgChip],
-                            startPoint: .leading,
-                            endPoint: .trailing
-                        )
-                            .frame(width: 16)
-
-                        Text("…")
-                            .font(.system(size: 12, weight: .bold, design: .monospaced))
-                            .foregroundStyle(theme.fgMute)
-                            .padding(.horizontal, 2)
-                            .background(theme.bgChip)
-                    }
-                    .allowsHitTesting(false)
-                    .transition(.opacity)
-                }
-            }
-            .animation(.easeInOut(duration: 0.18), value: hint)
             Spacer(minLength: 6)
+            if let tag {
+                Text(tag)
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(theme.fgMute)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Capsule().fill(theme.bgPanel))
+                    .overlay(Capsule().strokeBorder(theme.hairline, lineWidth: 1))
+            }
             if copyable {
                 Image(systemName: copied ? "checkmark" : "doc.on.doc")
                     .font(.system(size: 12))

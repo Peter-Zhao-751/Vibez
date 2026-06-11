@@ -57,7 +57,7 @@ One command — it detects Claude Code and Codex and installs for both:
 
 > ## `npx getvibez`
 
-Then open a new agent session: it prints your private 4-word Vibez ID — enter it once in the iOS app and you're paired (one ID covers both agents). In Claude Code, `/vibez:setup` shows the ID again and `/vibez:setup test` sends a test push. **Re-run `npx getvibez` anytime to update.** Requires Node ≥ 18; Codex asks you to trust the plugin's hooks on first launch — that's expected.
+Then open a new agent session: it prints your private 4-word Vibez ID — enter it once in the iOS app and you're paired (one ID covers both agents). To see the ID again, run `/vibez:setup` in Claude Code or `$vibez-setup` in Codex; `/vibez:setup test` sends a test push. **Re-run `npx getvibez` anytime to update.** Requires Node ≥ 18; Codex asks you to trust the plugin's hooks on first launch — that's expected.
 
 Full details: [`ClaudePlugin/README.md`](ClaudePlugin/README.md) · [`CodexPlugin/README.md`](CodexPlugin/README.md)
 
