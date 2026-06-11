@@ -185,6 +185,20 @@ else
     bad "stop-error-posts-needs-input" "request was [$(last_request)]"
 fi
 
+# --- instant stop after a reply: the detached shield:off must reach the
+# --- backend BEFORE the stop's shield:on (server-side seq ordering) ---
+reset_capture
+fire "{${BASE},\"hook_event_name\":\"beforeSubmitPrompt\",\"prompt\":\"quick question\",\"attachments\":[]}" >/dev/null
+fire "{${BASE},\"hook_event_name\":\"stop\",\"status\":\"completed\",\"loop_count\":0}" >/dev/null
+await_requests 2 || bad "instant-stop-both-arrive" "fewer than 2 requests within 5s"
+first_shield="$(requests | head -n 1 | jq -r '.shield')"
+second_shield="$(requests | tail -n 1 | jq -r '.shield')"
+if [ "${first_shield}/${second_shield}" = "off/on" ]; then
+    ok "reply-ordered-before-instant-stop"
+else
+    bad "reply-ordered-before-instant-stop" "order was ${first_shield} then ${second_shield}"
+fi
+
 # --- background sessions are mute for their whole lifecycle ---
 BGBASE='"conversation_id":"e2e-bg-1","generation_id":"g1","model":"m","cursor_version":"3.7.0","workspace_roots":["/Users/dev/my-proj"],"user_email":null,"transcript_path":null'
 reset_capture

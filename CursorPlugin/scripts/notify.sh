@@ -250,11 +250,30 @@ stash_path() {
 stash_write() {
     # $1 = kind, $2 = sid, $3 = content. Content is capped at 16 KB —
     # last_turn_is_asking scans the whole text, and an unbounded stash
-    # would let one giant response bloat ~/.config/vibez.
-    local path
+    # would let one giant response bloat ~/.config/vibez. The byte cut
+    # can split a multibyte UTF-8 char, and BSD awk/sed abort on invalid
+    # UTF-8 (which would misclassify an asking stop as done) — iconv -c
+    # drops the trailing partial sequence. tmp+mv keeps the write atomic:
+    # afterAgentResponse and stop fire back-to-back as separate
+    # processes, and stop must never read a truncated half-write.
+    local path tmp
     path="$(stash_path "$1" "$2")" || return 0
-    printf '%s' "$3" | head -c 16384 >"${path}" 2>/dev/null || true
-    chmod 600 "${path}" 2>/dev/null || true
+    tmp="${path}.tmp.$$"
+    if command -v iconv >/dev/null 2>&1; then
+        printf '%s' "$3" | head -c 16384 \
+            | iconv -c -f UTF-8 -t UTF-8 >"${tmp}" 2>/dev/null || true
+        # iconv -c exits nonzero when it had to drop bytes — the output
+        # is still exactly what we want, so judge by output, not exit
+        # code. Raw-cut fallback only when iconv emitted nothing for
+        # non-empty input (a genuinely broken iconv).
+        if [ -n "$3" ] && [ ! -s "${tmp}" ]; then
+            printf '%s' "$3" | head -c 16384 >"${tmp}" 2>/dev/null || true
+        fi
+    else
+        printf '%s' "$3" | head -c 16384 >"${tmp}" 2>/dev/null || true
+    fi
+    chmod 600 "${tmp}" 2>/dev/null || true
+    mv -f "${tmp}" "${path}" 2>/dev/null || rm -f "${tmp}" 2>/dev/null || true
 }
 
 stash_read() {
@@ -284,6 +303,25 @@ is_background_session() {
     [ -f "${path}" ]
 }
 
+# Block (bounded) while this session has a reply send still in flight —
+# the detached _flush-reply child deletes its job file only after its
+# POST returns. Without this, a near-instant stop's shield:on could be
+# seq-stamped by /notify BEFORE the reply's shield:off, leaving the
+# phone unblocked while Cursor waits (the sibling plugins get this
+# ordering for free by sending replies synchronously). A crashed child
+# leaves a stale job: the wait gives up after ~2s and the hygiene sweep
+# removes the file.
+wait_for_pending_reply() {
+    local sid="$1" i
+    [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 0
+    for i in $(seq 1 20); do
+        set -- "${CONFIG_DIR}/replyjob.${sid}."*
+        [ -e "$1" ] || return 0
+        sleep 0.1
+    done
+    return 0
+}
+
 # Title for a push: the stashed first user prompt, else the basename of
 # the first workspace root, else "cursor".
 resolve_title() {
@@ -299,10 +337,18 @@ resolve_title() {
 
 # True when the argument is a slash-command invocation. Cursor slash
 # commands (/Generate Commit Message and custom commands) shouldn't
-# wake the phone.
+# wake the phone. A prompt that merely STARTS with an absolute path
+# ("/Users/dev/crash.log shows a segfault, fix it") is a real reply —
+# the first token of a slash command never contains a second slash.
 is_slash_command() {
-    case "$1" in
-        "/"[a-zA-Z]*) return 0 ;;
+    local first="${1%%[[:space:]]*}"
+    case "${first}" in
+        "/"[a-zA-Z]*)
+            case "${first#/}" in
+                */*) return 1 ;;
+            esac
+            return 0
+            ;;
     esac
     return 1
 }
@@ -452,7 +498,7 @@ case "${EVENT}" in
                 # can't push stale content from the last turn.
                 stash_clear last "${SID}"
                 title="$(resolve_title "${SID}")"
-                job="$(mktemp "${CONFIG_DIR}/replyjob.XXXXXX" 2>/dev/null)" || job=""
+                job="$(mktemp "${CONFIG_DIR}/replyjob.${SID}.XXXXXX" 2>/dev/null)" || job=""
                 if [ -n "${job}" ] && jq -nc \
                     --arg title "$(clip_title "${title}")" \
                     --arg body "$(clip_body "${prompt}")" \
@@ -476,15 +522,21 @@ case "${EVENT}" in
     _flush-reply)
         # Detached continuation of beforeSubmitPrompt: read the job file
         # and deliver the shield:off push without holding up the prompt.
+        # The job file is removed AFTER the POST returns (success or
+        # fail) — its existence is the "reply still in flight" signal
+        # the stop branch waits on to keep server-side seq ordering
+        # (an instant stop's shield:on must not be seq-stamped before
+        # the reply's shield:off, or the phone ends up unblocked while
+        # Cursor waits).
         job="${2:-}"
         [ -n "${job}" ] && [ -f "${job}" ] || exit 0
         title="$(jq -r '.title // empty' "${job}" 2>/dev/null)"
         body="$(jq -r '.body // empty' "${job}" 2>/dev/null)"
         sid="$(jq -r '.sid // empty' "${job}" 2>/dev/null)"
-        rm -f "${job}" 2>/dev/null || true
         [ -n "${title}" ] || title="cursor"
         [ -n "${body}" ] || body="(replied)"
         post_vibez "${title}" "${body}" "replied" "off" "${sid}" "cu"
+        rm -f "${job}" 2>/dev/null || true
         ;;
 
     afterAgentResponse)
@@ -505,6 +557,7 @@ case "${EVENT}" in
             log "stop: aborted by user, skipping (session=${SID})"
             exit 0
         fi
+        wait_for_pending_reply "${SID}"
         title="$(clip_title "$(resolve_title "${SID}")")"
         excerpt="$(stash_read last "${SID}")" || excerpt=""
         if [ "${status}" = "error" ]; then
@@ -567,10 +620,15 @@ case "${EVENT}" in
         check_eq "clamp-field-passes" "$(clamp_field "short" 100)" "short"
 
         # Slash-command detection (Cursor only has the bare "/foo" form).
+        # A leading absolute path is a real reply, not a command.
         if is_slash_command "/summarize this"; then slash1=1; else slash1=0; fi
         if is_slash_command "fix the bug"; then slash2=1; else slash2=0; fi
-        check_eq "slash-detected"     "${slash1}" "1"
-        check_eq "slash-not-detected" "${slash2}" "0"
+        if is_slash_command "/Users/dev/app/crash.log shows a segfault, fix it"; then slash3=1; else slash3=0; fi
+        if is_slash_command "/tmp/x.log is empty"; then slash4=1; else slash4=0; fi
+        check_eq "slash-detected"      "${slash1}" "1"
+        check_eq "slash-not-detected"  "${slash2}" "0"
+        check_eq "slash-path-not-cmd"  "${slash3}" "0"
+        check_eq "slash-path2-not-cmd" "${slash4}" "0"
 
         # Debounce predicate — against a throwaway CONFIG_DIR so the
         # selftest never touches real ~/.config/vibez state.
@@ -646,6 +704,19 @@ case "${EVENT}" in
         big="$(printf 'x%.0s' $(seq 1 20000))"
         stash_write last "sessC" "${big}"
         check_eq "stash-caps-16k" "$(stash_read last sessC | wc -c | tr -d '[:space:]')" "16384"
+        # A multibyte char straddling the 16 KB cut must not leave an
+        # invalid UTF-8 tail (BSD awk/sed abort on one, flipping an
+        # asking stop to done). 16383 ASCII + 4-byte emoji → the cut
+        # keeps 1 lead byte → iconv strips it → 16383 valid bytes.
+        utf8probe="$(printf 'x%.0s' $(seq 1 16383))🦀"
+        stash_write last "sessU" "${utf8probe}"
+        check_eq "stash-utf8-safe-cut" "$(stash_read last sessU | wc -c | tr -d '[:space:]')" "16383"
+        if stash_read last sessU | iconv -f UTF-8 -t UTF-8 >/dev/null 2>&1; then
+            utf8valid="valid"
+        else
+            utf8valid="invalid"
+        fi
+        check_eq "stash-utf8-stays-valid" "${utf8valid}" "valid"
         stash_write bg "sessA" "1"
         if is_background_session "sessA"; then bgflag="bg"; else bgflag="fg"; fi
         check_eq "bg-marker-detected" "${bgflag}" "bg"
