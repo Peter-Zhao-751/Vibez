@@ -19,6 +19,10 @@ WORDMARK (vibez-assets/wordmark/)
 LOCKUPS (vibez-assets/lockup/)
   Icon + wordmark, horizontal. Light + dark.
 
+AGENTS (vibez-assets/agents/)
+  Third-party agent logos, capitalized brand names: Codex.png, Cursor.png.
+  (Codex's blue pixel-Z notification glyphs live in codex-blue-icons/.)
+
 PALETTE
   Orange       #d97757
   Orange deep  #bf694d
