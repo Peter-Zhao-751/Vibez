@@ -170,6 +170,12 @@ Next steps:
   2. Open a new agent session — it prints your private 4-word Vibez ID.
      (In Claude Code, /vibez:setup shows it again.)
   3. Enter the ID in the app's Setup card. One ID covers both agents.`);
+  if (selected.some((t) => t.bin === "codex")) {
+    console.log(`
+Note: on first launch, Codex will ask you to review and trust the Vibez
+hooks — that's expected (Codex requires a one-time review of any plugin's
+hooks, and again if an update changes them).`);
+  }
   if (failed) process.exit(1);
 }
 
