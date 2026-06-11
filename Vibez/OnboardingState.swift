@@ -153,14 +153,17 @@ final class OnboardingState: Identifiable {
 
     /// Snapshot the step list for a fresh presentation and rewind.
     /// Call after refreshNotificationStatus() so the snapshot sees the
-    /// real notification gate.
-    func begin() {
+    /// real notification gate. Pass `startingAt` to deep-link into a
+    /// specific step (the setup card's "Show me how" opens straight at
+    /// pluginInstall); a step absent from the snapshot falls back to
+    /// the front.
+    func begin(startingAt step: OnboardingStep? = nil) {
         steps = Self.computeSteps(
             notificationsGranted: notificationsGranted,
             screenTimeAuthorized: screenTimeAuthorized,
             paired: paired
         )
-        index = 0
+        index = step.flatMap { steps.firstIndex(of: $0) } ?? 0
     }
 
     /// Move forward, skipping any step whose gate got satisfied since

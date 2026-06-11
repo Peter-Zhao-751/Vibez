@@ -17,6 +17,9 @@ import SwiftUI
 struct VibezSetupCard: View {
     @Bindable var registrar: PushTokenRegistrar
     let theme: Theme
+    /// Opens the tutorial at the plugin-install step — the card carries
+    /// no inline instructions, just this affordance.
+    let onShowTutorial: () -> Void
 
     @State private var draft: String = ""
     @State private var fieldError: String? = nil
@@ -34,19 +37,6 @@ struct VibezSetupCard: View {
             && trimmedDraft != registrar.vibezId
     }
 
-    /// The setup summary, with the Claude Code command rendered in
-    /// monospace so it stands out from the surrounding instructions.
-    private var instructions: AttributedString {
-        var lead = AttributedString("Install the Vibez plugin. Claude Code and Codex show your Vibez ID when a session starts. For step-by-step instructions, open Settings and tap Tutorial. ")
-        lead.foregroundColor = theme.fgMute
-        var cmd = AttributedString("/vibez:setup")
-        cmd.font = .system(size: 12, design: .monospaced)
-        cmd.foregroundColor = theme.fg
-        var tail = AttributedString(" shows your ID again in Claude Code.")
-        tail.foregroundColor = theme.fgMute
-        return lead + cmd + tail
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
@@ -57,13 +47,7 @@ struct VibezSetupCard: View {
                     .font(.system(size: 14, weight: .bold))
                     .foregroundStyle(theme.fg)
             }
-            .padding(.bottom, 4)
-
-            Text(instructions)
-                .font(.system(size: 12))
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .padding(.bottom, 12)
+            .padding(.bottom, 12)
 
             HStack(spacing: 8) {
                 ZStack(alignment: .leading) {
@@ -114,8 +98,34 @@ struct VibezSetupCard: View {
                 .disabled(!saveable)
             }
 
-            statusRow
-                .padding(.top, 10)
+            Button(action: onShowTutorial) {
+                HStack(spacing: 6) {
+                    Image(systemName: "graduationcap")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("Show me how to get a Vibez ID")
+                        .font(.system(size: 12, weight: .semibold))
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.fgFaint)
+                }
+                .foregroundStyle(theme.fg)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 11)
+                        .fill(theme.bgChip)
+                )
+            }
+            .buttonStyle(.plain)
+            .padding(.top, 8)
+
+            // No status line before the first pairing attempt — an
+            // empty card already says "no ID" by being here at all.
+            if hasStatus {
+                statusRow
+                    .padding(.top, 10)
+            }
 
             if let fieldError {
                 Text(fieldError)
@@ -150,6 +160,15 @@ struct VibezSetupCard: View {
     }
 
     // MARK: - Status
+
+    /// Whether the status row has anything worth saying. Idle with no
+    /// saved ID is the card's default condition, not a status.
+    private var hasStatus: Bool {
+        if case .idle = registrar.state, registrar.vibezId.isEmpty {
+            return false
+        }
+        return true
+    }
 
     @ViewBuilder
     private var statusRow: some View {
@@ -216,7 +235,8 @@ struct VibezSetupCard: View {
 #Preview("VibezSetupCard · idle") {
     VibezSetupCard(
         registrar: PushTokenRegistrar.shared,
-        theme: Theme.make()
+        theme: Theme.make(),
+        onShowTutorial: {}
     )
     .padding()
     .background(Color.black)

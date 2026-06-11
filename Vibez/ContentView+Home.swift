@@ -111,6 +111,19 @@ extension ContentView {
         }
     }
 
+    /// The setup card's "Show me how" — opens the tutorial deep-linked
+    /// at the plugin-install step. Same construction dance as
+    /// SettingsView's Tutorial row: snapshot the steps only after the
+    /// async notification-status read.
+    private func presentSetupTutorial() {
+        let s = OnboardingState(manager: manager, registrar: registrar)
+        Task {
+            await s.refreshNotificationStatus()
+            s.begin(startingAt: .pluginInstall)
+            setupTutorial = s
+        }
+    }
+
     @ViewBuilder
     private var homeContent: some View {
         GeometryReader { proxy in
@@ -163,7 +176,8 @@ extension ContentView {
                 if setupCardMounted {
                     VibezSetupCard(
                         registrar: registrar,
-                        theme: theme
+                        theme: theme,
+                        onShowTutorial: presentSetupTutorial
                     )
                     .opacity(setupCardVisible ? 1 : 0)
                     .allowsHitTesting(setupCardVisible)

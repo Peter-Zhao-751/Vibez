@@ -101,6 +101,10 @@ struct ContentView: View {
 
     @State var overlayQueue: [NtfyMessage] = []   // order depends on overlayOrder — see enqueueOverlay
     @State var showSettings = false
+    /// Tutorial deep-linked from the setup card's "Show me how" button —
+    /// presents OnboardingFlow starting at the plugin-install step.
+    @State var setupTutorial: OnboardingState?
+    @AppStorage("vibez.onboardingCompleted") private var onboardingCompleted = false
     /// Drives the automatic "Rate Vibez" sheet (post-dismiss eligibility).
     @State var showReviewPrompt = false
     /// Retained state for the dormant Focus Mode picker detour.
@@ -336,6 +340,29 @@ struct ContentView: View {
         // Cold-launch onboarding decision + the fullScreenCover live in
         // OnboardingLaunchGate.swift.
         .onboardingLaunchGate(manager: manager, registrar: registrar)
+        .fullScreenCover(item: $setupTutorial) { s in
+            OnboardingFlow(
+                state: s,
+                manager: manager,
+                registrar: registrar,
+                onDismiss: { setupTutorial = nil },
+                onFinish: {
+                    // Deep-linked at pluginInstall, so permission steps
+                    // ahead of it were bypassed — only count the
+                    // walkthrough as complete when every gate is
+                    // actually satisfied (otherwise the launch gate
+                    // would stop re-presenting the missing steps).
+                    if !s.needsOnboarding { onboardingCompleted = true }
+                    setupTutorial = nil
+                    // Mirror the launch gate: finishing the walkthrough
+                    // arms the toggle in the same beat as the dismissal.
+                    guard !manager.armed else { return }
+                    withAnimation(.spring(response: 0.5, dampingFraction: 0.8)) {
+                        manager.setArmed(true)
+                    }
+                }
+            )
+        }
         .familyActivityPicker(
             isPresented: $pickerPresented,
             selection: $draftSelection

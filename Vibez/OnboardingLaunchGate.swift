@@ -51,6 +51,15 @@ struct OnboardingLaunchGate: ViewModifier {
                 // notification status is still notDetermined; don't let the
                 // cover bury every existing home-screen preview.
                 guard !Self.isRunningInPreviews else { return }
+                #if DEBUG
+                // Sim verification seam: home-screen states that only
+                // exist while setup is incomplete (the pairing card)
+                // are otherwise buried under this cover on launch.
+                // `xcrun simctl launch ... -vibez.debug.skipOnboarding YES`
+                if UserDefaults.standard.bool(forKey: "vibez.debug.skipOnboarding") {
+                    return
+                }
+                #endif
                 await onboarding.refreshNotificationStatus()
                 guard onboarding.needsOnboarding else {
                     // Everything granted + paired — mark complete so future
