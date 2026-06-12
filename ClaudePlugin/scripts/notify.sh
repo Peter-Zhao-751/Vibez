@@ -241,13 +241,20 @@ post_vibez() {
         # phone never got this push, so the next agent event for the
         # session must not be debounced against it.
         [ "${shield}" = "on" ] && clear_event "${session}" || true
+        # Callers that branch on delivery (the approval watcher's
+        # keep-the-fallback path) need the failure surfaced. Matches the
+        # Codex plugin's post_vibez. The script never runs under -e and
+        # ends in `exit 0`, so unchecked call sites are unaffected.
+        return 1
     fi
 }
 
-# Per-session pending marker — set by PreToolUse:AskUserQuestion so the
-# Notification hook can skip its near-duplicate push (~5-7s after the
-# picker appears). PostToolUse:AskUserQuestion clears it; Stop and
-# UserPromptSubmit clear defensively. Marker file holds an epoch-second
+# Per-session pending marker — set by whichever hook just pushed a
+# needs-input shield:on (PreToolUse:AskUserQuestion, or Notification for
+# a tool-permission prompt) so the Notification hook can skip its
+# near-duplicate push (~5-7s after the picker appears). PostToolUse and
+# PostToolUseFailure clear it (the gated tool ran = the user answered);
+# Stop and UserPromptSubmit clear defensively. Marker file holds an epoch-second
 # timestamp and auto-expires after PENDING_TTL_SECONDS, so a missed
 # PostToolUse (Claude Code crash, chat closed mid-question, etc.) can't
 # silently silence every later Notification for the rest of the session.
@@ -282,6 +289,210 @@ has_pending() {
         return 1
     fi
     return 0
+}
+
+# Claude Code has no hook that fires on the user's response to a permission
+# dialog (PermissionRequest fires when the dialog APPEARS; PostToolUse /
+# PostToolUseFailure fire when the granted tool FINISHES). For long-running
+# shell commands that left the shield up for the whole run after the user
+# had already pressed Enter. For Bash approvals, permission-request therefore
+# starts a detached watcher that snapshots matching Claude child processes
+# before the prompt is answered and sends shield:off as soon as a new
+# matching command process starts — approval is the only thing that starts
+# it. A denial never starts the command, so the shield stays. PostToolUse /
+# PostToolUseFailure remain the fallback for fast commands, edits, MCP calls,
+# and picker responses. Mirrored from the Codex plugin's approval watcher —
+# keep the two in sync (divergences flagged inline).
+
+# Find the Claude Code process that launched this hook. The approval watcher
+# uses that process as its tree root so an unrelated command elsewhere on
+# the Mac cannot be mistaken for this approval.
+find_claude_ancestor() {
+    local pid="${PPID}" comm base lower next
+    while [ -n "${pid}" ] && [ "${pid}" -gt 1 ] 2>/dev/null; do
+        comm="$(ps -p "${pid}" -o comm= 2>/dev/null | sed -E 's/^[[:space:]]+//')"
+        base="${comm##*/}"
+        lower="$(printf '%s' "${base}" | tr '[:upper:]' '[:lower:]')"
+        case "${lower}" in
+            claude|claude-*) printf '%s' "${pid}"; return 0 ;;
+        esac
+        next="$(ps -p "${pid}" -o ppid= 2>/dev/null | tr -d '[:space:]')"
+        case "${next}" in
+            ''|*[!0-9]*) return 1 ;;
+        esac
+        pid="${next}"
+    done
+    return 1
+}
+
+# Print descendant PIDs whose process command contains the approved shell
+# command. Both strings are whitespace-normalized because ps flattens newlines
+# from multi-line shell commands.
+matching_approval_processes() {
+    local root_pid="$1" command="$2"
+    ps -axo pid=,ppid=,command= 2>/dev/null |
+        VIBEZ_ROOT_PID="${root_pid}" VIBEZ_COMMAND="${command}" awk '
+            {
+                pid = $1
+                parent[pid] = $2
+                $1 = ""
+                $2 = ""
+                sub(/^[[:space:]]+/, "")
+                text[pid] = $0
+                ids[++count] = pid
+            }
+            END {
+                root = ENVIRON["VIBEZ_ROOT_PID"]
+                needle = ENVIRON["VIBEZ_COMMAND"]
+                gsub(/[[:space:]]+/, " ", needle)
+                # ps prints post-spawn argv: the quoting the shell consumed
+                # when launching the command never appears there. Strip
+                # quotes from both sides so an approved `rg -i "a|b"`
+                # matches the spawned `rg -i a|b`. (\047 = single quote.)
+                gsub(/["\047]/, "", needle)
+                # Wrapped needles arrive as a spawn vector ("zsh -lc <cmd>");
+                # sessions that exec the command directly never spawn that
+                # wrapper process — only the command itself shows up in ps.
+                # Try the prefix-stripped needle too.
+                bare = needle
+                sub(/^[A-Za-z0-9_.\/-]*sh -l?c /, "", bare)
+                descendant[root] = 1
+
+                # Process trees are shallow, but iterate to a fixed point so
+                # wrappers such as sandbox-exec -> zsh -> command are covered.
+                for (pass = 1; pass <= count; pass++) {
+                    changed = 0
+                    for (i = 1; i <= count; i++) {
+                        pid = ids[i]
+                        if (!descendant[pid] && descendant[parent[pid]]) {
+                            descendant[pid] = 1
+                            changed = 1
+                        }
+                    }
+                    if (!changed) break
+                }
+
+                for (i = 1; i <= count; i++) {
+                    pid = ids[i]
+                    candidate = text[pid]
+                    gsub(/[[:space:]]+/, " ", candidate)
+                    gsub(/["\047]/, "", candidate)
+                    if (pid != root && descendant[pid] &&
+                        (index(candidate, needle) > 0 || index(candidate, bare) > 0)) {
+                        print pid
+                    }
+                }
+            }
+        '
+}
+
+start_approval_watcher() {
+    local sid="$1" title="$2" tool_name="$3" command="$4"
+    local root_pid baseline state nonce
+
+    [ -n "${command}" ] || {
+        log "approval-watch: no command in payload (tool=${tool_name} session=${sid})"
+        return 0
+    }
+    # VIBEZ_APPROVAL_ROOT_PID is a test seam — the e2e suite has no claude
+    # ancestor, so it pins the tree root to the test shell instead.
+    root_pid="${VIBEZ_APPROVAL_ROOT_PID:-}"
+    case "${root_pid}" in
+        ''|*[!0-9]*)
+            root_pid="$(find_claude_ancestor)" || {
+                log "approval-watch: no Claude ancestor (session=${sid})"
+                return 0
+            }
+            ;;
+    esac
+    baseline="$(matching_approval_processes "${root_pid}" "${command}" | tr '\n' ' ')"
+    nonce="$(date +%s).$$"
+    state="${CONFIG_DIR}/approval-watch.${sid}.${nonce}.json"
+
+    jq -nc \
+        --arg sid "${sid}" \
+        --arg title "${title}" \
+        --arg toolName "${tool_name}" \
+        --arg command "${command}" \
+        --arg rootPid "${root_pid}" \
+        --arg baseline "${baseline}" \
+        '{sid:$sid,title:$title,toolName:$toolName,command:$command,
+          rootPid:$rootPid,baseline:$baseline}' >"${state}" 2>/dev/null || return 0
+    chmod 600 "${state}" 2>/dev/null || true
+
+    log "approval-watch: started (tool=${tool_name} session=${sid})"
+    # Redirect every descriptor so Claude Code does not wait for the detached
+    # watcher to close the hook process pipes.
+    nohup bash "${BASH_SOURCE[0]}" _watch-approval "${state}" \
+        </dev/null >/dev/null 2>&1 &
+}
+
+watch_approval_start() {
+    local state="$1" sid title tool_name command root_pid baseline timeout deadline
+    local pid marker
+
+    [ -f "${state}" ] || return 0
+    sid="$(jq -r '.sid // empty' "${state}" 2>/dev/null)"
+    title="$(jq -r '.title // empty' "${state}" 2>/dev/null)"
+    tool_name="$(jq -r '.toolName // "tool"' "${state}" 2>/dev/null)"
+    command="$(jq -r '.command // empty' "${state}" 2>/dev/null)"
+    root_pid="$(jq -r '.rootPid // empty' "${state}" 2>/dev/null)"
+    baseline="$(jq -r '.baseline // empty' "${state}" 2>/dev/null)"
+    case "${root_pid}" in
+        ''|*[!0-9]*) rm -f "${state}" 2>/dev/null || true; return 0 ;;
+    esac
+    marker="$(pending_marker_path "${sid}")" || { rm -f "${state}" 2>/dev/null || true; return 0; }
+
+    timeout="${VIBEZ_APPROVAL_WATCH_SECONDS:-600}"
+    case "${timeout}" in
+        ''|*[!0-9]*) timeout=600 ;;
+    esac
+    local started
+    started="$(date +%s)"
+    deadline="$(( started + timeout ))"
+
+    local end_reason="timeout"
+    while [ "$(date +%s)" -lt "${deadline}" ]; do
+        # DIVERGENCE from the Codex plugin: check the marker file's raw
+        # existence, NOT has_pending — this plugin's has_pending applies a
+        # 30s TTL and DELETES the marker on expiry (it exists to dedup the
+        # Notification near-duplicate). A user can take minutes to answer a
+        # permission prompt; expiring here would kill the watcher AND disarm
+        # the post-tool-use fallback in one stroke. Raw existence mirrors
+        # post-tool-use's deliberate no-TTL check.
+        if [ ! -f "${marker}" ]; then end_reason="pending-cleared"; break; fi
+        if ! kill -0 "${root_pid}" 2>/dev/null; then end_reason="claude-exited"; break; fi
+
+        for pid in $(matching_approval_processes "${root_pid}" "${command}"); do
+            case " ${baseline} " in
+                *" ${pid} "*) continue ;;
+            esac
+            if post_vibez "${title}" "(approved: ${tool_name})" \
+                "replied" "off" "${sid}" "cc"; then
+                clear_pending "${sid}"
+                log "approval-watch: command started (tool=${tool_name} session=${sid})"
+            else
+                # Keep pending so PostToolUse can retry after a transient
+                # network failure.
+                log "approval-watch: send failed; keeping fallback (session=${sid})"
+            fi
+            rm -f "${state}" 2>/dev/null || true
+            return 0
+        done
+        # Each pass is a full `ps -axo` scan. Stay snappy while the user
+        # is likely still looking at the prompt, then back off — 10 Hz
+        # for the full 10-minute window is real CPU for no benefit.
+        if [ "$(( $(date +%s) - started ))" -lt 30 ]; then
+            sleep 0.15
+        else
+            sleep 0.75
+        fi
+    done
+
+    # Every non-match exit logs its reason — a watcher that never fires must
+    # be visible in the log, not indistinguishable from one that never ran.
+    log "approval-watch: ended without match (${end_reason}, tool=${tool_name} session=${sid})"
+    rm -f "${state}" 2>/dev/null || true
 }
 
 # True when the argument is a slash-command invocation — either the bare
@@ -604,6 +815,8 @@ case "${EVENT}" in
         # caches that go stale once the session ends.
         find "${CONFIG_DIR}" -maxdepth 1 -name 'pending.*' -mtime +1 -delete 2>/dev/null || true
         find "${CONFIG_DIR}" -maxdepth 1 -name 'last_excerpt.*' -mtime +1 -delete 2>/dev/null || true
+        # Approval-watcher state files from crashed/killed watchers.
+        find "${CONFIG_DIR}" -maxdepth 1 -name 'approval-watch.*.json' -mtime +1 -delete 2>/dev/null || true
         ;;
 
     stop)
@@ -651,9 +864,9 @@ case "${EVENT}" in
         # AskUserQuestion blocks Claude mid-turn waiting for the user's
         # pick. Stop doesn't fire here (stop_reason is tool_use, not
         # end_turn), so this PreToolUse hook is what pings the phone
-        # while the picker is pending. The Notification hook is
-        # intentionally not registered — it would fire a second
-        # needs-input push ~5-7s later and look like a duplicate.
+        # while the picker is pending. The Notification hook fires a
+        # second needs-input ~5-7s after the picker appears; the pending
+        # marker set below is what makes it skip that near-duplicate.
         tool_name="$(jq_get '.tool_name')"
         [ "${tool_name}" = "AskUserQuestion" ] || exit 0
 
@@ -673,8 +886,17 @@ case "${EVENT}" in
         mark_pending "${sid}"
         ;;
 
-    post-tool-use)
-        # Two paths land here now that PostToolUse matches every tool:
+    post-tool-use|post-tool-use-failure)
+        # Serves BOTH PostToolUse and PostToolUseFailure. Claude Code
+        # fires PostToolUse only when a tool SUCCEEDS; an errored tool
+        # fires PostToolUseFailure instead. Either way the gated tool
+        # RAN, which is the only post-approval signal Claude Code gives
+        # us — there is no hook at Enter-press time. Without the failure
+        # leg, granting a command that then errored stranded the shield
+        # until the next successful tool or the 15-min timeout (the
+        # 2026-06-11 stuck-shield bug).
+        #
+        # Two paths land here:
         #
         # 1. AskUserQuestion just returned — the user picked an option
         #    (or clicked Clarify). Picker answers arrive as tool_result
@@ -690,7 +912,8 @@ case "${EVENT}" in
         #    Push shield:off in that case and clear pending. When no
         #    marker is set, Claude is just autonomously running tools
         #    (accept-edits / bypass / pre-approved) — exit silently so
-        #    we don't drown the phone with one shield:off per tool call.
+        #    we don't drown the phone with one shield:off per tool call
+        #    (or per failed tool call, on the failure leg).
         #
         #    File existence is checked directly instead of has_pending
         #    so the TTL doesn't apply: the marker's 30s window exists
@@ -726,7 +949,14 @@ case "${EVENT}" in
                 [ -z "${body}" ] && body="(answered)"
                 ;;
             *)
-                body="(approved: ${tool_name})"
+                # On the failure leg the user still answered the prompt,
+                # but the tool didn't succeed (errored, or the grant was
+                # denied) — "approved" would overclaim there.
+                if [ "${EVENT}" = "post-tool-use-failure" ]; then
+                    body="(answered: ${tool_name})"
+                else
+                    body="(approved: ${tool_name})"
+                fi
                 ;;
         esac
         if [ "${#body}" -gt 160 ]; then
@@ -776,7 +1006,7 @@ case "${EVENT}" in
         log "notification: received (sid=${sid}, message=${message})"
 
         if has_pending "${sid}"; then
-            log "notification: skip — AskUserQuestion still pending for ${sid}"
+            log "notification: skip — needs-input push still pending for ${sid}"
             exit 0
         fi
 
@@ -806,6 +1036,59 @@ case "${EVENT}" in
         # the equivalent for tool-permission prompts that arrive via
         # Notification instead.
         mark_pending "${sid}"
+        ;;
+
+    permission-request)
+        # Claude Code fires PermissionRequest when a permission dialog
+        # appears. Unlike the generic Notification message ("Claude needs
+        # your permission"), its payload carries tool_name + tool_input,
+        # so the banner can show WHAT wants to run — and for shell
+        # commands the approval watcher can unshield at process START
+        # (the moment the user grants) instead of command completion.
+        #
+        # Ordering vs the Notification hook, which fires for the same
+        # dialog: whichever lands first wins the banner. When this handler
+        # is first, the pending marker makes Notification skip its
+        # near-duplicate; when Notification is first, the 5s same-session
+        # debounce eats this push. The marker and the watcher are set up
+        # either way.
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        tool_name="$(jq_get '.tool_name' 'tool')"
+        proj="$(basename "${cwd:-unknown}")"
+        convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
+        is_slash_command "${convo_title}" && exit 0
+
+        # Body: "<tool>: <command>" for shell tools, compact tool_input
+        # JSON otherwise — mirrors the Codex permission-request body.
+        command="$(jq_get '.tool_input.command')"
+        body_detail="${command}"
+        if [ -z "${body_detail}" ]; then
+            body_detail="$(printf '%s' "${INPUT}" | jq -rc \
+                '.tool_input // empty | if type == "string" then . else tostring end' \
+                2>/dev/null || true)"
+        fi
+        if [ -n "${body_detail}" ]; then
+            body="${tool_name}: ${body_detail}"
+        else
+            body="Permission required to run ${tool_name}"
+        fi
+        if [ "${#body}" -gt 160 ]; then
+            body="${body:0:159}…"
+        fi
+
+        post_vibez "${convo_title}" "${body}" "needs-input" "on" "${sid}" "cc"
+        mark_pending "${sid}"
+        case "${tool_name}" in
+            Bash|bash)
+                start_approval_watcher "${sid}" "${convo_title}" "${tool_name}" "${command}"
+                ;;
+        esac
+        ;;
+
+    _watch-approval)
+        watch_approval_start "${2:-}"
         ;;
 
     _selftest)
@@ -860,6 +1143,65 @@ case "${EVENT}" in
         long_field="$(printf 'a%.0s' $(seq 1 150))"
         check_eq "clamp-field-caps"   "$(clamp_field "${long_field}" 100)" "${long_field:0:99}…"
         check_eq "clamp-field-passes" "$(clamp_field "short" 100)" "short"
+
+        # Approval process matching — mirrored from the Codex plugin's
+        # selftest. A newly spawned descendant containing the exact
+        # requested command must be observable, while the current selftest
+        # process must not match before that child exists.
+        approval_marker="vibez-approval-selftest-$$"
+        approval_probe="sleep 2 & wait"
+        check_eq "approval-watch-no-process" \
+            "$(matching_approval_processes "$$" "${approval_marker}")" ""
+        bash -c "${approval_probe}" "${approval_marker}" &
+        approval_probe_pid=$!
+        sleep 0.1
+        approval_matches="$(matching_approval_processes "$$" "${approval_marker}")"
+        case " ${approval_matches} " in
+            *" ${approval_probe_pid} "*) approval_found="found" ;;
+            *) approval_found="missing" ;;
+        esac
+        check_eq "approval-watch-finds-child" "${approval_found}" "found"
+        kill "${approval_probe_pid}" 2>/dev/null || true
+        wait "${approval_probe_pid}" 2>/dev/null || true
+
+        # Quoted-command matching. The hook receives the command as the user
+        # approved it — quotes intact — but the spawned process's argv has had
+        # that quoting consumed by the shell, and ps prints bare argv. The
+        # matcher must align the two or any quoted command (most of them)
+        # never matches.
+        quoted_dir="$(mktemp -d)"
+        quoted_script="${quoted_dir}/rgmark"
+        printf '#!/bin/bash\nsleep 2 & wait\n' >"${quoted_script}"
+        chmod +x "${quoted_script}"
+        "${quoted_script}" -n -i "bigg|toggle" /tmp &
+        quoted_pid=$!
+        sleep 0.1
+        quoted_needle="${quoted_script} -n -i \"bigg|toggle\" /tmp"
+        quoted_matches="$(matching_approval_processes "$$" "${quoted_needle}")"
+        case " ${quoted_matches} " in
+            *" ${quoted_pid} "*) quoted_found="found" ;;
+            *) quoted_found="missing" ;;
+        esac
+        check_eq "approval-watch-quoted-cmd" "${quoted_found}" "found"
+        kill "${quoted_pid}" 2>/dev/null || true
+        wait "${quoted_pid}" 2>/dev/null || true
+
+        # Wrapped needles ("<shell> -lc '<cmd>'") may never appear in ps when
+        # the host execs the command directly — the matcher must also try the
+        # prefix-stripped needle.
+        "${quoted_script}" -q /tmp &
+        prefix_pid=$!
+        sleep 0.1
+        prefix_needle="bash -lc '${quoted_script} -q /tmp'"
+        prefix_matches="$(matching_approval_processes "$$" "${prefix_needle}")"
+        case " ${prefix_matches} " in
+            *" ${prefix_pid} "*) prefix_found="found" ;;
+            *) prefix_found="missing" ;;
+        esac
+        check_eq "approval-watch-shell-prefix" "${prefix_found}" "found"
+        kill "${prefix_pid}" 2>/dev/null || true
+        wait "${prefix_pid}" 2>/dev/null || true
+        rm -rf "${quoted_dir}"
 
         # Debounce predicate — exercised against a throwaway CONFIG_DIR
         # so a selftest never touches real ~/.config/vibez state, and a

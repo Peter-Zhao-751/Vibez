@@ -216,8 +216,22 @@ ClaudePlugin/                 Claude Code plugin source.
   scripts/notify.sh           Hook script. POSTs lifecycle events to /notify with the
                               user's Vibez ID. Handles session-start, stop, notification,
                               pre/post-tool-use (AskUserQuestion + tool-grant),
+                              post-tool-use-failure (PostToolUse fires only on SUCCESS —
+                              without the failure leg, granting a command that then
+                              errored stranded the shield until the 15-min timeout),
+                              permission-request (tool-rich banner + the approval watcher:
+                              Claude Code has NO hook at Enter-press time, so for Bash
+                              grants a detached ps-poller sends shield:off the moment the
+                              approved command's process STARTS instead of when it
+                              finishes — ported from the Codex plugin 2026-06-11, keep in
+                              sync; ONE deliberate divergence: the watch loop checks the
+                              pending marker by raw existence because THIS plugin's
+                              has_pending TTLs + deletes at 30s, Codex's never expires),
                               user-prompt-submit. Falls back to setup.sh for first-run ID gen.
-  hooks/hooks.json            Registers notify.sh against 6 Claude Code lifecycle hooks.
+  hooks/hooks.json            Registers notify.sh against 8 Claude Code lifecycle hooks.
+  test/hooks.e2e.sh           E2e: realistic hook payloads → real dispatch → stub /notify
+                              capture (permission-grant shield lifecycle incl. failure leg
+                              + approval-watcher grant/deny/slow-grant cases).
   commands/setup.md           /vibez:setup slash-command definition.
 CodexPlugin/                  Codex plugin source. Parallel structure to ClaudePlugin
                               (independently distributed — the two plugins can't share files).

@@ -1,7 +1,7 @@
 {
   "name": "vibez",
   "description": "Push Claude Code notifications and stop events to the Vibez iPhone app via Firebase Cloud Messaging. First session auto-generates a 4-word Vibez ID; enter it once in the app to pair your Mac with your phone.",
-  "version": "0.14.8",
+  "version": "0.15.0",
   "author": {
     "name": "Peter Zhao"
   },
