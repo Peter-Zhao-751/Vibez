@@ -21,10 +21,11 @@ Vibez connects Claude Code, Codex, and Cursor lifecycle events to an iOS Screen 
 
 <br><br>
 
-<img src="assets/mockups/vibez_blocking_in_progress_transparent.png" width="23%" alt="Blocking in progress — the agent needs you, selected apps shielded behind a live countdown">
-<img src="assets/mockups/vibez_connect_light_transparent.png" width="23%" alt="Connect card — pair your phone once with the 4-word Vibez ID">
-<img src="assets/mockups/vibez_focus_mode_transparent.png" width="23%" alt="Focus mode — tap the mascot to hold a manual block">
-<img src="assets/mockups/vibez_how_it_works_transparent.png" width="23%" alt="How Vibez works — agent pushes, apps shield, reply releases">
+<img src="assets/carousel/slide-1-pitch.png" width="18%" alt="“Claude's done. Stop scrolling.” — Vibez blocks distracting apps when Claude Code or Codex needs you">
+<img src="assets/carousel/slide-2-ping.png" width="18%" alt="“Agent pings. Phone locks.” — a question or a finished task blocks your feeds until you reply">
+<img src="assets/carousel/slide-3-agents-left.png" width="18%" alt="All your agents, one app — a Claude Code block, tinted orange">
+<img src="assets/carousel/slide-4-agents-right.png" width="18%" alt="…and a Codex block, tinted blue — orange pings from Claude, blue from Codex">
+<img src="assets/carousel/slide-5-setup.png" width="18%" alt="“One command. You're paired.” — npx getvibez prints a private 4-word ID that pairs your Mac to your phone">
 
 </div>
 
