@@ -62,3 +62,21 @@ import Foundation
     #expect(r.primeFromTail(maxBytes: 1024).isEmpty)
     #expect(r.readNew().isEmpty)
 }
+
+@Test func engineTurnsALogIntoASnapshot() {
+    let log = TempLog()
+    log.appendLine(kind: "start", ts: 1_000, sid: "a", title: "Notch app")
+    log.appendLine(kind: "prompt", ts: 1_001, sid: "a", title: "Notch app")
+    log.appendLine(kind: "needs-input", ts: 1_002, sid: "a", title: "Notch app")
+    log.appendLine(kind: "tool", ts: 1_003, sid: "b", title: "Other")
+
+    let clock = FakeClock(2_000)
+    let engine = HUDEngine(logURL: log.url,
+                           config: StoreConfig(staleMs: .max),
+                           clock: clock,
+                           liveness: FakeLiveness())
+    let snap = engine.primeAndDrain()
+    #expect(snap.needsYou.map(\.sid) == ["a"])
+    #expect(snap.working.map(\.sid) == ["b"])
+    #expect(snap.done.isEmpty)
+}
