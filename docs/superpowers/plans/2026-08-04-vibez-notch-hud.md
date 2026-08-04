@@ -84,17 +84,41 @@ Tests/fixtures/golden-session.json                golden snapshot for the e2e
 
 ### Task 1: Notch window spike — prove the window level
 
-Retires the only assumption that could invalidate the UI work. Not TDD; the test is a screenshot.
+Retires the only assumption that could invalidate the UI work.
+
+**Verification is programmatic, not visual.** `screencapture` on this machine
+fails with "could not create image from rect" (Screen Recording permission is
+not granted), so a screenshot is not available. `CGWindowListCopyWindowInfo`
+needs **no** permission, returns every on-screen window's layer and its
+front-to-back index, and answers the question exactly rather than by eye.
+
+Measured on this machine, so the spike has a known-good target:
+
+| Window | Owner | Layer |
+|---|---|---|
+| Menu bar | `Window Server` | **24** (`.mainMenu`) |
+| Menu bar extras | `Control Center` | **25** (`.statusBar`) |
+
+So `.statusBar + 2` = layer **27** should clear both. The spike proves it.
 
 **Files:**
 - Create: `VibezHUD/Scripts/spike-notch.swift`
 
-- [ ] **Step 1: Write the spike**
+- [ ] **Step 1: Write the self-verifying spike**
+
+Two things this script must get right, both of which broke a previous attempt:
+`print` is block-buffered when stdout is redirected to a file and `app.run()`
+never returns, so **every print must be followed by `fflush(stdout)`**; and the
+process must **exit on its own** rather than needing a kill.
 
 ```swift
 // VibezHUD/Scripts/spike-notch.swift
 // Run: swift VibezHUD/Scripts/spike-notch.swift
+// Exits by itself with status 0 (PASS) or 1 (FAIL).
 import AppKit
+import CoreGraphics
+
+func say(_ s: String) { print(s); fflush(stdout) }
 
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
@@ -107,17 +131,21 @@ let auxR = screen.auxiliaryTopRightArea?.width ?? 0
 let notchW = (inset > 0 && auxL > 0 && auxR > 0) ? f.width - auxL - auxR : 180
 let notchH = inset > 0 ? inset : 24
 
-print("screen=\(f) safeTop=\(inset) auxL=\(auxL) auxR=\(auxR) notch=\(notchW)x\(notchH)")
+say("screen=\(f)")
+say("safeTop=\(inset) auxL=\(auxL) auxR=\(auxR)")
+say("notch=\(notchW)x\(notchH)")
 
-// Deliberately WIDER and TALLER than the notch, so we can see whether it
-// composites above the menu bar on both sides of the notch.
+// The level under test. If this fails, walk the ladder in Step 2.
+let level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
+
+// Deliberately WIDER than the notch, so it must clear the menu bar on both sides.
 let w: CGFloat = notchW + 260, h: CGFloat = notchH + 40
 let rect = NSRect(x: f.midX - w / 2, y: f.maxY - h, width: w, height: h)
 
 let panel = NSPanel(contentRect: rect,
                     styleMask: [.borderless, .nonactivatingPanel],
                     backing: .buffered, defer: false)
-panel.level = NSWindow.Level(rawValue: NSWindow.Level.statusBar.rawValue + 2)
+panel.level = level
 panel.isOpaque = false
 panel.hasShadow = false
 panel.backgroundColor = .clear
@@ -131,30 +159,69 @@ v.layer?.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
 panel.contentView = v
 panel.orderFrontRegardless()
 
+// Let WindowServer place the window before interrogating it.
+DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+    let mine = panel.windowNumber
+    let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements],
+                                          kCGNullWindowID) as? [[String: Any]] ?? []
+
+    guard let myIdx = list.firstIndex(where: {
+        ($0[kCGWindowNumber as String] as? Int) == mine
+    }) else {
+        say("FAIL: our window is not in the on-screen list at all")
+        exit(1)
+    }
+    let myLayer = list[myIdx][kCGWindowLayer as String] as? Int ?? -999
+    say("panel: layer=\(myLayer) frontIndex=\(myIdx) windowNumber=\(mine)")
+
+    // Menu-bar furniture: anything owned by Window Server or Control Center
+    // that sits flush against the top of the screen.
+    var barLayer = Int.min, barIdx = Int.max, barOwners = Set<String>()
+    for (i, wi) in list.enumerated() {
+        let owner = wi[kCGWindowOwnerName as String] as? String ?? ""
+        guard owner == "Window Server" || owner == "Control Center" else { continue }
+        let b = wi[kCGWindowBounds as String] as? [String: Any] ?? [:]
+        guard (b["Y"] as? Double ?? -1) == 0 else { continue }
+        barLayer = max(barLayer, wi[kCGWindowLayer as String] as? Int ?? Int.min)
+        barIdx = min(barIdx, i)
+        barOwners.insert(owner)
+    }
+    guard barLayer != Int.min else {
+        say("FAIL: found no menu-bar windows to compare against")
+        exit(1)
+    }
+    say("menubar: maxLayer=\(barLayer) frontIndex=\(barIdx) owners=\(barOwners.sorted())")
+
+    // Front-to-back ordering: a LOWER index is closer to the viewer.
+    let above = myLayer > barLayer && myIdx < barIdx
+    say(above
+        ? "PASS: panel layer \(myLayer) sits above menu bar layer \(barLayer)"
+        : "FAIL: panel layer \(myLayer) does NOT clear menu bar layer \(barLayer)")
+    exit(above ? 0 : 1)
+}
+
 app.run()
 ```
 
-- [ ] **Step 2: Run it and capture the result**
+- [ ] **Step 2: Run it — it exits by itself**
 
 ```bash
-swift VibezHUD/Scripts/spike-notch.swift
+cd VibezHUD && swift Scripts/spike-notch.swift; echo "exit=$?"
 ```
 
-In another terminal, screenshot the top of the screen:
+**Expected:** the geometry lines, then `PASS: panel layer 27 sits above menu bar layer 25`, then `exit=0`. First run takes ~20 s because `swift` compiles the script before running it — that is normal, not a hang.
 
-```bash
-screencapture -x -R0,0,1600,120 /tmp/notch-spike.png && open /tmp/notch-spike.png
-```
+**If it prints FAIL**, edit only the `let level = …` line, re-run, and record the first rung that passes: `.mainMenu + 1`, then `.popUpMenu`, then `.screenSaver`. The passing value becomes `HUDTheme.windowLevel` in Task 17. Note that something on this machine already floats at layer 1000 (`.screenSaver`), so that rung is a last resort — it would put the HUD above genuinely everything.
 
-**Expected:** a pink rounded slab covering the notch AND overlapping the menu bar on both sides of it. Kill with Ctrl-C.
-
-**If the menu bar draws on top instead:** raise the level one step at a time — `.mainMenu + 1`, then `.popUpMenu`, then `.screenSaver` — and re-screenshot after each. Record the first level that works; that value becomes `HUDTheme.windowLevel` in Task 16. Do not proceed past this task until a level is confirmed working.
+If no rung passes, report BLOCKED: the visual approach needs rethinking, and that is worth knowing now.
 
 - [ ] **Step 3: Commit**
 
+Commit the script with whichever level passed.
+
 ```bash
 git add VibezHUD/Scripts/spike-notch.swift
-git commit -m "spike(hud): prove notch window level composites over the macOS 26 menu bar"
+git commit -m "spike(hud): prove the notch panel composites above the macOS 26 menu bar"
 ```
 
 ---
