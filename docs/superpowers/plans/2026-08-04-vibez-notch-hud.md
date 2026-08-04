@@ -1842,8 +1842,32 @@ resolved and **before** any `post_vibez` call. Handlers and the kind each emits:
 | `pre-tool-use` (AskUserQuestion) | `hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${question}" "AskUserQuestion"` |
 | `permission-request` | `hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}" "${tool_name}"` |
 | `notification` | `hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${message}"` — placed **after** the existing idle-reminder skip, so it inherits that one suppression deliberately |
-| `stop` | `hud_record "${hud_kind}" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}"` where `hud_kind` is `done` when the existing classifier chose `done`, else `needs-input`. Add it **before** `defer_stop_push`, so the HUD is not gated by the grace window or by `stop_pending_work`. |
+| `stop` | `hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}"`, placed **before** `defer_stop_push` so the HUD is not gated by the grace window. See the note below on the handler's early exits. |
 | `session-end` (new handler) | `hud_record "end" "${sid}" "${proj}" "${cwd}" "${convo_title:-${proj}}"` |
+
+**The `stop` handler's three early exits, and which the HUD must survive.**
+`stop)` returns early in three places before reaching `hud_record`:
+
+1. **`stop_pending_work` gate** — skip the HUD record too. That turn end is a
+   pause, not a stop: the harness resumes the session itself, so the session
+   genuinely is still WORKING and saying otherwise would be a lie.
+2. **`is_slash_command`** — skip. Consistent with the push path; a
+   `/vibez:setup` invocation is not a session worth a row.
+3. **empty `excerpt`** — **do NOT skip.** That guard exists so the *phone*
+   doesn't get a contentless "Claude finished a turn." push. But a finished
+   turn with no excerpt is still a finished turn, and skipping it leaves the
+   session showing WORKING until staleness eventually ends it — a visible lie
+   in the panel. Restructure so the HUD record is written either way: classify
+   as `done` when there is no excerpt (with no text, `last_turn_is_asking`
+   cannot detect a question), pass an empty body, and let the push path keep
+   its own early return.
+
+**Keep `hud_record` to ONE `jq` invocation.** `post-tool-use` is the hottest
+hook in the script — it fires on every single tool call — so subprocess count
+there is a real cost, measured at +14 ms when the writer spawned three. Fold
+the timestamp into the record's own `jq` (`ts: (now * 1000 | floor)`) instead
+of a separate `hud_now_ms` call, and only spawn the extra process-chain `jq` on
+`start` records, which happen once per session.
 
 Add the new handler to the `case` statement:
 
