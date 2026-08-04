@@ -39,6 +39,113 @@ log() {
     printf '[%s] cx %s\n' "$(date -u +%FT%TZ)" "$*" >>"${LOG_FILE}" 2>/dev/null || true
 }
 
+# --- HUD sidecar log -------------------------------------------------------
+# The notch app tails this. Deliberately SEPARATE from post_vibez: the push
+# path suppresses events on purpose (block debounce, stop_pending_work gate,
+# Stop grace) to protect the phone from spam, and the HUD needs every
+# transition. hud_record is therefore called at the EVENT SITE, never from
+# inside post_vibez. Never call curl from here — SessionEnd hooks get killed
+# fast.
+HUD_DIR="${CONFIG_DIR}/hud"
+HUD_LOG="${HUD_DIR}/events.jsonl"
+HUD_LOG_MAX_BYTES="${VIBEZ_HUD_LOG_MAX_BYTES:-2097152}"
+# A junk override would otherwise make the -lt below error out and rotate on
+# every single write.
+case "${HUD_LOG_MAX_BYTES}" in
+    ''|*[!0-9]*) HUD_LOG_MAX_BYTES=2097152 ;;
+esac
+
+hud_rotate_if_needed() {
+    [ -f "${HUD_LOG}" ] || return 0
+    local size
+    size="$(wc -c < "${HUD_LOG}" 2>/dev/null | tr -d ' ')"
+    case "${size}" in ''|*[!0-9]*) return 0 ;; esac
+    [ "${size}" -lt "${HUD_LOG_MAX_BYTES}" ] && return 0
+    mv -f "${HUD_LOG}" "${HUD_LOG}.1" 2>/dev/null || true
+}
+
+# Walk up the process tree from this hook. Records TWO things:
+#   agentPid  the claude/codex/cursor process, for liveness
+#   appPid    the OUTERMOST .app ancestor, for click-to-jump
+# Outermost matters: taking the first .app lands on "Cursor Helper.app" for
+# integrated terminals; continuing to the root correctly yields "Cursor.app".
+# Echoes: "<agentPid>|<agentStart>|<appPid>|<appName>"
+hud_process_chain() {
+    local pid="${PPID}" agent_pid="" app_pid="" app_name="" comm ppid guard=0
+    while [ -n "${pid}" ] && [ "${pid}" -gt 1 ] 2>/dev/null && [ "${guard}" -lt 24 ]; do
+        guard=$((guard + 1))
+        comm="$(ps -o comm= -p "${pid}" 2>/dev/null)"
+        [ -z "${comm}" ] && break
+        case "${comm}" in
+            */claude|*/codex|*/cursor-agent|claude|codex|cursor-agent)
+                [ -z "${agent_pid}" ] && agent_pid="${pid}" ;;
+        esac
+        case "${comm}" in
+            *.app/Contents/MacOS/*)
+                app_pid="${pid}"
+                app_name="$(printf '%s' "${comm}" | sed -E 's|.*/([^/]+)\.app/Contents/MacOS/.*|\1|')" ;;
+        esac
+        ppid="$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')"
+        [ -z "${ppid}" ] && break
+        pid="${ppid}"
+    done
+    [ -z "${agent_pid}" ] && agent_pid="${PPID}"
+    local agent_start
+    agent_start="$(ps -o lstart= -p "${agent_pid}" 2>/dev/null | sed -e 's/^ *//' -e 's/ *$//')"
+    printf '%s|%s|%s|%s' "${agent_pid}" "${agent_start}" "${app_pid}" "${app_name}"
+}
+
+# hud_record <kind> <sid> <proj> <cwd> <title> [body] [tool]
+# A single O_APPEND printf: atomic against the parallel hooks Claude Code fires,
+# which is why this is an append-only log and not per-session state files.
+hud_record() {
+    local kind="$1" sid="$2" proj="$3" cwd="$4" title="$5" body="${6:-}" tool="${7:-}"
+    [ -z "${sid}" ] && return 0
+    [ "${sid}" = "nosid" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    mkdir -p "${HUD_DIR}" 2>/dev/null || return 0
+    chmod 700 "${HUD_DIR}" 2>/dev/null || true
+    hud_rotate_if_needed
+
+    local extra="{}" line
+    if [ "${kind}" = "start" ]; then
+        local chain agent_pid agent_start app_pid app_name
+        chain="$(hud_process_chain)"
+        agent_pid="${chain%%|*}"; chain="${chain#*|}"
+        agent_start="${chain%%|*}"; chain="${chain#*|}"
+        app_pid="${chain%%|*}"; app_name="${chain#*|}"
+        extra="$(jq -nc \
+            --argjson agentPid "${agent_pid:-0}" \
+            --arg agentStart "${agent_start}" \
+            --argjson appPid "${app_pid:-0}" \
+            --arg app "${app_name}" \
+            '{agentPid:$agentPid, agentStart:$agentStart}
+             + (if $appPid > 0 then {appPid:$appPid, app:$app} else {} end)')"
+    fi
+
+    # ONE jq per record. post-tool-use is the hottest hook in the script (it
+    # fires on every tool call), so the timestamp is computed inside this same
+    # invocation rather than by a second one — BSD date has no %N, and jq is
+    # already a hard dependency here. Only `start` pays for the extra
+    # process-chain jq above, once per session.
+    line="$(jq -nc \
+        --argjson v 1 \
+        --arg sid "${sid}" --arg agent "cx" --arg kind "${kind}" \
+        --arg proj "${proj}" --arg cwd "${cwd}" \
+        --arg title "$(clamp_field "${title}" 100)" \
+        --arg body "$(clamp_field "${body}" 200)" \
+        --arg tool "${tool}" \
+        --argjson extra "${extra}" \
+        '{v:$v, ts:(now * 1000 | floor), sid:$sid, agent:$agent, kind:$kind, proj:$proj, cwd:$cwd, title:$title}
+         + (if $body != "" then {body:$body} else {} end)
+         + (if $tool != "" then {tool:$tool} else {} end)
+         + $extra')" || return 0
+
+    printf '%s\n' "${line}" >> "${HUD_LOG}" 2>/dev/null || true
+    chmod 600 "${HUD_LOG}" 2>/dev/null || true
+}
+
 # Cap on the append-only log. Without one it grows forever (one line
 # per hook event). Checked once per session (session-start), not per
 # event; an oversized log is trimmed to its newest half. Mirrors the
@@ -661,6 +768,23 @@ esac
 case "${EVENT}" in
 
     session-start)
+        # HUD first: it must land even if ID generation below fails, and it
+        # writes to a file, never to stdout (the systemMessage JSON below is
+        # a hook output contract). Gated on the ephemeral check like every
+        # other handler — Codex Desktop fires the full lifecycle on the
+        # internal sub-threads it spawns for thread titles and summaries, and
+        # those are not sessions the user wants in the panel.
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        transcript="$(jq_get '.transcript_path')"
+        proj="$(basename "${cwd:-unknown}")"
+        # No thread name exists yet at session start; the project name is the
+        # honest label, and the first prompt/tool record supersedes it.
+        if is_ephemeral_session; then
+            log "session-start: skipping HUD record for ephemeral session"
+        else
+            hud_record "start" "${sid}" "${proj}" "${cwd}" "${proj}"
+        fi
         # Codex passes source ∈ {startup, resume, clear}. Only do the
         # welcome banner on the very first run (no ID file yet);
         # subsequent startups are silent.
@@ -726,6 +850,10 @@ case "${EVENT}" in
             body="Permission required to run ${tool_name}"
         fi
 
+        # Before post_vibez, so the same-session block debounce (which exists
+        # to spare the phone a second banner) can't hide the ask from the HUD.
+        hud_record "needs-input" "${sid}" "${proj}" "${cwd}" \
+            "$(clip_title "${title_raw}")" "$(clip_body "${body}")" "${tool_name}"
         post_vibez "$(clip_title "${title_raw}")" "$(clip_body "${body}")" \
             "needs-input" "on" "${sid}" "cx"
         mark_pending "${sid}"
@@ -753,17 +881,27 @@ case "${EVENT}" in
         # no transcript polling needed for the body (unlike the Claude Code
         # plugin), but we still read the transcript for the title.
         excerpt="$(jq_get '.last_assistant_message')"
+        # Classify on the full excerpt, clip only the push body. Empty text
+        # can't hold a question, so an excerpt-less turn classifies as done.
+        body="$(clip_body "${excerpt}")"
+        title="$(clip_title "${title_raw}")"
+        if last_turn_is_asking "${excerpt}"; then
+            stop_kind="needs-input"
+        else
+            stop_kind="done"
+        fi
+        # HUD first, and UNCONDITIONALLY — above the excerpt skip below. The
+        # turn ended, so the panel must stop showing WORKING whether or not
+        # the payload carried any text.
+        hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${title}" "${body}"
+        # The PUSH keeps its own skip: with no text, a generic "Codex finished
+        # a turn." is just noise on the phone. Deliberately a bare exit — it
+        # must not clear this session's pending markers.
         if [ -z "${excerpt}" ]; then
             log "stop: empty last_assistant_message, skipping"
             exit 0
         fi
-        body="$(clip_body "${excerpt}")"
-        title="$(clip_title "${title_raw}")"
-        if last_turn_is_asking "${excerpt}"; then
-            post_vibez "${title}" "${body}" "needs-input" "on" "${sid}" "cx"
-        else
-            post_vibez "${title}" "${body}" "done" "on" "${sid}" "cx"
-        fi
+        post_vibez "${title}" "${body}" "${stop_kind}" "on" "${sid}" "cx"
         # Stop is a terminal "needs you" signal — any pending shield-on from
         # an earlier permission/picker in this turn has been superseded.
         clear_pending "${sid}"
@@ -795,6 +933,8 @@ case "${EVENT}" in
         [ -z "${question}" ] && question="$(jq_get '.tool_input.question')"
         [ -z "${question}" ] && question="Codex is asking a question."
 
+        hud_record "needs-input" "${sid}" "${proj}" "${cwd}" \
+            "$(clip_title "${title_raw}")" "$(clip_body "${question}")" "${tool_name}"
         post_vibez "$(clip_title "${title_raw}")" "$(clip_body "${question}")" \
             "needs-input" "on" "${sid}" "cx"
         mark_pending "${sid}"
@@ -807,17 +947,25 @@ case "${EVENT}" in
         # Only push when an earlier interactive event left a pending marker;
         # otherwise autonomous tool calls would drown the phone.
         sid="$(jq_get '.session_id' 'nosid')"
-        has_pending "${sid}" || exit 0
-
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         is_ephemeral_session && { log "post-tool-use: skipping ephemeral session"; exit 0; }
         proj="$(basename "${cwd:-unknown}")"
+        tool_name="$(jq_get '.tool_name' 'tool')"
+        # HUD ABOVE the autonomous-tool early-exit below. That exit is a push
+        # suppression (one shield:off per tool call would drown the phone);
+        # for the notch panel every tool call is exactly the "still working"
+        # heartbeat it needs. Title is deliberately empty — the reducer keeps
+        # the session's known title, and the transcript reads below are too
+        # expensive to run on every PostToolUse.
+        hud_record "tool" "${sid}" "${proj}" "${cwd}" "" "" "${tool_name}"
+
+        has_pending "${sid}" || exit 0
+
         title_raw="$(read_thread_name_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
 
-        tool_name="$(jq_get '.tool_name' 'tool')"
         # For ask_user_question the response is the user's actual answer,
         # which is meaningful body content. For shell/apply_patch/etc. the
         # tool_response is command output that may be huge or contain
@@ -860,6 +1008,7 @@ case "${EVENT}" in
         if [ -z "${prompt}" ]; then
             prompt="(replied)"
         fi
+        hud_record "prompt" "${sid}" "${proj}" "${cwd}" "${title}" "$(clip_body "${prompt}")"
         post_vibez "${title}" "$(clip_body "${prompt}")" \
             "replied" "off" "${sid}" "cx"
         clear_pending "${sid}"
