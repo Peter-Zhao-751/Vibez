@@ -111,6 +111,18 @@ fire stop "{\"session_id\":\"s4\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${
 check "a stop that asks records needs-input" "needs-input," "$(kinds)"
 teardown
 
+# --- a stop with no excerpt still ends the turn in the panel ----------------
+# The push path skips this one (a contentless "Claude finished a turn." is
+# noise on the phone), but skipping the RECORD would leave the session showing
+# WORKING until staleness ended it — the panel lying about a finished turn.
+setup
+fire stop "{\"session_id\":\"s9\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SANDBOX}/never-written.jsonl\"}"
+check "an excerpt-less stop still records done" "done," "$(kinds)"
+check "an excerpt-less stop records exactly one" "1" "$(grep -c . "${HUD_LOG}")"
+check "an excerpt-less stop has an empty body" "null" "$(jq -r '.body // "null"' "${HUD_LOG}" | head -1)"
+check "an excerpt-less stop pushes nothing" "0" "$(curl_count)"
+teardown
+
 # --- the AskUserQuestion picker ---------------------------------------------
 setup
 fire pre-tool-use '{"session_id":"s6","cwd":"/tmp/proj","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which approach?"}]}}'

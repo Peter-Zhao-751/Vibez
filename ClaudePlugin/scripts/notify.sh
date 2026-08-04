@@ -55,9 +55,6 @@ case "${HUD_LOG_MAX_BYTES}" in
     ''|*[!0-9]*) HUD_LOG_MAX_BYTES=2097152 ;;
 esac
 
-# BSD date has no %N, and jq is already a hard dependency of this script.
-hud_now_ms() { jq -n '(now * 1000) | floor'; }
-
 hud_rotate_if_needed() {
     [ -f "${HUD_LOG}" ] || return 0
     local size
@@ -111,8 +108,7 @@ hud_record() {
     chmod 700 "${HUD_DIR}" 2>/dev/null || true
     hud_rotate_if_needed
 
-    local ts extra="{}" line
-    ts="$(hud_now_ms)" || return 0
+    local extra="{}" line
     if [ "${kind}" = "start" ]; then
         local chain agent_pid agent_start app_pid app_name
         chain="$(hud_process_chain)"
@@ -128,15 +124,20 @@ hud_record() {
              + (if $appPid > 0 then {appPid:$appPid, app:$app} else {} end)')"
     fi
 
+    # ONE jq per record. post-tool-use is the hottest hook in the script (it
+    # fires on every tool call), so the timestamp is computed inside this same
+    # invocation rather than by a second one — BSD date has no %N, and jq is
+    # already a hard dependency here. Only `start` pays for the extra
+    # process-chain jq above, once per session.
     line="$(jq -nc \
-        --argjson v 1 --argjson ts "${ts}" \
+        --argjson v 1 \
         --arg sid "${sid}" --arg agent "cc" --arg kind "${kind}" \
         --arg proj "${proj}" --arg cwd "${cwd}" \
         --arg title "$(clamp_field "${title}" 100)" \
         --arg body "$(clamp_field "${body}" 200)" \
         --arg tool "${tool}" \
         --argjson extra "${extra}" \
-        '{v:$v, ts:$ts, sid:$sid, agent:$agent, kind:$kind, proj:$proj, cwd:$cwd, title:$title}
+        '{v:$v, ts:(now * 1000 | floor), sid:$sid, agent:$agent, kind:$kind, proj:$proj, cwd:$cwd, title:$title}
          + (if $body != "" then {body:$body} else {} end)
          + (if $tool != "" then {tool:$tool} else {} end)
          + $extra')" || return 0
@@ -1053,24 +1054,28 @@ case "${EVENT}" in
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         is_slash_command "${convo_title}" && exit 0
         excerpt="$(last_assistant_excerpt)"
-        # Skip when polling didn't surface a fresh excerpt — sending a
-        # generic "Claude finished a turn." is just noise on the phone.
-        if [ -z "${excerpt}" ]; then
-            exit 0
-        fi
         # Classify on the full excerpt, clip only the push body — the
         # question that flips done→needs-input is often past the
-        # 160-char display cut.
+        # 160-char display cut. Empty text can't hold a question, so an
+        # excerpt-less turn classifies as done.
         body="$(clip_body "${excerpt}")"
         if last_turn_is_asking "${excerpt}"; then
             stop_kind="needs-input"
         else
             stop_kind="done"
         fi
-        # HUD before defer_stop_push: the notch panel must see the turn end
-        # now, not STOP_GRACE_SECONDS later, and it must still see it when the
-        # deferred push is cancelled by an auto-resume.
+        # HUD first, and UNCONDITIONALLY — above the excerpt skip below and
+        # before defer_stop_push. The turn ended, so the panel must stop
+        # showing WORKING whether or not polling surfaced fresh text, and it
+        # must not wait out the grace window or vanish when an auto-resume
+        # cancels the push.
         hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}"
+        # The PUSH keeps its own skip: with no fresh excerpt, a generic
+        # "Claude finished a turn." is just noise on the phone. Deliberately a
+        # bare exit — it must not clear this session's pending markers.
+        if [ -z "${excerpt}" ]; then
+            exit 0
+        fi
         # Supersede any still-armed deferred stop for this session (a newer
         # stop replaces the older one), then DEFER this push so an imminent
         # background-task auto-resume can cancel it before it reaches the
