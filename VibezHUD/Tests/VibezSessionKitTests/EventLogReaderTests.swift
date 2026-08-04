@@ -56,6 +56,24 @@ import Foundation
     #expect(r.readNew().isEmpty, "priming must leave the offset at EOF")
 }
 
+@Test func primeFromTailKeepsATornTrailingLineSoItIsNotLost() {
+    // Cold start while the writer is mid-write. The head of the unfinished line
+    // must be BUFFERED, not discarded — if it is dropped, the writer's later
+    // completion arrives as an orphan fragment that cannot decode, and the
+    // event is lost permanently with no error anywhere.
+    let log = TempLog()
+    for i in 1...200 { log.appendLine(kind: "tool", ts: Int64(i), title: String(repeating: "x", count: 60)) }
+    log.appendRaw(#"{"v":1,"ts":999,"sid":"torn","agent":"cc","kind":"needs-inp"#)
+
+    let r = EventLogReader(url: log.url)
+    let primed = r.primeFromTail(maxBytes: 4_096)
+    #expect(!primed.contains { $0.sid == "torn" }, "an incomplete line must not be emitted yet")
+
+    log.appendRaw("ut\",\"proj\":\"P\",\"cwd\":\"/tmp/P\",\"title\":\"T\"}\n")   // writer finishes it
+    #expect(r.readNew().contains { $0.sid == "torn" && $0.kind == .needsInput },
+            "the buffered head plus the completion must reconstitute the event")
+}
+
 @Test func missingFileIsNotAnError() {
     let dir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent(UUID().uuidString)
     let r = EventLogReader(url: dir.appendingPathComponent("nope.jsonl"))
