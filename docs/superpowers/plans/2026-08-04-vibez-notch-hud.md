@@ -1065,8 +1065,11 @@ import Testing
     let live = FakeLiveness(); live.table[999] = (true, nil)
     let s = SessionStore(config: StoreConfig(stopGraceMs: 0, retentionMs: 60_000),
                          clock: clock, liveness: live)
-    s.apply(makeEvent(.start, ts: 1_000_000, agentPid: 999))
-    s.apply(makeEvent(.done, ts: 1_000_001))
+    s.apply(makeEvent(.start, ts: 999_999, agentPid: 999))
+    // The done's ts must not lead the clock: with stopGraceMs 0 the commit
+    // check is `now - pending >= 0`, so a done stamped even 1ms in the future
+    // stays provisional until the clock catches up.
+    s.apply(makeEvent(.done, ts: 1_000_000))
     #expect(s.snapshot().done.count == 1)
     clock.advance(ms: 61_000)
     #expect(s.snapshot().done.isEmpty)
