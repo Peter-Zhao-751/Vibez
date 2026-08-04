@@ -125,6 +125,26 @@ case "${DEBOUNCE_SECONDS}" in
     ''|*[!0-9]*) DEBOUNCE_SECONDS=5 ;;
 esac
 
+# Grace window for the Stop push (the completion-boundary flap fix).
+# Claude Code re-injects a completed background task's result as a
+# synthetic user prompt to auto-resume an idle session; that injection
+# fires UserPromptSubmit ~1s after the Stop hook ran. The Stop gate
+# (stop_pending_work) only suppresses while a task is STILL in flight —
+# but a task that finished a beat before Stop has already left
+# background_tasks[], so the gate passes and a false done/shield:on ships,
+# only for the auto-resume's shield:off to unblock ~1s later: the phone
+# blocks then unblocks (a visible flash). Fix: the Stop push is DEFERRED
+# by this many seconds and CANCELLED if any session activity
+# (UserPromptSubmit / PostToolUse / a fresh ask) lands first — a genuine
+# stop (nothing resumes within the window) still fires, just this many
+# seconds later. 0 disables the deferral (send immediately, pre-fix
+# behavior). Only the Stop handler defers; explicit asks (AskUserQuestion
+# / Notification / permission-request) still block immediately.
+STOP_GRACE_SECONDS="${VIBEZ_STOP_GRACE_SECONDS:-3}"
+case "${STOP_GRACE_SECONDS}" in
+    ''|*[!0-9]*) STOP_GRACE_SECONDS=3 ;;
+esac
+
 lastevent_path() {
     local sid="$1"
     [ -z "${sid}" ] || [ "${sid}" = "nosid" ] && return 1
@@ -247,6 +267,78 @@ post_vibez() {
         # ends in `exit 0`, so unchecked call sites are unaffected.
         return 1
     fi
+}
+
+# --- Deferred Stop push (completion-boundary flap fix) ---------------------
+# The Stop handler doesn't send done/needs-input directly; it stashes the
+# push in a per-session state file and arms a detached child that waits
+# STOP_GRACE_SECONDS and only then delivers it — UNLESS a resume/activity
+# hook deleted the state file first (clear_stop_pending). That cancellation
+# is what swallows the false done at a background-task completion boundary:
+# the harness's auto-resume fires UserPromptSubmit ~1s after Stop, well
+# inside the grace window, and cancels the pending push before it ships.
+# Mirrors the approval watcher's detached-process pattern.
+
+clear_stop_pending() {
+    local sid="$1"
+    [ -z "${sid}" ] && return 0
+    [ "${sid}" = "nosid" ] && return 0
+    rm -f "${CONFIG_DIR}/stop-pending.${sid}."*.json 2>/dev/null || true
+}
+
+# Arm a deferred Stop push. With the grace window disabled (0), send inline
+# — exact pre-fix behavior, so VIBEZ_STOP_GRACE_SECONDS=0 is a clean rollback.
+defer_stop_push() {
+    local sid="$1" title="$2" body="$3" event="$4"
+    if [ "${STOP_GRACE_SECONDS}" -le 0 ] 2>/dev/null; then
+        post_vibez "${title}" "${body}" "${event}" "on" "${sid}" "cc"
+        return 0
+    fi
+    local nonce state
+    nonce="$(date +%s).$$"
+    state="${CONFIG_DIR}/stop-pending.${sid}.${nonce}.json"
+    jq -nc \
+        --arg sid "${sid}" \
+        --arg title "${title}" \
+        --arg body "${body}" \
+        --arg event "${event}" \
+        '{sid:$sid,title:$title,body:$body,event:$event}' >"${state}" 2>/dev/null || {
+            # State write failed — fall back to an immediate send so the
+            # push isn't lost entirely.
+            post_vibez "${title}" "${body}" "${event}" "on" "${sid}" "cc"
+            return 0
+        }
+    chmod 600 "${state}" 2>/dev/null || true
+    log "stop: deferred ${event} push armed (grace=${STOP_GRACE_SECONDS}s sid=${sid})"
+    # Detach so Claude Code doesn't wait on the grace sleep; redirect every
+    # descriptor so the hook process pipes can close.
+    nohup bash "${BASH_SOURCE[0]}" _deferred-stop "${state}" \
+        </dev/null >/dev/null 2>&1 &
+}
+
+# Detached worker: wait out the grace window, then deliver the stashed push
+# only if it wasn't cancelled (state file still present). Called via the
+# _deferred-stop event so it re-enters with a freshly resolved environment.
+run_deferred_stop() {
+    local state="$1" sid title body event grace
+    [ -f "${state}" ] || return 0
+    # Read the stashed push up front so the cancel log can name the session
+    # (the marker may be gone by the time we re-check after the sleep).
+    sid="$(jq -r '.sid // empty' "${state}" 2>/dev/null)"
+    title="$(jq -r '.title // empty' "${state}" 2>/dev/null)"
+    body="$(jq -r '.body // empty' "${state}" 2>/dev/null)"
+    event="$(jq -r '.event // "done"' "${state}" 2>/dev/null)"
+    grace="${STOP_GRACE_SECONDS}"
+    case "${grace}" in ''|*[!0-9]*) grace=3 ;; esac
+    [ "${grace}" -gt 0 ] && sleep "${grace}"
+    # Cancelled in-flight: a resume/activity hook removed the marker.
+    if [ ! -f "${state}" ]; then
+        log "stop: deferred push cancelled — session resumed before grace elapsed (sid=${sid})"
+        return 0
+    fi
+    # Consume the marker before sending so a late resume can't double-fire it.
+    rm -f "${state}" 2>/dev/null || true
+    post_vibez "${title}" "${body}" "${event}" "on" "${sid}" "cc"
 }
 
 # Per-session pending marker — set by whichever hook just pushed a
@@ -817,6 +909,9 @@ case "${EVENT}" in
         find "${CONFIG_DIR}" -maxdepth 1 -name 'last_excerpt.*' -mtime +1 -delete 2>/dev/null || true
         # Approval-watcher state files from crashed/killed watchers.
         find "${CONFIG_DIR}" -maxdepth 1 -name 'approval-watch.*.json' -mtime +1 -delete 2>/dev/null || true
+        # Deferred-stop markers orphaned by a killed detached worker (they
+        # normally live only STOP_GRACE_SECONDS).
+        find "${CONFIG_DIR}" -maxdepth 1 -name 'stop-pending.*.json' -mtime +1 -delete 2>/dev/null || true
         ;;
 
     stop)
@@ -852,10 +947,16 @@ case "${EVENT}" in
         # question that flips done→needs-input is often past the
         # 160-char display cut.
         body="$(clip_body "${excerpt}")"
+        # Supersede any still-armed deferred stop for this session (a newer
+        # stop replaces the older one), then DEFER this push so an imminent
+        # background-task auto-resume can cancel it before it reaches the
+        # phone — the completion-boundary flap fix. defer_stop_push sends
+        # inline when the grace window is disabled (pre-fix behavior).
+        clear_stop_pending "${sid}"
         if last_turn_is_asking "${excerpt}"; then
-            post_vibez "${convo_title}" "${body}" "needs-input" "on" "${sid}" "cc"
+            defer_stop_push "${sid}" "${convo_title}" "${body}" "needs-input"
         else
-            post_vibez "${convo_title}" "${body}" "done" "on" "${sid}" "cc"
+            defer_stop_push "${sid}" "${convo_title}" "${body}" "done"
         fi
         clear_pending "${sid}"
         ;;
@@ -871,6 +972,10 @@ case "${EVENT}" in
         [ "${tool_name}" = "AskUserQuestion" ] || exit 0
 
         sid="$(jq_get '.session_id' 'nosid')"
+        # Session is active again — cancel any armed deferred stop; this
+        # explicit ask supersedes a stale done/needs-input from the turn
+        # boundary just before it.
+        clear_stop_pending "${sid}"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
@@ -923,6 +1028,12 @@ case "${EVENT}" in
         #    proof the user responded, no matter how long they took.
         tool_name="$(jq_get '.tool_name')"
         sid="$(jq_get '.session_id' 'nosid')"
+        # A tool ran = the session is active again. Cancel any armed
+        # deferred stop BEFORE the autonomous-tool early-exit below — an
+        # auto-resumed session running pre-approved tools (no pending
+        # marker) is exactly the completion-boundary case, and it must
+        # still cancel the false done even though it exits without sending.
+        clear_stop_pending "${sid}"
 
         case "${tool_name}" in
             "AskUserQuestion")
@@ -971,6 +1082,13 @@ case "${EVENT}" in
         # iOS app lifts the shield for this session. Body is mostly
         # informational; the Vibez app routes on the event + shield axes.
         sid="$(jq_get '.session_id' 'nosid')"
+        # THE primary cancel point: the harness re-injects a completed
+        # background task as a synthetic user prompt to auto-resume an idle
+        # session, which fires THIS hook ~1s after Stop. Cancelling here —
+        # first thing, before the slow title lookup — is what swallows the
+        # false done within the grace window. A real human reply cancels it
+        # too (and the user clearly doesn't need a stale block then).
+        clear_stop_pending "${sid}"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
@@ -1004,6 +1122,11 @@ case "${EVENT}" in
         sid="$(jq_get '.session_id' 'nosid')"
         message="$(jq_get '.message')"
         log "notification: received (sid=${sid}, message=${message})"
+        # A real permission/needs-you notification means the session
+        # resumed and is now explicitly asking — supersede any armed
+        # deferred stop. (An idle reminder lands ~60s out, long after the
+        # grace window, so this is a no-op there.)
+        clear_stop_pending "${sid}"
 
         if has_pending "${sid}"; then
             log "notification: skip — needs-input push still pending for ${sid}"
@@ -1053,6 +1176,9 @@ case "${EVENT}" in
         # debounce eats this push. The marker and the watcher are set up
         # either way.
         sid="$(jq_get '.session_id' 'nosid')"
+        # Explicit permission ask = session resumed and is waiting on the
+        # user — supersede any armed deferred stop from the prior turn.
+        clear_stop_pending "${sid}"
         cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
         tool_name="$(jq_get '.tool_name' 'tool')"
@@ -1089,6 +1215,10 @@ case "${EVENT}" in
 
     _watch-approval)
         watch_approval_start "${2:-}"
+        ;;
+
+    _deferred-stop)
+        run_deferred_stop "${2:-}"
         ;;
 
     _selftest)
@@ -1314,6 +1444,50 @@ case "${EVENT}" in
         INPUT=''
         check_eq "pendwork-no-stdin"          "$(stop_pending_work)" "0 0"
         INPUT="${saved_input}"
+
+        # Deferred-stop completion-boundary fix: the Stop push is stashed in
+        # a per-session marker and delivered by a detached worker only if a
+        # resume/activity hook didn't cancel it first. Exercised against a
+        # throwaway CONFIG_DIR with curl shadowed, grace pinned to 0 (no
+        # real sleep), VIBEZ_ID forced, debounce off, and LOG_FILE inside
+        # the throwaway dir.
+        saved_grace="${STOP_GRACE_SECONDS}"
+        saved_log_ds="${LOG_FILE}"
+        saved_id_ds="${VIBEZ_ID}"
+        saved_deb_ds="${DEBOUNCE_SECONDS}"
+        STOP_GRACE_SECONDS=0
+        DEBOUNCE_SECONDS=0
+        CONFIG_DIR="$(mktemp -d)"
+        LOG_FILE="${CONFIG_DIR}/dslog"
+        : >"${LOG_FILE}"  # ensure it exists so grep -c yields a clean 0
+        VIBEZ_ID="self-test-self-test"
+        curl() { return 0; }
+        # clear_stop_pending removes the per-session marker(s).
+        printf '%s' '{"sid":"dsA","title":"t","body":"b","event":"done"}' >"${CONFIG_DIR}/stop-pending.dsA.1.json"
+        check_eq "deferstop-marker-written" "$( [ -f "${CONFIG_DIR}/stop-pending.dsA.1.json" ] && echo yes || echo no )" "yes"
+        clear_stop_pending "dsA"
+        check_eq "deferstop-clear-removes"  "$(ls "${CONFIG_DIR}"/stop-pending.dsA.*.json 2>/dev/null | wc -l | tr -d '[:space:]')" "0"
+        clear_stop_pending "nosid"  # must be a no-op, never error
+        # A CANCELLED push (marker cleared) must NOT send.
+        printf '%s' '{"sid":"dsB","title":"tb","body":"b","event":"done"}' >"${CONFIG_DIR}/stop-pending.dsB.1.json"
+        clear_stop_pending "dsB"
+        run_deferred_stop "${CONFIG_DIR}/stop-pending.dsB.1.json"
+        check_eq "deferstop-cancelled-no-send" "$(grep -c 'sent:' "${LOG_FILE}" 2>/dev/null | tr -d '[:space:]')" "0"
+        # A LIVE push (marker present) sends exactly once and is consumed.
+        ds_live="${CONFIG_DIR}/stop-pending.dsC.1.json"
+        printf '%s' '{"sid":"dsC","title":"tc","body":"b","event":"done"}' >"${ds_live}"
+        run_deferred_stop "${ds_live}"
+        check_eq "deferstop-live-sends"     "$(grep -c 'sent: tc (event=done)' "${LOG_FILE}" 2>/dev/null | tr -d '[:space:]')" "1"
+        check_eq "deferstop-live-consumed"  "$( [ -f "${ds_live}" ] && echo yes || echo no )" "no"
+        # defer_stop_push with grace=0 sends inline (clean rollback path).
+        defer_stop_push "dsD" "td" "b" "needs-input"
+        check_eq "deferstop-grace0-inline"  "$(grep -c 'sent: td (event=needs-input)' "${LOG_FILE}" 2>/dev/null | tr -d '[:space:]')" "1"
+        unset -f curl
+        STOP_GRACE_SECONDS="${saved_grace}"
+        LOG_FILE="${saved_log_ds}"
+        VIBEZ_ID="${saved_id_ds}"
+        DEBOUNCE_SECONDS="${saved_deb_ds}"
+        rm -rf "${CONFIG_DIR}"
 
         # Log rotation — an oversized log keeps its newest half; a log
         # under the cap is untouched.

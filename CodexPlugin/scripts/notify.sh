@@ -488,6 +488,20 @@ is_ephemeral_session() {
     return 1
 }
 
+# True when this Codex session was launched by Claude Code's codex-rescue
+# agent rather than run standalone. codex-rescue drives Codex over
+# `codex app-server`, spawned with Claude Code's inherited environment, so
+# CLAUDECODE / CLAUDE_CODE_ENTRYPOINT are present in the hook's env; a
+# terminal Codex session has neither. Used to suppress the duplicate cx
+# push — Claude Code's own Stop hook already fires a cc "done" for the same
+# logical task, so a cx "done" here just double-blocks the phone. Detected
+# via the inherited env, NOT process ancestry: codex-rescue can reuse a
+# detached broker app-server that reparents to launchd, breaking the PPID
+# chain, but the captured env survives.
+is_claude_subagent() {
+    [ -n "${CLAUDECODE:-}" ] || [ -n "${CLAUDE_CODE_ENTRYPOINT:-}" ]
+}
+
 # Pull a JSON field with a default, swallowing jq errors. The default
 # applies whenever the result is EMPTY — field absent, explicitly "",
 # jq failure, or no stdin — not just when jq exits nonzero (jq exits 0
@@ -627,6 +641,22 @@ last_turn_is_asking() {
 
     return 1
 }
+
+# Suppress every push-producing event when this Codex session is a Claude
+# Code sub-agent (codex-rescue). Without this, a rescue task fires a cx
+# "done" when Codex finishes AND a cc "done" when the parent Claude turn
+# ends — two terminal pushes, two shields, for one task. Claude Code's cc
+# lifecycle is the user-facing one, so the cx sub-run stays silent.
+# session-start is intentionally not guarded: its ID-gen + hygiene are
+# harmless and never push to the phone.
+case "${EVENT}" in
+    stop|permission-request|pre-tool-use|post-tool-use|user-prompt-submit)
+        if is_claude_subagent; then
+            log "${EVENT}: skipping — Codex running as a Claude Code sub-agent"
+            exit 0
+        fi
+        ;;
+esac
 
 case "${EVENT}" in
 
@@ -1057,6 +1087,27 @@ case "${EVENT}" in
         INPUT=''
         check_eq "jqget-noinput-default" "$(jq_get '.x' 'fb')" "fb"
         INPUT="${saved_input}"
+
+        # is_claude_subagent — Codex launched by Claude Code's codex-rescue
+        # inherits CLAUDECODE / CLAUDE_CODE_ENTRYPOINT through the app-server
+        # spawn; a standalone terminal Codex session has neither. The
+        # push-producing handlers skip their send when it's true so the cx
+        # "done" doesn't duplicate Claude Code's own cc "done".
+        sub_probe() {
+            if is_claude_subagent; then printf 'subagent'; else printf 'standalone'; fi
+        }
+        saved_cc="${CLAUDECODE:-}"
+        saved_entry="${CLAUDE_CODE_ENTRYPOINT:-}"
+        unset CLAUDECODE CLAUDE_CODE_ENTRYPOINT
+        check_eq "subagent-clean-env"   "$(sub_probe)" "standalone"
+        CLAUDECODE=1
+        check_eq "subagent-claudecode"  "$(sub_probe)" "subagent"
+        unset CLAUDECODE
+        CLAUDE_CODE_ENTRYPOINT=cli
+        check_eq "subagent-entrypoint"  "$(sub_probe)" "subagent"
+        unset CLAUDE_CODE_ENTRYPOINT
+        [ -n "${saved_cc}" ] && CLAUDECODE="${saved_cc}"
+        [ -n "${saved_entry}" ] && CLAUDE_CODE_ENTRYPOINT="${saved_entry}"
 
         # Log rotation — an oversized log keeps its newest half; a log
         # under the cap is untouched.
