@@ -115,16 +115,42 @@ fire post-tool-use "{\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${ROLLOUT}\",\"
 check "nosid and empty sid write nothing" "0" "$( [ -f "${HUD_LOG}" ] && wc -l < "${HUD_LOG}" | tr -d ' ' || echo 0)"
 teardown
 
-# --- ephemeral sessions never reach the HUD --------------------------------
+# --- ephemeral sessions never render a row ---------------------------------
 # Codex Desktop runs an ephemeral sub-LLM thread per turn (thread titles,
 # summarization). They fire the full hook lifecycle but never write a rollout
 # file, and they are not conversations the user has any interest in seeing.
+#
+# The ephemeral gate therefore sits on every handler that produces a VISIBLE
+# row — prompt / tool / needs-input / done — and deliberately NOT on
+# session-start. A lone `start` seeds the reducer at .idle, and .idle renders
+# in no column (SessionStore.snapshot skips it), so gating session-start too
+# would buy no invisibility while costing every real session whose rollout
+# file isn't on disk yet its agentPid/agentStart (liveness) and appPid/app
+# (click-to-jump) — the only record that carries them.
 setup
 fire session-start '{"session_id":"eph1","cwd":"/tmp/proj","ephemeral":true}'
+fire user-prompt-submit '{"session_id":"eph1","cwd":"/tmp/proj","prompt":"summarize this"}'
 fire post-tool-use '{"session_id":"eph1","cwd":"/tmp/proj","tool_name":"Read"}'
-check "ephemeral sessions are invisible to the HUD" "0" \
-  "$( [ -f "${HUD_LOG}" ] && jq -r 'select(.sid=="eph1")' "${HUD_LOG}" | jq -s 'length' || echo 0)"
+fire pre-tool-use '{"session_id":"eph1","cwd":"/tmp/proj","tool_name":"request_user_input","tool_input":{"questions":[{"question":"Which?"}]}}'
+fire stop '{"session_id":"eph1","cwd":"/tmp/proj","last_assistant_message":"{\"title\":\"x\"}"}'
+check "an ephemeral session records only start" "start," \
+  "$(jq -r 'select(.sid=="eph1") | .kind' "${HUD_LOG}" | tr '\n' ',')"
+check "no row-producing kind ever lands for an ephemeral session" "0" \
+  "$(jq -r 'select(.sid=="eph1" and .kind != "start")' "${HUD_LOG}" | jq -s 'length')"
 check "ephemeral sessions push nothing either" "0" "$(curl_count)"
+teardown
+
+# --- a session-start with no rollout file still carries liveness -----------
+# THE regression this pins: is_ephemeral_session means "rollout file missing",
+# and nothing guarantees Codex has written the rollout by the time SessionStart
+# fires. Gating the start record on it silently stripped agentPid/agentStart
+# (so a killed terminal could only reach ENDED via the ~30min staleness path)
+# and appPid/app (so click-to-jump had no target) from real sessions.
+setup
+fire session-start '{"session_id":"cold1","cwd":"/tmp/proj"}'
+check "a rollout-less session-start still records" "start," "$(kinds)"
+check "...and still carries the liveness pair" "yes" \
+  "$(jq -r 'select(.kind=="start") | if (.agentPid != null and .agentStart != null) then "yes" else "no" end' "${HUD_LOG}" | head -1)"
 teardown
 
 # --- agent tag --------------------------------------------------------------

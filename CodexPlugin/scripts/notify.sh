@@ -770,21 +770,25 @@ case "${EVENT}" in
     session-start)
         # HUD first: it must land even if ID generation below fails, and it
         # writes to a file, never to stdout (the systemMessage JSON below is
-        # a hook output contract). Gated on the ephemeral check like every
-        # other handler — Codex Desktop fires the full lifecycle on the
-        # internal sub-threads it spawns for thread titles and summaries, and
-        # those are not sessions the user wants in the panel.
+        # a hook output contract).
+        #
+        # Deliberately NOT gated on is_ephemeral_session, unlike every handler
+        # that produces a visible row. That predicate means "rollout file
+        # missing", and nothing guarantees Codex has written the rollout by
+        # the time SessionStart fires — only that it exists by the first
+        # UserPromptSubmit/Stop. Gating here would strip agentPid/agentStart
+        # (liveness — without it a killed terminal only reaches ENDED via the
+        # staleness timer) and appPid/app (click-to-jump) from real sessions,
+        # and buy nothing: this is the ONLY record that carries them, and a
+        # session holding just a `start` seeds the reducer at .idle, which
+        # renders in no column. So an ephemeral thread whose row-producing
+        # events are all gated stays invisible either way.
         sid="$(jq_get '.session_id' 'nosid')"
         cwd="$(jq_get '.cwd')"
-        transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         # No thread name exists yet at session start; the project name is the
         # honest label, and the first prompt/tool record supersedes it.
-        if is_ephemeral_session; then
-            log "session-start: skipping HUD record for ephemeral session"
-        else
-            hud_record "start" "${sid}" "${proj}" "${cwd}" "${proj}"
-        fi
+        hud_record "start" "${sid}" "${proj}" "${cwd}" "${proj}"
         # Codex passes source ∈ {startup, resume, clear}. Only do the
         # welcome banner on the very first run (no ID file yet);
         # subsequent startups are silent.
