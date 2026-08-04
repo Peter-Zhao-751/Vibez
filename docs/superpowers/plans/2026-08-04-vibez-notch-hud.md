@@ -975,8 +975,14 @@ private func store(_ c: FakeClock, grace: Int64 = 3_000) -> SessionStore {
     let clock = FakeClock(10_000); let s = store(clock)
     s.apply(makeEvent(.done, ts: 10_000))
     s.apply(makeEvent(.done, ts: 10_400))
-    clock.advance(ms: 3_000)                             // 3s past the FIRST done
-    #expect(s.stateForTesting(sid: "s1") == .working || s.stateForTesting(sid: "s1") == .idle)
+    // Exactly 3s past the FIRST done. This instant is the discriminator: a
+    // reducer that measured grace from the first done would have committed by
+    // now (13_000 - 10_000 == 3_000), while one measuring from the latest has
+    // only seen 2_600ms elapse. Assert the exact state — `!= .done` (or a
+    // disjunction spelling it) would pass under BOTH behaviours and pin nothing.
+    // The session never worked, so its state is still .idle.
+    clock.advance(ms: 3_000)
+    #expect(s.stateForTesting(sid: "s1") == .idle)
     clock.advance(ms: 400)                               // now 3s past the LAST done
     #expect(s.stateForTesting(sid: "s1") == .done)
 }
