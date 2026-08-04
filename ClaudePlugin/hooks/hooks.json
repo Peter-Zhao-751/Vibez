@@ -10,6 +10,16 @@
         ]
       }
     ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/scripts/notify.sh\" session-end"
+          }
+        ]
+      }
+    ],
     "Notification": [
       {
         "hooks": [

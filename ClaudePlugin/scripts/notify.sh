@@ -39,6 +39,112 @@ log() {
     printf '[%s] %s\n' "$(date -u +%FT%TZ)" "$*" >>"${LOG_FILE}" 2>/dev/null || true
 }
 
+# --- HUD sidecar log -------------------------------------------------------
+# The notch app tails this. Deliberately SEPARATE from post_vibez: the push
+# path suppresses events on purpose (block debounce, stop_pending_work gate,
+# Stop grace) to protect the phone from spam, and the HUD needs every
+# transition. hud_record is therefore called at the EVENT SITE, never from
+# inside post_vibez. Never call curl from here — SessionEnd hooks get killed
+# fast.
+HUD_DIR="${CONFIG_DIR}/hud"
+HUD_LOG="${HUD_DIR}/events.jsonl"
+HUD_LOG_MAX_BYTES="${VIBEZ_HUD_LOG_MAX_BYTES:-2097152}"
+# A junk override would otherwise make the -lt below error out and rotate on
+# every single write.
+case "${HUD_LOG_MAX_BYTES}" in
+    ''|*[!0-9]*) HUD_LOG_MAX_BYTES=2097152 ;;
+esac
+
+# BSD date has no %N, and jq is already a hard dependency of this script.
+hud_now_ms() { jq -n '(now * 1000) | floor'; }
+
+hud_rotate_if_needed() {
+    [ -f "${HUD_LOG}" ] || return 0
+    local size
+    size="$(wc -c < "${HUD_LOG}" 2>/dev/null | tr -d ' ')"
+    case "${size}" in ''|*[!0-9]*) return 0 ;; esac
+    [ "${size}" -lt "${HUD_LOG_MAX_BYTES}" ] && return 0
+    mv -f "${HUD_LOG}" "${HUD_LOG}.1" 2>/dev/null || true
+}
+
+# Walk up the process tree from this hook. Records TWO things:
+#   agentPid  the claude/codex/cursor process, for liveness
+#   appPid    the OUTERMOST .app ancestor, for click-to-jump
+# Outermost matters: taking the first .app lands on "Cursor Helper.app" for
+# integrated terminals; continuing to the root correctly yields "Cursor.app".
+# Echoes: "<agentPid>|<agentStart>|<appPid>|<appName>"
+hud_process_chain() {
+    local pid="${PPID}" agent_pid="" app_pid="" app_name="" comm ppid guard=0
+    while [ -n "${pid}" ] && [ "${pid}" -gt 1 ] 2>/dev/null && [ "${guard}" -lt 24 ]; do
+        guard=$((guard + 1))
+        comm="$(ps -o comm= -p "${pid}" 2>/dev/null)"
+        [ -z "${comm}" ] && break
+        case "${comm}" in
+            */claude|*/codex|*/cursor-agent|claude|codex|cursor-agent)
+                [ -z "${agent_pid}" ] && agent_pid="${pid}" ;;
+        esac
+        case "${comm}" in
+            *.app/Contents/MacOS/*)
+                app_pid="${pid}"
+                app_name="$(printf '%s' "${comm}" | sed -E 's|.*/([^/]+)\.app/Contents/MacOS/.*|\1|')" ;;
+        esac
+        ppid="$(ps -o ppid= -p "${pid}" 2>/dev/null | tr -d ' ')"
+        [ -z "${ppid}" ] && break
+        pid="${ppid}"
+    done
+    [ -z "${agent_pid}" ] && agent_pid="${PPID}"
+    local agent_start
+    agent_start="$(ps -o lstart= -p "${agent_pid}" 2>/dev/null | sed -e 's/^ *//' -e 's/ *$//')"
+    printf '%s|%s|%s|%s' "${agent_pid}" "${agent_start}" "${app_pid}" "${app_name}"
+}
+
+# hud_record <kind> <sid> <proj> <cwd> <title> [body] [tool]
+# A single O_APPEND printf: atomic against the parallel hooks Claude Code fires,
+# which is why this is an append-only log and not per-session state files.
+hud_record() {
+    local kind="$1" sid="$2" proj="$3" cwd="$4" title="$5" body="${6:-}" tool="${7:-}"
+    [ -z "${sid}" ] && return 0
+    [ "${sid}" = "nosid" ] && return 0
+    command -v jq >/dev/null 2>&1 || return 0
+
+    mkdir -p "${HUD_DIR}" 2>/dev/null || return 0
+    chmod 700 "${HUD_DIR}" 2>/dev/null || true
+    hud_rotate_if_needed
+
+    local ts extra="{}" line
+    ts="$(hud_now_ms)" || return 0
+    if [ "${kind}" = "start" ]; then
+        local chain agent_pid agent_start app_pid app_name
+        chain="$(hud_process_chain)"
+        agent_pid="${chain%%|*}"; chain="${chain#*|}"
+        agent_start="${chain%%|*}"; chain="${chain#*|}"
+        app_pid="${chain%%|*}"; app_name="${chain#*|}"
+        extra="$(jq -nc \
+            --argjson agentPid "${agent_pid:-0}" \
+            --arg agentStart "${agent_start}" \
+            --argjson appPid "${app_pid:-0}" \
+            --arg app "${app_name}" \
+            '{agentPid:$agentPid, agentStart:$agentStart}
+             + (if $appPid > 0 then {appPid:$appPid, app:$app} else {} end)')"
+    fi
+
+    line="$(jq -nc \
+        --argjson v 1 --argjson ts "${ts}" \
+        --arg sid "${sid}" --arg agent "cc" --arg kind "${kind}" \
+        --arg proj "${proj}" --arg cwd "${cwd}" \
+        --arg title "$(clamp_field "${title}" 100)" \
+        --arg body "$(clamp_field "${body}" 200)" \
+        --arg tool "${tool}" \
+        --argjson extra "${extra}" \
+        '{v:$v, ts:$ts, sid:$sid, agent:$agent, kind:$kind, proj:$proj, cwd:$cwd, title:$title}
+         + (if $body != "" then {body:$body} else {} end)
+         + (if $tool != "" then {tool:$tool} else {} end)
+         + $extra')" || return 0
+
+    printf '%s\n' "${line}" >> "${HUD_LOG}" 2>/dev/null || true
+    chmod 600 "${HUD_LOG}" 2>/dev/null || true
+}
+
 # Cap on the append-only log. Without one it grows forever (one line
 # per hook event). Checked once per session (session-start), not per
 # event; an oversized log is trimmed to its newest half.
@@ -877,6 +983,15 @@ last_turn_is_asking() {
 case "${EVENT}" in
 
     session-start)
+        # HUD first: it must land even if ID generation below fails, and it
+        # writes to a file, never to stdout (the systemMessage JSON below is
+        # a hook output contract).
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        # No conversation title exists yet at session start; the project name
+        # is the honest label, and the first prompt/tool record supersedes it.
+        hud_record "start" "${sid}" "${proj}" "${cwd}" "${proj}"
         if [ -z "${VIBEZ_ID}" ]; then
             ensure_vibez_id
             if [ -n "${VIBEZ_ID}" ]; then
@@ -947,17 +1062,22 @@ case "${EVENT}" in
         # question that flips done→needs-input is often past the
         # 160-char display cut.
         body="$(clip_body "${excerpt}")"
+        if last_turn_is_asking "${excerpt}"; then
+            stop_kind="needs-input"
+        else
+            stop_kind="done"
+        fi
+        # HUD before defer_stop_push: the notch panel must see the turn end
+        # now, not STOP_GRACE_SECONDS later, and it must still see it when the
+        # deferred push is cancelled by an auto-resume.
+        hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}"
         # Supersede any still-armed deferred stop for this session (a newer
         # stop replaces the older one), then DEFER this push so an imminent
         # background-task auto-resume can cancel it before it reaches the
         # phone — the completion-boundary flap fix. defer_stop_push sends
         # inline when the grace window is disabled (pre-fix behavior).
         clear_stop_pending "${sid}"
-        if last_turn_is_asking "${excerpt}"; then
-            defer_stop_push "${sid}" "${convo_title}" "${body}" "needs-input"
-        else
-            defer_stop_push "${sid}" "${convo_title}" "${body}" "done"
-        fi
+        defer_stop_push "${sid}" "${convo_title}" "${body}" "${stop_kind}"
         clear_pending "${sid}"
         ;;
 
@@ -987,6 +1107,7 @@ case "${EVENT}" in
         if [ "${#question}" -gt 160 ]; then
             question="${question:0:159}…"
         fi
+        hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${question}" "AskUserQuestion"
         post_vibez "${convo_title}" "${question}" "needs-input" "on" "${sid}" "cc"
         mark_pending "${sid}"
         ;;
@@ -1035,6 +1156,17 @@ case "${EVENT}" in
         # still cancel the false done even though it exits without sending.
         clear_stop_pending "${sid}"
 
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        # HUD ABOVE the autonomous-tool early-exit below. That exit is a push
+        # suppression (one shield:off per tool call would drown the phone);
+        # for the notch panel every tool call is exactly the "still working"
+        # heartbeat it needs. Title is deliberately empty — the reducer keeps
+        # the session's known title, and read_conversation_title (a recursive
+        # grep of the desktop app's session store) is far too expensive to run
+        # on every PostToolUse.
+        hud_record "tool" "${sid}" "${proj}" "${cwd}" "" "" "${tool_name}"
+
         case "${tool_name}" in
             "AskUserQuestion")
                 ;;
@@ -1044,9 +1176,7 @@ case "${EVENT}" in
                 ;;
         esac
 
-        cwd="$(jq_get '.cwd')"
         transcript="$(jq_get '.transcript_path')"
-        proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
         is_slash_command "${convo_title}" && exit 0
 
@@ -1103,6 +1233,7 @@ case "${EVENT}" in
             prompt="${prompt:0:79}…"
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
+        hud_record "prompt" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${prompt}"
         post_vibez "${convo_title}" "${prompt}" "replied" "off" "${sid}" "cc"
         clear_pending "${sid}"
         ;;
@@ -1152,6 +1283,10 @@ case "${EVENT}" in
         if [ "${#message}" -gt 160 ]; then
             message="${message:0:159}…"
         fi
+        # Deliberately BELOW the idle-reminder skip and the has_pending skip:
+        # both mean "this isn't a new transition" (a 60s nag; a near-duplicate
+        # of the ask PreToolUse already recorded), not "don't spam the phone".
+        hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${message}"
         post_vibez "${convo_title}" "${message}" "needs-input" "on" "${sid}" "cc"
         # Mark pending so the next PostToolUse can detect the user's
         # response to this permission prompt and push shield:off. The
@@ -1204,6 +1339,9 @@ case "${EVENT}" in
             body="${body:0:159}…"
         fi
 
+        # Before post_vibez, so the 5s same-session debounce (which exists to
+        # spare the phone a second banner) can't hide the ask from the HUD.
+        hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}" "${tool_name}"
         post_vibez "${convo_title}" "${body}" "needs-input" "on" "${sid}" "cc"
         mark_pending "${sid}"
         case "${tool_name}" in
@@ -1211,6 +1349,16 @@ case "${EVENT}" in
                 start_approval_watcher "${sid}" "${convo_title}" "${tool_name}" "${command}"
                 ;;
         esac
+        ;;
+
+    session-end)
+        sid="$(jq_get '.session_id' 'nosid')"
+        cwd="$(jq_get '.cwd')"
+        proj="$(basename "${cwd:-unknown}")"
+        # Record only — never push, never curl. Claude Code kills SessionEnd
+        # hooks quickly during exit (see CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS),
+        # and a session that just ended has nothing to tell the phone anyway.
+        hud_record "end" "${sid}" "${proj}" "${cwd}" "${proj}"
         ;;
 
     _watch-approval)
