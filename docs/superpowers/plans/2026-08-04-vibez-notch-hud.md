@@ -1631,7 +1631,7 @@ git commit -m "feat(hud): HUDEngine plus the headless vibez-hud-probe CLI"
 - Create: `ClaudePlugin/test/hud.e2e.sh`
 
 **Interfaces:**
-- Produces: `hud_record <kind> <sid> <proj> <cwd> <title> <body> <tool>`, `hud_process_chain`, `hud_now_ms`
+- Produces: `hud_record <kind> <sid> <proj> <cwd> <title> <body> <tool>`, `hud_process_chain`
 
 - [ ] **Step 1: Write the failing writer test**
 
@@ -1926,7 +1926,7 @@ git commit -m "feat(hud): Claude plugin writes HUD records at the event site"
 - Create: `CodexPlugin/test/hud.e2e.sh`
 
 **Interfaces:**
-- Consumes: the `hud_record` / `hud_process_chain` / `hud_now_ms` shape from Task 10
+- Consumes: `hud_record` / `hud_process_chain` as ACTUALLY COMMITTED in `ClaudePlugin/scripts/notify.sh` — copy from that file, not from the Task 10 snippet below, which predates the one-jq fix and still shows a separate `hud_now_ms`
 
 - [ ] **Step 1: Write the test**
 
