@@ -15,7 +15,11 @@ struct BubbleBoard: View {
             column("DONE", HUDTheme.done, snapshot.done)
             column("WORKING", HUDTheme.working, snapshot.working)
         }
-        .padding(.top, 34)          // clears the notch
+        // 14pt rides the headers up beside the notch rather than below it. The
+        // outer columns sit left/right of the hardware cutout, and the middle
+        // column's header starts ~30pt clear of the notch's left edge at the
+        // 1040pt island width — verified against this machine's 185pt notch.
+        .padding(.top, 14)
         .padding([.horizontal, .bottom], 14)
     }
 
