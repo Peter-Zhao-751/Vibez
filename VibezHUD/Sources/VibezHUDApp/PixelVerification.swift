@@ -23,6 +23,8 @@ enum PixelVerification {
         let bubble = CGSize(width: 1040, height: 450)
 
         orientationControl()
+        everyTileIsTheSameHeight()
+        needsYouIsRingedNotBarred()
         expandedIsPureBlack(notch: notch, bubble: bubble)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: true)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: false)
@@ -34,6 +36,79 @@ enum PixelVerification {
         if failures == 0 { line("PIXEL VERIFY: PASS"); exit(0) }
         line("PIXEL VERIFY: \(failures) FAILED")
         exit(1)
+    }
+
+    // MARK: - Board tiles
+
+    /// The columns looked ragged because tiles were intrinsic-height: measured
+    /// unconstrained, the three-line variant is 63.0pt and the two-line variant
+    /// 48.0pt. Now every tile is exactly `HUDTheme.tileHeight`, whatever it
+    /// contains, so rows line up ACROSS the three columns.
+    private static func everyTileIsTheSameHeight() {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let demo = DemoData.snapshot()
+        let variants = [("3-line needs-you", demo.needsYou[0]), ("2-line done", demo.done[0]),
+                        ("ended", demo.done[1]), ("3-line working", demo.working[0])]
+        var heights: [Double] = []
+        for (name, session) in variants {
+            let view = SessionTile(session: session, nowMs: now) { _ in }
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(width: 300)
+            guard let r = rasterize(view) else { return check("tile \(name) rendered", false) }
+            let pt = Double(r.height) / Double(scale)
+            heights.append(pt)
+            check(String(format: "%@ tile is exactly %.0fpt  [%.1f]", name,
+                         Double(HUDTheme.tileHeight), pt),
+                  abs(pt - Double(HUDTheme.tileHeight)) < 0.51)
+        }
+        check("...and every variant agrees, so the columns cannot go ragged  \(heights)",
+              Set(heights).count == 1)
+    }
+
+    /// The 2pt amber bar down the left edge is gone — it lined up with nothing,
+    /// least of all the header dot above it. A needs-you tile is RINGED instead,
+    /// Mail-sidebar style: same fill as every other tile, amber border.
+    private static func needsYouIsRingedNotBarred() {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let demo = DemoData.snapshot()
+        guard let ring = rasterize(tile(demo.needsYou[0], now)),
+              let plain = rasterize(tile(demo.working[0], now))
+        else { return check("needs-you and plain tiles rendered", false) }
+
+        // The border runs the whole way round, so the TOP edge — where the old
+        // bar never was — is where to look.
+        // `strokeBorder` draws inside the edge, so the amber occupies the first
+        // ~1pt of rows; take the best of them rather than betting on one.
+        let topAmber = (0..<Int(2 * scale)).map { amberRun(ring, row: $0) }.max() ?? 0
+        let plainTopAmber = (0..<Int(2 * scale)).map { amberRun(plain, row: $0) }.max() ?? 0
+        check("a needs-you tile is ringed in amber along its top edge  [\(topAmber)px]",
+              topAmber > Int(150 * scale))
+        check("...and an ordinary tile is not  [\(plainTopAmber)px]", plainTopAmber == 0)
+
+        // ...and the old bar is really gone: a 2pt-wide amber column running the
+        // full height at the leading edge would show up as amber deep inside the
+        // tile, well below the border's corner radius.
+        let midRow = ring.height / 2
+        let inset = Int(3 * scale)
+        let p = ring.px(inset, midRow)
+        check("no amber bar survives inside the leading edge  [\(rgb(p))]",
+              !(p.r > 150 && p.g > 90 && p.b < 90))
+    }
+
+    private static func tile(_ s: Session, _ now: Int64) -> some View {
+        SessionTile(session: s, nowMs: now) { _ in }
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(width: 300)
+    }
+
+    /// Pixels in one row that look like the needs-you amber.
+    private static func amberRun(_ r: Raster, row: Int) -> Int {
+        var n = 0
+        for x in 0..<r.width {
+            let p = r.px(x, row)
+            if p.r > 120 && p.g > 60 && p.g < 170 && p.b < 90 { n += 1 }
+        }
+        return n
     }
 
     // MARK: - 0. Which way up is the buffer?
@@ -162,44 +237,47 @@ enum PixelVerification {
               + "[\(r.width)x\(r.height) px, expected \(Int(expected.width * scale))x\(Int(expected.height * scale))]",
               r.width == Int(expected.width * scale) && r.height == Int(expected.height * scale))
 
-        // Dot + one digit per flank: 30pt a side, against the 40pt the very
-        // first attempt cost and the 16pt the numberless one did.
+        // The dot now sits ON TOP of the count instead of beside it, which makes
+        // the two flanks mirror images and takes a flank from 30pt to 20.
         check(String(format: "each flank costs %.0fpt, so the island is notch+%.0fpt",
                      IslandMetrics.flankWidth(count: 1), expected.width - notch.width),
-              IslandMetrics.flankWidth(count: 1) == 30)
+              IslandMetrics.flankWidth(count: 1) == IslandMetrics.minFlankWidth)
+        check("...and a two-digit count widens it rather than clipping  "
+              + "[\(IslandMetrics.flankWidth(count: 12))pt]",
+              IslandMetrics.flankWidth(count: 12) >= IslandMetrics.flankWidth(count: 1))
 
         guard let box = inkBounds(r) else { return check("the collapsed island has visible ink", false) }
         let inkCentre = Double(box.minY + box.maxY + 1) / 2 / Double(scale)
         let shapeCentre = Double(r.height) / 2 / Double(scale)
         let delta = inkCentre - shapeCentre
-        check(String(format: "dot centre %.2fpt vs shape centre %.2fpt — off by %+.2fpt (±1pt)",
+        check(String(format: "stack ink centre %.2fpt vs shape centre %.2fpt — off by %+.2fpt (±1pt)",
                      inkCentre, shapeCentre, delta), abs(delta) <= 1.0)
-        line(String(format: "     dot rows %d..%d of %d px; %d ink pixels",
+        line(String(format: "     ink rows %d..%d of %d px; %d ink pixels",
                     box.minY, box.maxY, r.height, box.count))
-        // Ink is a dot AND a digit now, so it is taller than a bare dot but
-        // nowhere near the flank's full height.
+        // Ink is a dot STACKED over a digit — dot, gap, cap height — and still
+        // comfortably inside the notch's own height.
         let inkHeight = Double(box.maxY - box.minY + 1) / Double(scale)
-        check(String(format: "the ink is a dot plus a digit  [%.1fpt tall]", inkHeight),
-              inkHeight >= Double(IslandMetrics.dotDiameter) && inkHeight <= 10)
+        check(String(format: "the ink is a dot stacked over a digit  [%.1fpt tall]", inkHeight),
+              inkHeight >= Double(IslandMetrics.dotDiameter + IslandMetrics.dotGap)
+                  && inkHeight <= Double(notch.height) - 8)
 
         // ...and each dot is the RIGHT dot. The left one says "blocked on you",
         // the right one says "finished" — different meanings, so different
-        // colours, asserted rather than assumed.
-        // Both flanks read dot-then-number, so the right flank's dot is at the
-        // START of that flank, not mirrored to its end.
-        let midRow = r.height / 2
-        let dotOffset = Int((IslandMetrics.flankPadding + IslandMetrics.dotDiameter / 2) * scale)
-        let rightFlankX = r.width - Int(IslandMetrics.flankWidth(count: 3) * scale)
-        let left = r.px(dotOffset, midRow)
-        let right = r.px(rightFlankX + dotOffset, midRow)
+        // colours, asserted rather than assumed. Stacked, the dot is the TOP of
+        // the ink and sits on its flank's own centre line.
+        let dotRow = box.minY + Int(IslandMetrics.dotDiameter / 2 * scale)
+        let leftFlankMid = Int(IslandMetrics.flankWidth(count: 2) / 2 * scale)
+        let rightFlankMid = r.width - 1 - Int(IslandMetrics.flankWidth(count: 3) / 2 * scale)
+        let left = r.px(leftFlankMid, dotRow)
+        let right = r.px(rightFlankMid, dotRow)
         check("left flank is the amber needs-you dot #FF9F0A  [\(rgb(left))]",
               left.r > 230 && left.g > 130 && left.g < 190 && left.b < 60)
         check("right flank is the green done dot #30D158  [\(rgb(right))]",
               right.r < 90 && right.g > 190 && right.b > 60 && right.b < 130)
 
         // The counts themselves: white ink somewhere to the right of each dot.
-        let leftDigit = brightestColumnRange(r, from: dotOffset + Int(4 * scale),
-                                             to: Int(IslandMetrics.flankWidth(count: 1) * scale))
+        let leftDigit = brightestColumnRange(r, from: 0,
+                                             to: Int(IslandMetrics.flankWidth(count: 2) * scale))
         check("the needs-you count is drawn in white  [brightest=\(leftDigit)]", leftDigit >= 230)
     }
 

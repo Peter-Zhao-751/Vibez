@@ -79,3 +79,10 @@ private let external = ScreenMetrics(
     let g = NotchGeometry(metrics: tiny)
     #expect(g.bubbleRect(rowCount: 10).width <= 900)
 }
+
+/// The bubble's height math and the tiles it is sizing for live in different
+/// files on purpose — `NotchGeometry` is AppKit-free so the geometry is testable
+/// with no display attached. That only works if the two agree.
+@Test func theRowHeightMatchesTheTilesItIsSizingFor() {
+    #expect(NotchGeometry.rowHeight == HUDTheme.tileHeight + HUDTheme.tileSpacing)
+}

@@ -34,6 +34,15 @@ enum HUDTheme {
     // seam, which is exactly what the first build got wrong.
     static let islandFill = Color.black
     static let tileFill = Color.white.opacity(0.075)
+    /// One height for every tile in every column.
+    ///
+    /// MEASURED, not guessed: unconstrained, the three-line variant (chip +
+    /// project, title, detail) renders 63.0pt and the two-line variant 48.0pt —
+    /// a 15pt gap, which is exactly the raggedness across columns the user
+    /// screenshotted. 63 is the taller of the two, so nothing is ever clipped
+    /// and short tiles carry theempty space. `--verify-pixels` re-measures both.
+    static let tileHeight: CGFloat = 63
+    static let tileSpacing: CGFloat = 7
     static let tileStroke = Color.white.opacity(0.085)
     static let expandedCornerRadius: CGFloat = 30
     /// Matches the notch's own bottom-corner radius, so the resting island's
