@@ -27,7 +27,7 @@ struct AgentChip: View {
     @ViewBuilder private var mark: some View {
         switch agent {
         case .claude:
-            ClawdChip(critterWidth: 11)
+            ClawdChip(critterWidth: 13)
         case .codex:
             brandImage(Self.codexArt, fallbackGlyph: "◆", fallbackColor: HUDTheme.chip(.codex))
         case .cursor:
@@ -40,7 +40,7 @@ struct AgentChip: View {
         if let image {
             Image(nsImage: image)
                 .resizable().scaledToFit()
-                .frame(width: 11, height: 11)
+                .frame(width: 12, height: 12)
         } else {
             // Resource missing (odd bundle layout): the old glyph, never a blank chip.
             Text(fallbackGlyph).font(.system(size: 8, weight: .bold)).foregroundStyle(fallbackColor)
