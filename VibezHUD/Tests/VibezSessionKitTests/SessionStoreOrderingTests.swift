@@ -38,6 +38,42 @@ private func store(_ c: FakeClock) -> SessionStore {
     #expect(s.stateForTesting(sid: "s1") == .needsYou)
 }
 
+@Test func rowsSharingAMillisecondKeepAStableOrderAcrossSnapshots() {
+    // The store walks a DICTIONARY, and Swift's sort is not stable: rows with
+    // equal timestamps would otherwise be free to swap places on every 5 Hz
+    // poll. sid is the tiebreaker, in all three columns.
+    let clock = FakeClock(); let s = store(clock)
+    for sid in ["mike", "alpha", "zulu", "delta"] {
+        s.apply(makeEvent(.needsInput, ts: 2_000, sid: "n-\(sid)"))
+        s.apply(makeEvent(.tool, ts: 3_000, sid: "w-\(sid)"))
+        s.apply(makeEvent(.done, ts: 1_000, sid: "d-\(sid)"))
+    }
+    clock.advance(ms: 10_000)               // commit the provisional dones
+
+    let first = s.snapshot()
+    #expect(first.needsYou.map(\.sid) == ["n-alpha", "n-delta", "n-mike", "n-zulu"])
+    #expect(first.working.map(\.sid) == ["w-alpha", "w-delta", "w-mike", "w-zulu"])
+    #expect(first.done.map(\.sid) == ["d-alpha", "d-delta", "d-mike", "d-zulu"])
+
+    for _ in 0..<25 {
+        let again = s.snapshot()
+        #expect(again == first)
+    }
+}
+
+@Test func theTiebreakerNeverOutranksTheTimestamp() {
+    let clock = FakeClock(); let s = store(clock)
+    // "zulu" waits longest / is most recent, so it leads despite sorting last.
+    s.apply(makeEvent(.needsInput, ts: 1_000, sid: "zulu"))
+    s.apply(makeEvent(.needsInput, ts: 2_000, sid: "alpha"))
+    #expect(s.snapshot().needsYou.map(\.sid) == ["zulu", "alpha"])
+
+    let clock2 = FakeClock(); let s2 = store(clock2)
+    s2.apply(makeEvent(.tool, ts: 2_000, sid: "zulu"))
+    s2.apply(makeEvent(.tool, ts: 1_000, sid: "alpha"))
+    #expect(s2.snapshot().working.map(\.sid) == ["zulu", "alpha"])
+}
+
 @Test func aStaleRecordStillHealsMissingIdentity() {
     // Simulates the `start` line having been rotated away: the first record we
     // ever see is a bare heartbeat, and an older record backfills the name.

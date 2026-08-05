@@ -51,7 +51,14 @@ final class HUDViewModel {
         guard !isDemo, let engine else { return }
         // Drain the log ~5x/sec; the hover clock still ticks at 10Hz.
         pollCounter += 1
-        if pollCounter % 2 == 0 { snapshot = engine.poll() }
+        if pollCounter % 2 == 0 {
+            let next = engine.poll()
+            // @Observable invalidates on ASSIGNMENT, not on change, so an
+            // unconditional store here re-renders the whole panel 5x/sec for as
+            // long as the app runs — even with nothing happening. HUDSnapshot is
+            // Equatable precisely so this comparison is cheap and total.
+            if next != snapshot { snapshot = next }
+        }
     }
 
     var needsYouCount: Int { snapshot.needsYou.count }

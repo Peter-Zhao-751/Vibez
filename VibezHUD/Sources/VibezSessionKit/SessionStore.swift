@@ -89,12 +89,25 @@ public final class SessionStore {
             }
         }
 
+        // Every sort is a TOTAL order: `entries` is a dictionary, so the input
+        // arrives in an arbitrary order, and Swift's sort is not stable. Without
+        // the `sid` tiebreaker two rows sharing a millisecond could swap places
+        // on every poll — a panel that visibly shuffles while nothing happened.
+        //
         // Longest wait first — the most urgent thing sits at the top.
-        needsYou.sort { $0.stateSinceMs < $1.stateSinceMs }
+        needsYou.sort(by: Self.byWaitThenSid)
         // Most recent activity first for the other two.
-        working.sort { $0.lastActivityMs > $1.lastActivityMs }
-        done.sort { $0.lastActivityMs > $1.lastActivityMs }
+        working.sort(by: Self.byRecencyThenSid)
+        done.sort(by: Self.byRecencyThenSid)
         return HUDSnapshot(needsYou: needsYou, done: done, working: working)
+    }
+
+    private static func byWaitThenSid(_ a: Session, _ b: Session) -> Bool {
+        a.stateSinceMs == b.stateSinceMs ? a.sid < b.sid : a.stateSinceMs < b.stateSinceMs
+    }
+
+    private static func byRecencyThenSid(_ a: Session, _ b: Session) -> Bool {
+        a.lastActivityMs == b.lastActivityMs ? a.sid < b.sid : a.lastActivityMs > b.lastActivityMs
     }
 
     /// Test seam — the raw resolved state for one session, ignoring column grouping.
