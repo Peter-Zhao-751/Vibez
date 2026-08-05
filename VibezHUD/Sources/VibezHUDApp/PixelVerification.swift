@@ -91,7 +91,8 @@ enum PixelVerification {
         // inPanel: true mirrors production — SessionColumn passes it when grouped.
         guard let panelled = rasterize(SectionPanel { stack(demo.needsYou, inPanel: true) }
                                         .background(HUDTheme.islandFill)),
-              // WORKING, not DONE: done/ended tiles render at 0.48 opacity, so
+              // WORKING, not DONE: an arbitrary unpanelled column (the dim is
+              // gone entirely now — done rows render exactly like working), so
               // comparing a full-strength needs-you card against a dimmed one
               // would measure the dimming, not the panel.
               let plain = rasterize(stack(demo.working).background(HUDTheme.islandFill))

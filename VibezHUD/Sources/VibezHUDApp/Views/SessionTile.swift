@@ -31,7 +31,9 @@ struct SessionTile: View {
     /// usual card on black.
     var inPanel = false
 
-    private var isDim: Bool { session.state == .done || session.state == .ended }
+    // No dim anywhere: done rows look exactly like working rows (user call).
+    // A finished session is still marked by its column and, for ended, the
+    // italic "ended" detail line — de-emphasis by position, not by fading.
 
     var body: some View {
         VStack(alignment: .leading, spacing: HUDTheme.tileLineSpacing) {
@@ -58,10 +60,6 @@ struct SessionTile: View {
             }
             Spacer(minLength: 0)
         }
-        // The dim is CONTENT-only: dimming the whole tile made done cards
-        // darker than working cards, and once the user chose that darker
-        // shade for both, the card color had to stop depending on state.
-        .opacity(isDim ? 0.48 : 1)
         .padding(.horizontal, 10)
         .padding(.vertical, HUDTheme.tileVerticalPadding)
         // Fixed height, content top-aligned: a two-line tile carries the empty
