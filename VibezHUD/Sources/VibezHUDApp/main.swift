@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         let args = CommandLine.arguments
+        if args.contains("--verify-jump") { JumpVerification.run() }
         let demo = args.contains("--demo")
         let verifying = args.contains("--verify-hover")
         let model = HUDViewModel(demo: demo || verifying)
