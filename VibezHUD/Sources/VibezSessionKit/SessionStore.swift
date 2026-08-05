@@ -69,13 +69,17 @@ public final class SessionStore {
         case .prompt, .tool: setState(&entry, .working, at: e.ts)
         case .needsInput:    setState(&entry, .needsYou, at: e.ts)
         case .end:           setState(&entry, .ended, at: e.ts)
-        case .done:          entry.pendingDoneAtMs = e.ts
+        case .done:
+            // Already-committed done: a repeated Stop refreshes recency
+            // only. Re-arming the grace would revert the display for 3s.
+            if entry.session.state != .done { entry.pendingDoneAtMs = e.ts }
         }
         entries[e.sid] = entry
     }
 
     public func snapshot() -> HUDSnapshot {
         let now = clock.nowMs
+        commitPendingDones(now: now)
         var needsYou: [Session] = [], done: [Session] = [], working: [Session] = []
 
         var evicted: [String] = []
@@ -120,20 +124,31 @@ public final class SessionStore {
 
     /// Test seam — the raw resolved state for one session, ignoring column grouping.
     public func stateForTesting(sid: String) -> SessionState? {
+        commitPendingDones(now: clock.nowMs)
         guard let entry = entries[sid] else { return nil }
         return resolve(entry, now: clock.nowMs, ignoringRetention: true)?.state
+    }
+
+    /// Commit provisional dones whose grace window has elapsed, INTO the
+    /// stored entry. Persisting the commit is what makes done sticky: a
+    /// later duplicate `done` finds state == .done and leaves it alone,
+    /// instead of re-opening the grace window and flashing the row back
+    /// to its pre-done state.
+    private func commitPendingDones(now: Int64) {
+        for (sid, var entry) in entries {
+            guard let pending = entry.pendingDoneAtMs,
+                  now - pending >= config.stopGraceMs else { continue }
+            entry.session.state = .done
+            entry.session.stateSinceMs = pending
+            entry.pendingDoneAtMs = nil
+            entries[sid] = entry
+        }
     }
 
     // MARK: - resolution
 
     private func resolve(_ entry: Entry, now: Int64, ignoringRetention: Bool = false) -> Session? {
         var s = entry.session
-
-        // Commit a provisional done once the grace window has passed in silence.
-        if let pending = entry.pendingDoneAtMs, now - pending >= config.stopGraceMs {
-            s.state = .done
-            s.stateSinceMs = pending
-        }
 
         if s.state != .ended {
             if let pid = s.agentPid {

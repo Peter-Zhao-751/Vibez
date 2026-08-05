@@ -61,3 +61,30 @@ private func store(_ c: FakeClock, grace: Int64 = 3_000) -> SessionStore {
     s.apply(makeEvent(.done, ts: 10_000))
     #expect(s.stateForTesting(sid: "s1") == .done)
 }
+
+@Test func repeatedDoneAfterCommitDoesNotReopenTheGraceWindow() {
+    // The flash bug: a second Stop on an already-done session used to
+    // overwrite pendingDoneAtMs, and the display reverted to the stored
+    // pre-done state for 3s.
+    let clock = FakeClock(10_000); let s = store(clock)
+    s.apply(makeEvent(.prompt, ts: 9_000))
+    s.apply(makeEvent(.done, ts: 10_000))
+    clock.advance(ms: 3_000)
+    #expect(s.stateForTesting(sid: "s1") == .done)   // committed
+    s.apply(makeEvent(.done, ts: 13_100))
+    #expect(s.stateForTesting(sid: "s1") == .done)   // STAYS done — no flash
+    clock.advance(ms: 10_000)
+    #expect(s.stateForTesting(sid: "s1") == .done)
+}
+
+@Test func activityAfterACommittedDoneStillResumesWorking() {
+    let clock = FakeClock(10_000); let s = store(clock)
+    s.apply(makeEvent(.prompt, ts: 9_000))
+    s.apply(makeEvent(.done, ts: 10_000))
+    clock.advance(ms: 3_000)
+    #expect(s.stateForTesting(sid: "s1") == .done)
+    s.apply(makeEvent(.prompt, ts: 14_000))
+    #expect(s.stateForTesting(sid: "s1") == .working)
+    // stateSince reflects the resume, not the pre-done working stretch.
+    #expect(s.snapshot().working.first?.stateSinceMs == 14_000)
+}
