@@ -40,6 +40,17 @@ enum HUDTheme {
     /// silhouette is the notch's silhouette.
     static let collapsedCornerRadius: CGFloat = 13
 
-    static let expand = Animation.spring(response: 0.42, dampingFraction: 0.78)
-    static let contentFadeDelay: Double = 0.16
+    /// The whole morph, start to settled. MEASURED, not guessed: the previous
+    /// `spring(response: 0.42, dampingFraction: 0.78)` sailed 12.5pt past its
+    /// width target at t=505ms and then drifted back for another 170ms — 672ms
+    /// of motion in two visibly distinct movements, which is what "it pops up
+    /// twice" was describing. `bounce: 0` cannot overshoot at all.
+    static let morphDuration: Double = 0.24
+    static let expand = Animation.spring(duration: morphDuration, bounce: 0)
+    static let expandDescription = "spring(duration: 0.24, bounce: 0)"
+    /// The board arrives INSIDE the morph, not after it: at 0.09 + 0.14 it is
+    /// fully in by 0.23s, before the shape settles at 0.28s, so the eye sees one
+    /// event rather than a slab followed by its contents.
+    static let contentFadeDelay: Double = 0.09
+    static let contentFadeDuration: Double = 0.14
 }

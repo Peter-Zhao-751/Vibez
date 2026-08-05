@@ -11,7 +11,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if args.contains("--verify-pixels") { PixelVerification.run() }
         let demo = args.contains("--demo")
         let verifying = args.contains("--verify-hover")
-        let model = HUDViewModel(demo: demo || verifying)
+        let morphing = args.contains("--verify-morph")
+        let model = HUDViewModel(demo: demo || verifying || morphing)
         self.model = model
         let controller = NotchWindowController(model: model,
                                                logsHover: verifying || args.contains("--debug-hover"))
@@ -22,6 +23,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if verifying {
             Task { @MainActor in await HoverVerification.run(controller: controller, model: model) }
+        }
+        if morphing {
+            Task { @MainActor in await MorphVerification.run(controller: controller, model: model) }
         }
     }
 }

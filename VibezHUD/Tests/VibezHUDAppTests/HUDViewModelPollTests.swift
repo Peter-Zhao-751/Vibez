@@ -9,6 +9,7 @@
 import Foundation
 import Testing
 @testable import VibezHUDApp
+import VibezSessionKit
 
 private final class Answers: @unchecked Sendable {
     var next: HoverInput = .exited
@@ -57,4 +58,43 @@ private final class Answers: @unchecked Sendable {
     answers.next = .exited
     try await Task.sleep(for: .milliseconds(300))
     #expect(model.isExpanded == false)
+}
+
+// MARK: - The frozen expanded size
+//
+// The island's target height comes from this row count, and the log is drained
+// five times a second. A session landing mid-morph used to be able to move the
+// target the animation was already flying toward — a second movement inside the
+// first, which is one of the three things "it pops up twice" could have been.
+// (The measured cause was spring overshoot; this closes the other door, and
+// stops the island resizing under a pointer that is reading it.)
+
+private func snap(needsYou: Int, done: Int, working: Int) -> HUDSnapshot {
+    func rows(_ n: Int, _ state: SessionState) -> [Session] {
+        (0..<n).map {
+            Session(sid: "s\($0)\(state)", agent: .claude, proj: "p", cwd: "/tmp", title: "t",
+                    detail: nil, tool: nil, state: state, startedAtMs: 0, lastActivityMs: 0,
+                    stateSinceMs: 0, agentPid: nil, agentStart: nil, appPid: nil, app: nil)
+        }
+    }
+    return HUDSnapshot(needsYou: rows(needsYou, .needsYou),
+                       done: rows(done, .done),
+                       working: rows(working, .working))
+}
+
+@Test func collapsedTheRowCountFollowsTheLongestColumn() {
+    #expect(HUDViewModel.rowCount(current: 1, snapshot: snap(needsYou: 2, done: 5, working: 3),
+                                 isExpanded: false) == 5)
+    // Never zero: an empty island still has a minimum height.
+    #expect(HUDViewModel.rowCount(current: 4, snapshot: snap(needsYou: 0, done: 0, working: 0),
+                                 isExpanded: false) == 1)
+}
+
+@Test func expandedTheRowCountIsFrozenNoMatterWhatArrives() {
+    let busy = snap(needsYou: 9, done: 9, working: 9)
+    #expect(HUDViewModel.rowCount(current: 2, snapshot: busy, isExpanded: true) == 2)
+    // ...including shrinking, which would yank the floor out from under a
+    // pointer already inside the board.
+    #expect(HUDViewModel.rowCount(current: 6, snapshot: snap(needsYou: 1, done: 0, working: 0),
+                                  isExpanded: true) == 6)
 }

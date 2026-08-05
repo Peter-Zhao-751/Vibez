@@ -43,6 +43,9 @@ final class HUDViewModel {
         clockMs = startMs
         engine = demo ? nil : HUDEngine()
         if demo { snapshot = DemoData.snapshot() } else { snapshot = engine?.primeAndDrain() ?? HUDSnapshot() }
+        // Seeded before the window controller's first `layout()`, so the panel is
+        // never sized for a one-row island on frame 1.
+        refreezeRowsWhileCollapsed()
     }
 
     func start() {
@@ -81,6 +84,9 @@ final class HUDViewModel {
             isExpanded = hover.isExpanded
             onExpansionChanged?(isExpanded)
         }
+        // AFTER the flip, so the tick that opens the island keeps the size it was
+        // already showing rather than adopting a target computed a frame later.
+        refreezeRowsWhileCollapsed()
         // At most one assignment per second: the tiles' age labels are
         // wall-clock derived, and the snapshot guard below means nothing else
         // would invalidate them while the log is quiet.
@@ -97,6 +103,32 @@ final class HUDViewModel {
             // Equatable precisely so this comparison is cheap and total.
             if next != snapshot { snapshot = next }
         }
+    }
+
+    /// Rows the EXPANDED island is sized from — the longest column, since the
+    /// three columns sit side by side.
+    ///
+    /// FROZEN while open, and recomputed only while collapsed. Two reasons, one
+    /// of which is a bug that would have been very hard to catch by eye: this
+    /// number decides the island's target height, the log is drained five times
+    /// a second, and a new session landing mid-morph would move the target the
+    /// animation is flying toward — a genuine second movement in the middle of
+    /// the first. Freezing it also stops the island resizing under a pointer
+    /// that is already reading it; the columns scroll, so nothing is lost.
+    private(set) var bubbleRowCount: Int = 1
+
+    private func refreezeRowsWhileCollapsed() {
+        let next = HUDViewModel.rowCount(current: bubbleRowCount,
+                                         snapshot: snapshot, isExpanded: isExpanded)
+        if next != bubbleRowCount { bubbleRowCount = next }
+    }
+
+    /// Pure, so the freeze is a testable rule rather than an ordering accident.
+    /// `nonisolated` because it touches nothing but its arguments.
+    nonisolated static func rowCount(current: Int, snapshot: HUDSnapshot, isExpanded: Bool) -> Int {
+        guard !isExpanded else { return current }
+        return max(1, max(snapshot.needsYou.count,
+                          max(snapshot.done.count, snapshot.working.count)))
     }
 
     var needsYouCount: Int { snapshot.needsYou.count }

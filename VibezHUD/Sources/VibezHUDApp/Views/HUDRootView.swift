@@ -37,9 +37,7 @@ struct HUDRootView: View {
     }
 
     private var bubbleSize: CGSize {
-        let rows = max(model.snapshot.needsYou.count,
-                       max(model.snapshot.done.count, model.snapshot.working.count))
-        let r = geometry.bubbleRect(rowCount: rows)
+        let r = geometry.bubbleRect(rowCount: model.bubbleRowCount)
         return CGSize(width: r.width, height: r.height)
     }
 }

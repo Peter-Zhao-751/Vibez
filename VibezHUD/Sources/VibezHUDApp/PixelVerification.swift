@@ -24,6 +24,8 @@ enum PixelVerification {
 
         orientationControl()
         expandedIsPureBlack(notch: notch, bubble: bubble)
+        noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: true)
+        noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: false)
         collapsedInkIsCentred(notch: notch, bubble: bubble)
         collapsedQuietIsExactlyTheNotch(notch: notch, bubble: bubble)
 
@@ -102,6 +104,50 @@ enum PixelVerification {
             check("corner \(name) inside the shape is opaque #000000  [\(rgb(p)) a=\(p.a)]",
                   p.a == 255 && p.r == 0 && p.g == 0 && p.b == 0)
         }
+    }
+
+    // MARK: - 1b. Nothing bleeds outside the edge
+
+    /// The "glow" complaint. A drop shadow on a black slab is a soft dark bloom
+    /// spreading out of a hard-edged object, and against a desktop it reads as a
+    /// halo rather than as depth — so there is no shadow any more, in either
+    /// state, and this is how that stays true.
+    ///
+    /// Rendered on a transparent canvas a shadow would be almost invisible to a
+    /// probe (dark pixels with low alpha, easy to mistake for antialiasing), so
+    /// the island is composited over mid-grey exactly as it is composited over a
+    /// desktop. Any bleed then shows up as grey that is no longer grey.
+    private static func noHaloAroundTheIsland(notch: CGSize, bubble: CGSize, expanded: Bool) {
+        let pad: CGFloat = 60          // wider than the deleted shadow's 30pt radius + 18pt offset
+        let view = island(needsYou: 2, working: 3, expanded: expanded, notch: notch, bubble: bubble)
+            .padding(pad)
+            .background(Color(white: 0.5))
+        guard let r = rasterize(view) else {
+            return check("halo probe rendered (expanded=\(expanded))", false)
+        }
+        let state = expanded ? "expanded" : "collapsed"
+        // Self-calibrating: whatever the far corner is, is the background.
+        let bg = r.px(2, 2)
+        let padPx = Int(pad * scale)
+
+        // A ring from 2pt to 40pt outside the island's box — where a shadow of
+        // radius 30 offset 18 down would land, in every direction.
+        var worst = (x: 0, y: 0, d: 0)
+        var samples = 0
+        for y in 0..<r.height {
+            for x in 0..<r.width {
+                let outside = x < padPx - Int(2 * scale) || x >= r.width - padPx + Int(2 * scale)
+                    || y < padPx - Int(2 * scale) || y >= r.height - padPx + Int(2 * scale)
+                guard outside else { continue }
+                let p = r.px(x, y)
+                let d = max(abs(p.r - bg.r), max(abs(p.g - bg.g), abs(p.b - bg.b)))
+                samples += 1
+                if d > worst.d { worst = (x, y, d) }
+            }
+        }
+        check("\(state): background sampled as \(rgb(bg)) over \(samples) ring pixels", samples > 1000)
+        check("\(state): nothing bleeds outside the island's edge  "
+              + "[worst deviation \(worst.d)/255 at (\(worst.x),\(worst.y))]", worst.d == 0)
     }
 
     // MARK: - 2. The collapsed counts sit on the notch's centre line

@@ -48,11 +48,12 @@ enum IslandMetrics {
 /// Hovering does not swap one view for another; it grows this one out of the
 /// notch's own footprint, which is the whole "it pops out of the notch" feel.
 ///
-/// The fill is `Color.black` and nothing else. No material, no glass, no
-/// specular gradient, no rim: any of those read as grey against the real notch
-/// and give the illusion away. The only thing outside the fill is the drop
-/// shadow, and that is expanded-only — a shadow around the resting island would
-/// halo the wallpaper around a shape that is supposed to be invisible.
+/// The fill is `Color.black` and NOTHING else — no material, no glass, no
+/// specular gradient, no rim, and no drop shadow. The shadow was the "glow" the
+/// user saw: a soft dark bloom spreading 30pt out of a black slab reads as a
+/// halo, not as depth. The hardware island has a hard edge, so this one does
+/// too. `--verify-pixels` composites the island over mid-grey and asserts the
+/// pixels just outside its edge are the background EXACTLY.
 struct NotchIsland<Board: View>: View {
     let needsYou: Int
     let working: Int
@@ -88,9 +89,12 @@ struct NotchIsland<Board: View>: View {
         // The frame is the morph. Everything overflowing it — the board while the
         // shape is still notch-sized — is clipped by the shape below.
         .frame(width: size.width, height: size.height, alignment: .top)
+        // Test seam, nil in production: `--verify-morph` reads the INTERPOLATED
+        // size here, once per rendered frame, which is the only way to say
+        // anything factual about how the morph actually moves.
+        .onGeometryChange(for: CGSize.self, of: { $0.size }, action: { IslandSizeProbe.sink?($0) })
         .background(HUDTheme.islandFill)
         .clipShape(shape)
-        .shadow(color: .black.opacity(isExpanded ? 0.55 : 0), radius: 30, y: 18)
         .offset(x: isExpanded ? 0 : IslandMetrics.centerOffset(needsYou: needsYou, working: working))
         .animation(HUDTheme.expand, value: isExpanded)
     }
@@ -99,8 +103,9 @@ struct NotchIsland<Board: View>: View {
     /// way, and leaves quickly so it never lingers outside a shrinking shape.
     private var contentFade: AnyTransition {
         .asymmetric(
-            insertion: .opacity.animation(.easeOut(duration: 0.16).delay(HUDTheme.contentFadeDelay)),
-            removal: .opacity.animation(.easeOut(duration: 0.10)))
+            insertion: .opacity.animation(.easeOut(duration: HUDTheme.contentFadeDuration)
+                .delay(HUDTheme.contentFadeDelay)),
+            removal: .opacity.animation(.easeOut(duration: 0.09)))
     }
 
     // MARK: - Collapsed content
@@ -149,4 +154,12 @@ struct NotchIsland<Board: View>: View {
     private func bar(_ height: CGFloat) -> some View {
         Capsule().fill(HUDTheme.working).frame(width: 2, height: height)
     }
+}
+
+/// Where `--verify-morph` taps the island's interpolated frame. Nil in
+/// production, and the island's only cost for it is one optional call per
+/// layout pass — the same shape of seam as `NotchWindowController.pointerSource`.
+@MainActor
+enum IslandSizeProbe {
+    static var sink: ((CGSize) -> Void)?
 }
