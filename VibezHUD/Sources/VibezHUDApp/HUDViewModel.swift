@@ -8,6 +8,11 @@ final class HUDViewModel {
     private(set) var snapshot: HUDSnapshot = HUDSnapshot()
     private(set) var isExpanded = false
 
+    /// Fired only when `isExpanded` actually flips. The window controller uses it
+    /// to re-derive the panel's mouse opacity, which MUST track the collapsed /
+    /// expanded state — see `NotchHoverRouter`.
+    @ObservationIgnored var onExpansionChanged: ((Bool) -> Void)?
+
     private let engine: HUDEngine?
     private var hover: HoverPolicy
     private var timer: Timer?
@@ -39,7 +44,10 @@ final class HUDViewModel {
 
     private var pollCounter = 0
     private func tick() {
-        if hover.tick(nowMs: nowMs) { isExpanded = hover.isExpanded }
+        if hover.tick(nowMs: nowMs) {
+            isExpanded = hover.isExpanded
+            onExpansionChanged?(isExpanded)
+        }
         guard !isDemo, let engine else { return }
         // Drain the log ~5x/sec; the hover clock still ticks at 10Hz.
         pollCounter += 1

@@ -6,11 +6,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var model: HUDViewModel?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        let demo = CommandLine.arguments.contains("--demo")
-        let model = HUDViewModel(demo: demo)
+        let args = CommandLine.arguments
+        let demo = args.contains("--demo")
+        let verifying = args.contains("--verify-hover")
+        let model = HUDViewModel(demo: demo || verifying)
         self.model = model
-        controller = NotchWindowController(model: model)
+        let controller = NotchWindowController(model: model,
+                                               logsHover: verifying || args.contains("--debug-hover"))
+        self.controller = controller
         model.start()
+
+        if verifying {
+            Task { @MainActor in await HoverVerification.run(controller: controller, model: model) }
+        }
     }
 }
 

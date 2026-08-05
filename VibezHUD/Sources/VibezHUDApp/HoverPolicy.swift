@@ -1,6 +1,6 @@
 import Foundation
 
-public enum HoverInput: Sendable { case entered, exited }
+public enum HoverInput: Sendable, Equatable { case entered, exited }
 
 /// Hysteresis for the notch. Pure and clock-driven, because "the panel vanishes
 /// when the pointer crosses a seam" is the single most common way a hover UI
