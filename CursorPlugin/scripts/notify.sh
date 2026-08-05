@@ -279,6 +279,12 @@ post_vibez() {
     body="$(clamp_field "${body}" 200)"
     session="${session:0:128}"
 
+    # Short hostname so the HUD can label cross-device rows. Sanitized to
+    # the server's MACHINE_PATTERN charset; the server drops anything
+    # invalid rather than rejecting the push.
+    local machine
+    machine="$(hostname -s 2>/dev/null | LC_ALL=C tr -cd 'A-Za-z0-9.-' | cut -c1-64)"
+
     if [ -z "${VIBEZ_ID}" ]; then
         log "skip: no Vibez ID configured (event=${EVENT})"
         return 1
@@ -308,11 +314,13 @@ post_vibez() {
         --arg shield "${shield}" \
         --arg session "${session}" \
         --arg agent "${agent}" \
+        --arg machine "${machine}" \
         '{vibezId:$vibezId,title:$title,body:$body}
          + (if $event   != "" then {event:$event}     else {} end)
          + (if $shield  != "" then {shield:$shield}   else {} end)
          + (if $session != "" then {session:$session} else {} end)
-         + (if $agent   != "" then {agent:$agent}     else {} end)')
+         + (if $agent   != "" then {agent:$agent}     else {} end)
+         + (if $machine != "" then {machine:$machine} else {} end)')
 
     if curl -fsS --max-time 5 \
         -H "content-type: application/json" \

@@ -272,5 +272,16 @@ else
 fi
 kill "${TTL_PID}" 2>/dev/null; wait "${TTL_PID}" 2>/dev/null
 
+# --- machine field rides every push ----------------------------------------
+reset_capture
+fire notification "{${BASE},\"hook_event_name\":\"Notification\",\"message\":\"Claude needs permission to use Bash\"}" >/dev/null
+expected_machine="$(hostname -s 2>/dev/null | LC_ALL=C tr -cd 'A-Za-z0-9.-' | cut -c1-64)"
+got_machine="$(last_request | jq -r '.machine // empty')"
+if [ -n "${expected_machine}" ] && [ "${got_machine}" = "${expected_machine}" ]; then
+    ok "machine field rides the push"
+else
+    bad "machine field rides the push" "expected '${expected_machine}' got '${got_machine}'"
+fi
+
 printf '%d passed, %d failed\n' "${pass}" "${fail}"
 [ "${fail}" = "0" ]
