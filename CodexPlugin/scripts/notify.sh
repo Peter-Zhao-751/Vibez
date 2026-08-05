@@ -880,7 +880,6 @@ case "${EVENT}" in
         title_raw="$(read_thread_name_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
-        is_slash_command "${title_raw}" && exit 0
         # Codex puts the final assistant text directly in the Stop payload —
         # no transcript polling needed for the body (unlike the Claude Code
         # plugin), but we still read the transcript for the title.
@@ -894,10 +893,17 @@ case "${EVENT}" in
         else
             stop_kind="done"
         fi
-        # HUD first, and UNCONDITIONALLY — above the excerpt skip below. The
-        # turn ended, so the panel must stop showing WORKING whether or not
-        # the payload carried any text.
+        # HUD first, and UNCONDITIONALLY — above the slash-command gate and the
+        # excerpt skip below. The turn ended, so the panel must stop showing
+        # WORKING whether or not the payload carried any text.
         hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${title}" "${body}"
+        # The PUSH skips slash commands so a /vibez:setup invocation doesn't
+        # spam the phone. The HUD does NOT: a running /codex:rescue session is
+        # exactly what the panel exists to show, and gating the record here was
+        # what pinned such sessions at WORKING forever (tool records kept
+        # arriving, done/needs-input never did). The phone suppresses, the HUD
+        # records everything.
+        is_slash_command "${title_raw}" && exit 0
         # The PUSH keeps its own skip: with no text, a generic "Codex finished
         # a turn." is just noise on the phone. Deliberately a bare exit — it
         # must not clear this session's pending markers.
@@ -929,7 +935,6 @@ case "${EVENT}" in
         title_raw="$(read_thread_name_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="$(first_user_prompt_from_transcript "${transcript}")"
         [ -z "${title_raw}" ] && title_raw="${proj}"
-        is_slash_command "${title_raw}" && exit 0
 
         # Codex uses .questions[0].question; retain the singular fallback for
         # older/imported question-tool schemas.
@@ -939,6 +944,10 @@ case "${EVENT}" in
 
         hud_record "needs-input" "${sid}" "${proj}" "${cwd}" \
             "$(clip_title "${title_raw}")" "$(clip_body "${question}")" "${tool_name}"
+        # Push suppressed for slash commands, record kept: a /codex:rescue
+        # session stuck on a picker is precisely what the panel must surface.
+        # The phone suppresses, the HUD records everything.
+        is_slash_command "${title_raw}" && exit 0
         post_vibez "$(clip_title "${title_raw}")" "$(clip_body "${question}")" \
             "needs-input" "on" "${sid}" "cx"
         mark_pending "${sid}"
@@ -1000,7 +1009,9 @@ case "${EVENT}" in
         is_ephemeral_session && { log "user-prompt-submit: skipping ephemeral session"; exit 0; }
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
-        is_slash_command "${prompt}" && exit 0
+        # Kept for the slash-command gate further down: the gate used to run
+        # here, before the empty-prompt substitution below.
+        prompt_raw="${prompt}"
         # Title preference order: Codex Desktop's agent-generated thread name
         # (what the user sees in the app sidebar), then the transcript's first
         # user prompt (CLI fallback — CLI doesn't generate titles), then the
@@ -1013,6 +1024,11 @@ case "${EVENT}" in
             prompt="(replied)"
         fi
         hud_record "prompt" "${sid}" "${proj}" "${cwd}" "${title}" "$(clip_body "${prompt}")"
+        # Only the PUSH skips slash commands (a scheduled command shouldn't wake
+        # the phone). The record stays: this is the transition that moves the
+        # row back to WORKING, and without it a slash-command session shows a
+        # stale done while the agent is plainly running.
+        is_slash_command "${prompt_raw}" && exit 0
         post_vibez "${title}" "$(clip_body "${prompt}")" \
             "replied" "off" "${sid}" "cx"
         clear_pending "${sid}"

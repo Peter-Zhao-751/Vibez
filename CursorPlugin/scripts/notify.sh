@@ -615,15 +615,23 @@ case "${EVENT}" in
         # immediately.
         if ! is_background_session "${SID}"; then
             prompt="$(jq_get '.prompt')"
-            if [ -n "${prompt}" ] && ! is_slash_command "${prompt}"; then
-                # First real prompt becomes the session's push title.
-                if ! stash_read title "${SID}" >/dev/null 2>&1; then
-                    stash_write title "${SID}" "$(clip_title "${prompt}")"
+            if [ -n "${prompt}" ]; then
+                # The stash bookkeeping is push-path state, so it stays gated on
+                # the slash check; the HUD record below does NOT. The push skips
+                # slash commands so a /Generate Commit Message doesn't wake the
+                # phone, but a row that never leaves its old state while the
+                # agent is plainly running is the panel lying. The phone
+                # suppresses, the HUD records everything.
+                if ! is_slash_command "${prompt}"; then
+                    # First real prompt becomes the session's push title.
+                    if ! stash_read title "${SID}" >/dev/null 2>&1; then
+                        stash_write title "${SID}" "$(clip_title "${prompt}")"
+                    fi
+                    # Turn boundary: drop the previous turn's stashed
+                    # response so a stop with no fresh text (error, CLI)
+                    # can't push stale content from the last turn.
+                    stash_clear last "${SID}"
                 fi
-                # Turn boundary: drop the previous turn's stashed
-                # response so a stop with no fresh text (error, CLI)
-                # can't push stale content from the last turn.
-                stash_clear last "${SID}"
                 title="$(resolve_title "${SID}")"
                 # Ahead of the detached send, and unable to disturb the
                 # {"continue": true} below: hud_record only ever appends to a
@@ -631,21 +639,23 @@ case "${EVENT}" in
                 hud_identity
                 hud_record "prompt" "${SID}" "${HUD_PROJ}" "${HUD_CWD}" \
                     "$(clip_title "${title}")" "$(clip_body "${prompt}")"
-                job="$(mktemp "${CONFIG_DIR}/replyjob.${SID}.XXXXXX" 2>/dev/null)" || job=""
-                if [ -n "${job}" ] && jq -nc \
-                    --arg title "$(clip_title "${title}")" \
-                    --arg body "$(clip_body "${prompt}")" \
-                    --arg sid "${SID}" \
-                    '{title:$title,body:$body,sid:$sid}' >"${job}" 2>/dev/null; then
-                    chmod 600 "${job}" 2>/dev/null || true
-                    nohup bash "${BASH_SOURCE[0]}" _flush-reply "${job}" \
-                        </dev/null >/dev/null 2>&1 &
-                else
-                    # Job-file plumbing failed — send synchronously
-                    # rather than not at all (the phone must unblock).
-                    rm -f "${job}" 2>/dev/null || true
-                    post_vibez "$(clip_title "${title}")" "$(clip_body "${prompt}")" \
-                        "replied" "off" "${SID}" "cu"
+                if ! is_slash_command "${prompt}"; then
+                    job="$(mktemp "${CONFIG_DIR}/replyjob.${SID}.XXXXXX" 2>/dev/null)" || job=""
+                    if [ -n "${job}" ] && jq -nc \
+                        --arg title "$(clip_title "${title}")" \
+                        --arg body "$(clip_body "${prompt}")" \
+                        --arg sid "${SID}" \
+                        '{title:$title,body:$body,sid:$sid}' >"${job}" 2>/dev/null; then
+                        chmod 600 "${job}" 2>/dev/null || true
+                        nohup bash "${BASH_SOURCE[0]}" _flush-reply "${job}" \
+                            </dev/null >/dev/null 2>&1 &
+                    else
+                        # Job-file plumbing failed — send synchronously
+                        # rather than not at all (the phone must unblock).
+                        rm -f "${job}" 2>/dev/null || true
+                        post_vibez "$(clip_title "${title}")" "$(clip_body "${prompt}")" \
+                            "replied" "off" "${SID}" "cu"
+                    fi
                 fi
             fi
         fi
@@ -695,9 +705,14 @@ case "${EVENT}" in
         # machine, not doomscrolling. No push. The HUD still needs the
         # transition: an aborted turn that recorded nothing would leave the
         # panel claiming WORKING until staleness ended it.
+        #
+        # `done`, NOT `end`: the turn stopped, the SESSION did not. `end` means
+        # the session is gone, and SessionStore.resolve() skips its liveness
+        # check for an already-ended row — so a live Cursor session would have
+        # sat there dimmed and italic until the user's next prompt.
         if [ "${status}" = "aborted" ]; then
             log "stop: aborted by user, skipping (session=${SID})"
-            hud_record "end" "${SID}" "${HUD_PROJ}" "${HUD_CWD}" \
+            hud_record "done" "${SID}" "${HUD_PROJ}" "${HUD_CWD}" \
                 "$(clip_title "$(resolve_title "${SID}")")"
             exit 0
         fi

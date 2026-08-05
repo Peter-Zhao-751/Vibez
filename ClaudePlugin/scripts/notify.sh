@@ -1052,7 +1052,6 @@ case "${EVENT}" in
         proj="$(basename "${cwd:-unknown}")"
         transcript="$(jq_get '.transcript_path')"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        is_slash_command "${convo_title}" && exit 0
         excerpt="$(last_assistant_excerpt)"
         # Classify on the full excerpt, clip only the push body — the
         # question that flips done→needs-input is often past the
@@ -1064,12 +1063,19 @@ case "${EVENT}" in
         else
             stop_kind="done"
         fi
-        # HUD first, and UNCONDITIONALLY — above the excerpt skip below and
-        # before defer_stop_push. The turn ended, so the panel must stop
-        # showing WORKING whether or not polling surfaced fresh text, and it
-        # must not wait out the grace window or vanish when an auto-resume
-        # cancels the push.
+        # HUD first, and UNCONDITIONALLY — above the slash-command gate and the
+        # excerpt skip below, and before defer_stop_push. The turn ended, so the
+        # panel must stop showing WORKING whether or not polling surfaced fresh
+        # text, and it must not wait out the grace window or vanish when an
+        # auto-resume cancels the push.
         hud_record "${stop_kind}" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}"
+        # The PUSH skips slash commands so a /vibez:setup invocation doesn't
+        # spam the phone. The HUD does NOT: a running /ultracode session is
+        # exactly what the panel exists to show, and gating the record here was
+        # what pinned such sessions at WORKING forever (tool records kept
+        # arriving, done/needs-input never did). The phone suppresses, the HUD
+        # records everything.
+        is_slash_command "${convo_title}" && exit 0
         # The PUSH keeps its own skip: with no fresh excerpt, a generic
         # "Claude finished a turn." is just noise on the phone. Deliberately a
         # bare exit — it must not clear this session's pending markers.
@@ -1105,7 +1111,6 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        is_slash_command "${convo_title}" && exit 0
 
         question="$(jq_get '.tool_input.questions[0].question')"
         [ -z "${question}" ] && question="Claude is asking a question."
@@ -1113,6 +1118,10 @@ case "${EVENT}" in
             question="${question:0:159}…"
         fi
         hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${question}" "AskUserQuestion"
+        # Push suppressed for slash commands, record kept: a /ultracode session
+        # stuck on a picker is precisely what the panel must surface. The phone
+        # suppresses, the HUD records everything.
+        is_slash_command "${convo_title}" && exit 0
         post_vibez "${convo_title}" "${question}" "needs-input" "on" "${sid}" "cc"
         mark_pending "${sid}"
         ;;
@@ -1228,7 +1237,9 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         prompt="$(jq_get '.prompt')"
-        is_slash_command "${prompt}" && exit 0
+        # Kept untruncated for the slash-command gate further down: the gate
+        # used to run here, before the 80-char clip below.
+        prompt_raw="${prompt}"
         # Pass the current prompt as a hint — for desktop sessions the
         # transcript file frequently doesn't exist yet at this point,
         # so falling back to .prompt beats falling back to basename.
@@ -1239,6 +1250,11 @@ case "${EVENT}" in
         fi
         [ -z "${prompt}" ] && prompt="(replied)"
         hud_record "prompt" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${prompt}"
+        # Only the PUSH skips slash commands (a scheduled /loop shouldn't wake
+        # the phone). The record stays: this is the transition that moves the
+        # row back to WORKING, and without it a slash-command session shows a
+        # stale done while the agent is plainly running.
+        is_slash_command "${prompt_raw}" && exit 0
         post_vibez "${convo_title}" "${prompt}" "replied" "off" "${sid}" "cc"
         clear_pending "${sid}"
         ;;
@@ -1282,7 +1298,6 @@ case "${EVENT}" in
         transcript="$(jq_get '.transcript_path')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        is_slash_command "${convo_title}" && { log "notification: skip — slash command title"; exit 0; }
 
         [ -z "${message}" ] && message="Claude needs your input."
         if [ "${#message}" -gt 160 ]; then
@@ -1291,7 +1306,12 @@ case "${EVENT}" in
         # Deliberately BELOW the idle-reminder skip and the has_pending skip:
         # both mean "this isn't a new transition" (a 60s nag; a near-duplicate
         # of the ask PreToolUse already recorded), not "don't spam the phone".
+        # Just as deliberately ABOVE the slash-command gate, which IS a "don't
+        # spam the phone" rule — a /ultracode run asking for permission is the
+        # panel's whole reason to exist. The phone suppresses, the HUD records
+        # everything.
         hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${message}"
+        is_slash_command "${convo_title}" && { log "notification: skip — slash command title"; exit 0; }
         post_vibez "${convo_title}" "${message}" "needs-input" "on" "${sid}" "cc"
         # Mark pending so the next PostToolUse can detect the user's
         # response to this permission prompt and push shield:off. The
@@ -1324,7 +1344,6 @@ case "${EVENT}" in
         tool_name="$(jq_get '.tool_name' 'tool')"
         proj="$(basename "${cwd:-unknown}")"
         convo_title="$(read_conversation_title "${transcript}" "${proj}" "" "${sid}")"
-        is_slash_command "${convo_title}" && exit 0
 
         # Body: "<tool>: <command>" for shell tools, compact tool_input
         # JSON otherwise — mirrors the Codex permission-request body.
@@ -1345,8 +1364,12 @@ case "${EVENT}" in
         fi
 
         # Before post_vibez, so the 5s same-session debounce (which exists to
-        # spare the phone a second banner) can't hide the ask from the HUD.
+        # spare the phone a second banner) can't hide the ask from the HUD —
+        # and above the slash-command gate, which is the same kind of rule: the
+        # phone suppresses, the HUD records everything. A /ultracode session
+        # waiting on a permission dialog is exactly what the panel is for.
         hud_record "needs-input" "${sid}" "${proj}" "${cwd}" "${convo_title}" "${body}" "${tool_name}"
+        is_slash_command "${convo_title}" && exit 0
         post_vibez "${convo_title}" "${body}" "needs-input" "on" "${sid}" "cc"
         mark_pending "${sid}"
         case "${tool_name}" in

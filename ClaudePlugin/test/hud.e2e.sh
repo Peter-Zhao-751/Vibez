@@ -96,6 +96,37 @@ check "debounced pushes still produce HUD records" "2" "$(jq -r 'select(.kind=="
 check "the second push really was suppressed" "1" "$(curl_count)"
 teardown
 
+# --- slash-command sessions: invisible to the phone, whole in the panel -----
+# THE other regression. The push path skips slash commands on purpose (a
+# /vibez:setup invocation shouldn't banner the phone). Gating the RECORDS on the
+# same check pinned every /ultracode, /loop and /codex:rescue session at WORKING
+# for its entire life: `tool` records kept arriving from post-tool-use (which
+# never had the gate above it), and done/needs-input never did.
+setup
+SLASH="${SANDBOX}/slash.jsonl"
+printf '%s\n' '{"type":"last-prompt","lastPrompt":"/ultracode ship the notch hud"}' >"${SLASH}"
+printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Shipped it."}]}}' >>"${SLASH}"
+fire session-start "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\"}"
+fire user-prompt-submit "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\",\"prompt\":\"/ultracode ship the notch hud\"}"
+fire post-tool-use "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\",\"tool_name\":\"Edit\"}"
+fire stop "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\"}"
+check "a slash-command session records the full sequence" "start,prompt,tool,done," "$(kinds)"
+check "...while pushing absolutely nothing" "0" "$(curl_count)"
+check "the row leaves WORKING" "done" "$(jq -r '.kind' "${HUD_LOG}" | tail -1)"
+# The three needs-input gates behave the same way.
+fire permission-request "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"vibez-hud-e2e-noexec\"}}"
+fire notification "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\",\"message\":\"Claude needs your permission to use Bash\"}"
+fire pre-tool-use "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH}\",\"tool_name\":\"AskUserQuestion\",\"tool_input\":{\"questions\":[{\"question\":\"Which approach?\"}]}}"
+check "every needs-input gate records too" \
+    "start,prompt,tool,done,needs-input,needs-input,needs-input," "$(kinds)"
+check "...and still none of them push" "0" "$(curl_count)"
+# (rtrim: read_conversation_title's last-prompt path newline-joins with `tr`,
+# which leaves one trailing space on every title it returns — not this test's
+# business, and identical for slash and non-slash sessions.)
+check "the records carry the slash command as the title" "/ultracode ship the notch hud" \
+    "$(jq -r 'select(.kind=="done") | .title' "${HUD_LOG}" | head -1 | sed -E 's/[[:space:]]+$//')"
+teardown
+
 # --- unusable session ids are dropped --------------------------------------
 setup
 fire post-tool-use '{"session_id":"nosid","cwd":"/tmp/proj","tool_name":"Read"}'

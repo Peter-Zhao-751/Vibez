@@ -108,6 +108,30 @@ check "debounced pushes still produce HUD records" "2" "$(jq -r 'select(.kind=="
 check "the second push really was suppressed" "1" "$(curl_count)"
 teardown
 
+# --- slash-command sessions: invisible to the phone, whole in the panel -----
+# The push path skips slash commands on purpose (a /vibez:setup invocation
+# shouldn't banner the phone). Gating the RECORDS on the same check pinned every
+# /codex:rescue-style session at WORKING for its entire life: `tool` records kept
+# arriving from post-tool-use (which never had the gate above it), and
+# done/needs-input never did.
+setup
+SLASH_ROLLOUT="${SANDBOX}/slash-rollout.jsonl"
+printf '%s\n' '{"payload":{"type":"thread_name_updated","thread_name":"/codex:rescue fix the build"}}' >"${SLASH_ROLLOUT}"
+fire session-start "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH_ROLLOUT}\"}"
+fire user-prompt-submit "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH_ROLLOUT}\",\"prompt\":\"/codex:rescue fix the build\"}"
+fire post-tool-use "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH_ROLLOUT}\",\"tool_name\":\"Edit\"}"
+fire stop "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH_ROLLOUT}\",\"last_assistant_message\":\"Fixed the build.\"}"
+check "a slash-command session records the full sequence" "start,prompt,tool,done," "$(kinds)"
+check "...while pushing absolutely nothing" "0" "$(curl_count)"
+check "the row leaves WORKING" "done" "$(jq -r '.kind' "${HUD_LOG}" | tail -1)"
+# The picker gate behaves the same way (permission-request never had a gate).
+fire pre-tool-use "{\"session_id\":\"sl1\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${SLASH_ROLLOUT}\",\"tool_name\":\"request_user_input\",\"tool_input\":{\"questions\":[{\"question\":\"Which approach?\"}]}}"
+check "the ask gate records too" "start,prompt,tool,done,needs-input," "$(kinds)"
+check "...and still does not push" "0" "$(curl_count)"
+check "the records carry the slash command as the title" "/codex:rescue fix the build" \
+    "$(jq -r 'select(.kind=="done") | .title' "${HUD_LOG}" | head -1)"
+teardown
+
 # --- unusable session ids are dropped --------------------------------------
 setup
 fire post-tool-use "{\"session_id\":\"nosid\",\"cwd\":\"/tmp/proj\",\"transcript_path\":\"${ROLLOUT}\",\"tool_name\":\"Read\"}"

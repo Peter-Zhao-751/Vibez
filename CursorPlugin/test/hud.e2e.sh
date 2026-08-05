@@ -12,7 +12,8 @@
 #
 # Two load-bearing cases:
 #   - an aborted stop pushes nothing (the user is at the keyboard) but MUST
-#     still record `end`, or the panel keeps claiming the session is working;
+#     still record the turn end, or the panel keeps claiming the session is
+#     working — as `done`, since the TURN stopped and the session did not;
 #   - beforeSubmitPrompt GATES the user's prompt, so its stdout must stay
 #     exactly {"continue": true} with hud_record in the path.
 #
@@ -96,11 +97,42 @@ teardown
 # aborted stop = the user hit Stop in the IDE. No push (they're at the
 # keyboard), but skipping the RECORD would leave the panel showing WORKING
 # until staleness ended it.
+#
+# `done`, NOT `end`: the TURN stopped, the session did not. SessionStore.resolve
+# skips its liveness check for a row that already says ended, so an `end` here
+# left a live Cursor session rendering dimmed and italic — "gone" — until the
+# user's next prompt.
 setup
 fire '{"hook_event_name":"sessionStart","conversation_id":"cu2","workspace_roots":["/tmp/proj"]}'
 fire '{"hook_event_name":"stop","conversation_id":"cu2","workspace_roots":["/tmp/proj"],"status":"aborted"}'
-check "aborted stop records end, not done" "end" "$(jq -r 'select(.kind!="start") | .kind' "${HUD_LOG}" | head -1)"
+check "aborted stop records done, not end" "done" "$(jq -r 'select(.kind!="start") | .kind' "${HUD_LOG}" | head -1)"
 check "aborted stop pushes nothing" "0" "$(curl_count)"
+# ...and `end` stays reserved for the session actually going away.
+fire '{"hook_event_name":"sessionEnd","conversation_id":"cu2","workspace_roots":["/tmp/proj"]}'
+check "only sessionEnd records end" "start,done,end," "$(kinds)"
+teardown
+
+# --- slash-command prompts: invisible to the phone, whole in the panel ------
+# beforeSubmitPrompt suppresses the push for a slash command (a /Generate Commit
+# Message shouldn't unblock the phone), but the HUD needs the transition: it is
+# what moves the row back to WORKING. Cursor's stop carries no such gate, so the
+# turn end pushes as usual — the suppression here is prompt-only.
+setup
+fire '{"hook_event_name":"sessionStart","conversation_id":"cu8","workspace_roots":["/tmp/proj"]}'
+STDOUT="$(printf '%s' '{"hook_event_name":"beforeSubmitPrompt","conversation_id":"cu8","workspace_roots":["/tmp/proj"],"prompt":"/Generate Commit Message"}' | bash "${NOTIFY}" 2>/dev/null)"
+check "a slash prompt still answers exactly the permit" '{"continue": true}' "${STDOUT}"
+check "the slash prompt reached the HUD" "start,prompt," "$(kinds)"
+check "...while the phone heard nothing" "0" "$(curl_count)"
+check "the slash prompt is the record's body" "/Generate Commit Message" \
+    "$(jq -r 'select(.kind=="prompt") | .body' "${HUD_LOG}" | head -1)"
+# A slash-command turn still finishes like any other.
+fire '{"hook_event_name":"afterAgentResponse","conversation_id":"cu8","workspace_roots":["/tmp/proj"],"text":"Committed."}'
+fire '{"hook_event_name":"stop","conversation_id":"cu8","workspace_roots":["/tmp/proj"],"status":"completed"}'
+check "a slash-command session records the full sequence" "start,prompt,tool,done," "$(kinds)"
+# The slash prompt must NOT become the session's push title (that stash write is
+# push-path state and stays gated) — the workspace name stands in.
+check "the slash prompt never becomes the title" "proj" \
+    "$(jq -r 'select(.kind=="done") | .title' "${HUD_LOG}" | head -1)"
 teardown
 
 # --- the push debounce must not hide a transition from the HUD -------------
