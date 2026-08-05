@@ -54,6 +54,11 @@ struct SessionTile: View {
     /// usual card on black.
     var style = TileStyle.workingCard
 
+    /// Elastic drag: the bubble follows the pointer through the rubber-band
+    /// curve and springs back on release. A real drag never fires the tap —
+    /// the 4pt minimumDistance keeps clicks-to-jump intact.
+    @State private var dragOffset: CGSize = .zero
+
     // No dim anywhere: done rows look exactly like working rows (user call).
     // A finished session is still marked by its column and, for ended, the
     // italic "ended" detail line — de-emphasis by position, not by fading.
@@ -94,8 +99,19 @@ struct SessionTile: View {
             ? RoundedRectangle(cornerRadius: style.cornerRadius)
                 .strokeBorder(HUDTheme.mutedCardStroke, lineWidth: 1)
             : nil)
+        .offset(dragOffset)
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }
+        .gesture(
+            DragGesture(minimumDistance: 4)
+                .onChanged { value in
+                    dragOffset = RubberBand.offset(for: value.translation,
+                                                   limit: HUDTheme.bubbleDragLimit)
+                }
+                .onEnded { _ in
+                    withAnimation(HUDTheme.bubbleSnapBack) { dragOffset = .zero }
+                }
+        )
     }
 
     private var chip: some View {

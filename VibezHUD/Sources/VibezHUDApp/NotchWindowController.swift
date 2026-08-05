@@ -158,7 +158,14 @@ final class NotchWindowController {
         let decision = ExitPredictor.decide(pointer: pointer, kinematics: kinematics,
                                             zone: zone, isExpanded: model.isExpanded,
                                             tuning: tuning)
-        if model.isExpanded && decision.exit {
+        // While a mouse button is down the user is INTERACTING (dragging an
+        // elastic bubble), not leaving — a vigorous drag near the island's
+        // edge projects outside and would collapse the panel mid-drag. Real
+        // exits still work: the pointer can't actually leave the island while
+        // dragging a bubble inside it, and the moment the button lifts the
+        // predictor is back.
+        let dragging = NSEvent.pressedMouseButtons != 0
+        if model.isExpanded && decision.exit && !dragging {
             reading.hover = .exited
             reading.immediateExit = decision.immediate
         }

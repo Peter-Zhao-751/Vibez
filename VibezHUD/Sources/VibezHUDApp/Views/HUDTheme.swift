@@ -63,6 +63,13 @@ enum HUDTheme {
     /// the user preferred that darker shade and asked for both columns to
     /// match it. So the card chrome is muted for both (7.5% x 0.48 ≈ 3.6%),
     /// and the 48% dim now applies to done/ended CONTENT only.
+    /// Elastic bubble drag: how far a bubble can be pulled (asymptotic limit
+    /// of the rubber-band curve) and the snap-back. The snap-back is the ONE
+    /// deliberately bouncy animation in the HUD — playfulness was the point —
+    /// while the island morph stays bounce-free.
+    static let bubbleDragLimit: CGFloat = 14
+    static let bubbleSnapBack = Animation.spring(response: 0.32, dampingFraction: 0.55)
+
     static let mutedCardFill = Color.white.opacity(0.036)
     /// Visible on purpose: at 0.04 the outline vanished into the fill (user:
     /// "make the outlines slightly more distinctive"). 0.10 draws RGB ~26 on
