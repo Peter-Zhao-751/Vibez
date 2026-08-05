@@ -46,7 +46,11 @@ enum HUDTheme {
     /// the slab unmistakably reads as its own element.
     static let sectionFill = Color.white.opacity(0.09)
     static let sectionCornerRadius: CGFloat = 16
-    static let sectionPadding: CGFloat = 10
+    /// Uniform on every side AND equal to the gap between message bubbles —
+    /// the panel's breathing room is the same 5pt rhythm as the cells' own
+    /// spacing (user ask). The scroll stack's extra bottom padding is gone for
+    /// the same reason: it made the bottom inset 4pt deeper than the sides.
+    static let sectionPadding: CGFloat = tileSpacing
     /// Mail's second grey: each row inside the panel is its own lighter rounded
     /// cell, like the Inbox row's highlight in the sidebar. Two surfaces, both
     /// unmistakably deliberate: panel composites to RGB 23 on black, a cell on
@@ -59,7 +63,10 @@ enum HUDTheme {
     /// match it. So the card chrome is muted for both (7.5% x 0.48 ≈ 3.6%),
     /// and the 48% dim now applies to done/ended CONTENT only.
     static let mutedCardFill = Color.white.opacity(0.036)
-    static let mutedCardStroke = Color.white.opacity(0.04)
+    /// Visible on purpose: at 0.04 the outline vanished into the fill (user:
+    /// "make the outlines slightly more distinctive"). 0.10 draws RGB ~26 on
+    /// the RGB 9 card — an edge you can see without the card going bright.
+    static let mutedCardStroke = Color.white.opacity(0.10)
     /// Board margins. Sides and bottom are EQUAL and small — the island hugs
     /// its content Mail-style instead of trailing a black apron. Top stays
     /// larger only because the headers ride beside the notch.

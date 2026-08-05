@@ -125,6 +125,14 @@ enum PixelVerification {
         check("rows outside the panel keep a (muted) card  [\(stepOnBlack)]",
               stepOnBlack >= 4 && stepOnBlack <= 14)
 
+        // The outline must be DISTINCT from the fill (user: "slightly more
+        // distinctive") — sample the card's top edge, where strokeBorder draws.
+        let edgePx = plain.px(plain.width / 2, Int(0.5 * scale))
+        line("     card outline: edge=\(rgb(edgePx)) vs fill=\(rgb(tileOnBlack))")
+        check("done/working outlines are visibly brighter than their fill  "
+              + "[edge \(edgePx.r) vs fill \(tileOnBlack.r)]",
+              edgePx.r >= tileOnBlack.r + 10)
+
         // Done and Working bubbles are ONE color — done's. The dim is content-
         // only now, so a done card and a working card must sample identically
         // away from the ink.

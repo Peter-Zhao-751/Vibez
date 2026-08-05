@@ -31,8 +31,10 @@ enum BoardLayout {
     /// The column header's forced text-row height (see SessionColumn).
     static let headerRowHeight: CGFloat = 11
     static let headerBottomPad: CGFloat = 8
-    /// The tile stack's own bottom padding inside the scroll area.
-    static let stackBottomPad: CGFloat = 4
+    /// The tile stack's own bottom padding inside the scroll area. Zero: it
+    /// made the panel's bottom inset deeper than its sides, and the board's
+    /// own bottom margin already provides the breathing room below columns.
+    static let stackBottomPad: CGFloat = 0
 
     static func scrollHeight(rows: Int) -> CGFloat {
         guard rows > 0 else { return 0 }
