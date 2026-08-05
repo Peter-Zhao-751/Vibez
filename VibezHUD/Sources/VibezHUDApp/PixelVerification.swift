@@ -27,6 +27,7 @@ enum PixelVerification {
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: true)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: false)
         collapsedInkIsCentred(notch: notch, bubble: bubble)
+        theFullscreenNudgeMovesInkAndOnlyInk(notch: notch, bubble: bubble)
         collapsedQuietIsExactlyTheNotch(notch: notch, bubble: bubble)
 
         line("")
@@ -202,6 +203,32 @@ enum PixelVerification {
         check("the needs-you count is drawn in white  [brightest=\(leftDigit)]", leftDigit >= 230)
     }
 
+    // MARK: - 2b. The fullscreen nudge
+
+    /// The user sees the dots as centred on the desktop but high/low in
+    /// fullscreen. Whatever the cause — the eye has a lit menu-bar strip to
+    /// compare against in one mode and unbroken black in the other — the fix is
+    /// a small mode-dependent nudge, and the thing that must NOT happen is the
+    /// black island moving with it: the island has to stay welded to the
+    /// hardware notch in every mode. So this asserts the ink moved by exactly
+    /// the nudge and the shape did not move at all.
+    private static func theFullscreenNudgeMovesInkAndOnlyInk(notch: CGSize, bubble: CGSize) {
+        let nudge = HoverTuning.compiled.flankYNudgeFullscreen
+        guard let plain = rasterize(island(needsYou: 2, done: 3, expanded: false,
+                                           notch: notch, bubble: bubble)),
+              let nudged = rasterize(island(needsYou: 2, done: 3, expanded: false,
+                                            notch: notch, bubble: bubble, nudge: nudge)),
+              let a = inkBounds(plain), let b = inkBounds(nudged)
+        else { return check("nudged island rendered", false) }
+
+        check("the nudge does not resize the black island  [\(plain.width)x\(plain.height) vs \(nudged.width)x\(nudged.height)]",
+              plain.width == nudged.width && plain.height == nudged.height)
+        let movedPt = Double(b.minY - a.minY) / Double(scale)
+        check(String(format: "menu-bar-hidden moves the ink %.2fpt (asked for %.2f)", movedPt, Double(nudge)),
+              abs(movedPt - Double(nudge)) <= 0.5)
+        check(String(format: "...and it moves UP  [%.2fpt]", movedPt), movedPt < 0)
+    }
+
     // MARK: - 3. Quiet is invisible
 
     private static func collapsedQuietIsExactlyTheNotch(notch: CGSize, bubble: CGSize) {
@@ -219,9 +246,10 @@ enum PixelVerification {
     // MARK: - Rendering
 
     private static func island(needsYou: Int, done: Int, expanded: Bool,
-                               notch: CGSize, bubble: CGSize) -> some View {
+                               notch: CGSize, bubble: CGSize,
+                               nudge: CGFloat = 0) -> some View {
         NotchIsland(needsYou: needsYou, done: done, isExpanded: expanded,
-                    notchSize: notch, bubbleSize: bubble) {
+                    notchSize: notch, bubbleSize: bubble, flankYNudge: nudge) {
             BubbleBoard(snapshot: DemoData.snapshot(),
                         nowMs: Int64(Date().timeIntervalSince1970 * 1000)) { _ in }
         }

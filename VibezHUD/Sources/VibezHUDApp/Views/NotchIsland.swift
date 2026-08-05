@@ -68,6 +68,9 @@ struct NotchIsland<Board: View>: View {
     let isExpanded: Bool
     let notchSize: CGSize
     let bubbleSize: CGSize
+    /// Vertical correction for the collapsed flanks. Non-zero only when the menu
+    /// bar is hidden — see `HUDViewModel.menuBarHidden`.
+    var flankYNudge: CGFloat = 0
     @ViewBuilder var board: () -> Board
 
     private var collapsedSize: CGSize {
@@ -129,6 +132,9 @@ struct NotchIsland<Board: View>: View {
             flank(count: done, color: HUDTheme.done)
         }
         .frame(width: collapsedSize.width, height: collapsedSize.height)
+        // Applied to the CONTENT, not the shape: the black island still has to
+        // line up with the hardware notch in every mode. Only the ink moves.
+        .offset(y: flankYNudge)
     }
 
     /// A dot and a number. Amber on the left for what is blocked on you, green

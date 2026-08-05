@@ -27,7 +27,8 @@ struct HUDRootView: View {
                     isExpanded: model.isExpanded,
                     notchSize: CGSize(width: geometry.notchRect.width,
                                       height: geometry.notchRect.height),
-                    bubbleSize: bubbleSize) {
+                    bubbleSize: bubbleSize,
+                    flankYNudge: model.menuBarHidden ? model.tuning.flankYNudgeFullscreen : 0) {
             // Built lazily, INSIDE the island's expanded branch: `model.clockMs`
             // is what keeps the tiles' age labels ticking, and it is the only
             // observable that moves while the log is quiet. Reading it here means
