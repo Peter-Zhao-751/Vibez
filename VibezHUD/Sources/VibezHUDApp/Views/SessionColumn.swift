@@ -154,7 +154,7 @@ struct SessionColumn: View {
                 Text("\(sessions.count) \(title)")
                     .font(.system(size: 8.5, weight: .bold)).kerning(0.9)
             }
-            .foregroundStyle(.white.opacity(0.55))
+            .foregroundStyle(.white)
             // Forced height: BoardLayout adds these numbers up to size the
             // island exactly, and a text line's intrinsic height is not a
             // number you can do arithmetic with.
