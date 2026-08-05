@@ -7,17 +7,19 @@ enum DemoData {
     static func snapshot() -> HUDSnapshot {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         func s(_ sid: String, _ agent: AgentTag, _ proj: String, _ title: String,
-               _ state: SessionState, _ tool: String?, _ detail: String?, _ agoMs: Int64) -> Session {
+               _ state: SessionState, _ tool: String?, _ detail: String?, _ agoMs: Int64,
+               machine: String? = nil) -> Session {
             Session(sid: sid, agent: agent, proj: proj, cwd: "/tmp/\(proj)", title: title,
                     detail: detail, tool: tool, state: state,
                     startedAtMs: now - agoMs - 60_000, lastActivityMs: now - agoMs,
                     stateSinceMs: now - agoMs, agentPid: nil, agentStart: nil,
-                    appPid: nil, app: nil)
+                    appPid: nil, app: nil, machine: machine)
         }
         return HUDSnapshot(
             needsYou: [
                 s("d1", .claude, "Vibez", "Mac notch app", .needsYou, "Bash", "rm -rf build", 12_000),
                 s("d2", .codex, "vibez-backend", "Deploy the ratelimit fix", .needsYou, nil, "deploy to prod now?", 61_000),
+                s("d7", .claude, "", "Migrate the auth tests", .needsYou, nil, "which fixture layout?", 95_000, machine: "mbp-air"),
             ],
             done: [
                 s("d3", .claude, "carousel", "Export spread stills", .done, nil, nil, 8 * 60_000),

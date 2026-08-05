@@ -86,6 +86,15 @@ struct SessionTile: View {
                     Text(session.proj)
                         .font(.system(size: 10.5, weight: .bold))
                         .lineLimit(1).truncationMode(.tail)
+                    if let machine = session.machine {
+                        Text(machine)
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.5))
+                            .lineLimit(1).truncationMode(.tail)
+                            .padding(.horizontal, 4).padding(.vertical, 1)
+                            .background(RoundedRectangle(cornerRadius: 4)
+                                .fill(.white.opacity(0.12)))
+                    }
                     Spacer(minLength: 4)
                     Text(elapsed)
                         .font(.system(size: 8.5, weight: .medium))

@@ -321,6 +321,35 @@ check "the phone was pushed exactly once" "1" "$(curl_count)"
 check "the panel shows the ask, blocked" "needsYou" "$(probe | jq -r '.needsYou[0].state // "none"')"
 check "and it shows the LATEST ask" 'Edit: {"step":"third"}' "$(probe | jq -r '.needsYou[0].detail // "none"')"
 
+# === 5. remote sessions merge in, local wins on a sid collision =============
+# The probe's optional second argument is a JSON array of RemoteEventDoc
+# (RemoteSessionSource's fixture seam — no network in this suite). A fresh
+# remote sid should appear with its hostname; a remote doc that collides with
+# a sid the local log already knows must be dropped in favor of the local,
+# richer row (SessionStore.snapshot(remote:) — "local wins").
+
+printf '\n-- remote fixture merges into the panel, local wins on collision\n'
+new_sandbox remote
+cc_arc_to_blocked
+REMOTE_NOW_MS=$(( $(date +%s) * 1000 ))
+REMOTE_FIXTURE="${SANDBOX}/remote-fixture.json"
+jq -n --arg localSid "${CC_SID}" --argjson now "${REMOTE_NOW_MS}" '[
+    {session: $localSid, agent: "cc", event: "needs-input", shield: null,
+     title: "remote should not win", body: null, machine: "ghost-mac", createdAtMs: $now},
+    {session: "remote-1", agent: "cc", event: "needs-input", shield: null,
+     title: "Fix the flaky test", body: null, machine: "other-mac", createdAtMs: $now}
+]' > "${REMOTE_FIXTURE}"
+
+REMOTE_OUT="$("${PROBE}" "${HUD_LOG}" "${REMOTE_FIXTURE}" 2>/dev/null | jq -S .)"
+check "the fresh remote session appears in needsYou" "remote-1" \
+    "$(printf '%s' "${REMOTE_OUT}" | jq -r '.needsYou[] | select(.sid=="remote-1") | .sid')"
+check "it carries its machine badge" "other-mac" \
+    "$(printf '%s' "${REMOTE_OUT}" | jq -r '.needsYou[] | select(.sid=="remote-1") | .machine')"
+check "the local sid is not duplicated" "1" \
+    "$(printf '%s' "${REMOTE_OUT}" | jq --arg sid "${CC_SID}" '[.needsYou[] | select(.sid==$sid)] | length')"
+check "and it stays the local (richer) row, not the remote one" "Bash" \
+    "$(printf '%s' "${REMOTE_OUT}" | jq -r --arg sid "${CC_SID}" '.needsYou[] | select(.sid==$sid) | .tool // "none"')"
+
 # --- done -------------------------------------------------------------------
 
 if [ "${UPDATE_GOLDEN}" = "1" ]; then

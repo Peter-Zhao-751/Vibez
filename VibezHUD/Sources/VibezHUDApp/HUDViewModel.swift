@@ -46,14 +46,14 @@ final class HUDViewModel {
         let startMs = Int64(Date().timeIntervalSince1970 * 1000)
         ageClock = AgeClock(nowMs: startMs)
         clockMs = startMs
-        engine = demo ? nil : HUDEngine()
+        engine = demo ? nil : HUDEngine(remote: RemoteSessionSource.makeDefault())
         if demo { snapshot = DemoData.snapshot() } else { snapshot = engine?.primeAndDrain() ?? HUDSnapshot() }
         // Seeded before the window controller's first `layout()`, so the panel is
         // never sized for a one-row island on frame 1.
         refreezeRowsWhileCollapsed()
     }
 
-    func start() { schedule(fast: false) }
+    func start() { engine?.startRemote(); schedule(fast: false) }
 
     func stop() { timer?.invalidate(); timer = nil; isSampling = nil }
 
