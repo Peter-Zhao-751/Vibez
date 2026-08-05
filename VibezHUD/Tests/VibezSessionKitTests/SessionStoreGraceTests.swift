@@ -88,3 +88,33 @@ private func store(_ c: FakeClock, grace: Int64 = 3_000) -> SessionStore {
     // stateSince reflects the resume, not the pre-done working stretch.
     #expect(s.snapshot().working.first?.stateSinceMs == 14_000)
 }
+
+@Test func startInsideTheGraceWindowCancelsPendingDone() {
+    // The grace-window fix only covers activity that ARRIVES after the done.
+    // Start is also activity (from the event log), and it ALSO cancels the pending done.
+    // A session that becomes done, then resumes before the grace expires, should not
+    // flash to done even when the grace window elapses.
+    let clock = FakeClock(10_000); let s = store(clock)
+    s.apply(makeEvent(.prompt, ts: 9_000))
+    s.apply(makeEvent(.done, ts: 10_000))
+    clock.advance(ms: 500)
+    // Start inside the grace window cancels pendingDoneAtMs (line: if e.kind != .done { entry.pendingDoneAtMs = nil })
+    s.apply(makeEvent(.start, ts: 10_500))
+    // The state is still .working (the pre-done state); start doesn't change it.
+    #expect(s.stateForTesting(sid: "s1") == .working)
+    // Advance past the grace window — the pending done was canceled, so it never commits.
+    clock.advance(ms: 3_000)
+    #expect(s.stateForTesting(sid: "s1") == .working)   // never flashed to .done
+}
+
+@Test func startAfterCommittedDoneResetsToIdle() {
+    // After the grace window has elapsed and the done commits, a start event
+    // should still reset the row to idle for a proper resume display.
+    let clock = FakeClock(10_000); let s = store(clock)
+    s.apply(makeEvent(.prompt, ts: 9_000))
+    s.apply(makeEvent(.done, ts: 10_000))
+    clock.advance(ms: 3_000)
+    #expect(s.stateForTesting(sid: "s1") == .done)   // committed
+    s.apply(makeEvent(.start, ts: 13_500))
+    #expect(s.stateForTesting(sid: "s1") == .idle)   // fresh start
+}

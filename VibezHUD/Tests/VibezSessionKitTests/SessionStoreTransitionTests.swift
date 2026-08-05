@@ -94,8 +94,8 @@ private func newStore(_ clock: FakeClock, _ live: FakeLiveness = FakeLiveness())
 }
 
 @Test func startOnAFinishedSessionResetsToIdle() {
-    // Resume bug: a session that ended (explicit end, or probed-dead pid)
-    // showed "ended" in the done column until the first prompt.
+    // Resume bug: a session that ended (explicit end) showed "ended" in the
+    // done column until the first prompt.
     let clock = FakeClock(10_000); let s = newStore(clock)
     s.apply(makeEvent(.prompt, ts: 10_000))
     s.apply(makeEvent(.end, ts: 11_000))
