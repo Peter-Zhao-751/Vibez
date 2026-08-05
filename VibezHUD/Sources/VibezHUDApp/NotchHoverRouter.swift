@@ -11,6 +11,17 @@ import CoreGraphics
 ///
 /// So mouse opacity is derived, never assumed: opaque only while the pointer is
 /// genuinely on the HUD, click-through every other instant.
+/// One pointer sample, answering both questions the poll needs: is the pointer
+/// on the HUD, and is it close enough to the top of the screen to be worth
+/// watching closely. Both come from a single `NSEvent.mouseLocation` read.
+public struct PointerReading: Sendable, Equatable {
+    public var hover: HoverInput
+    public var nearTop: Bool
+    public init(hover: HoverInput, nearTop: Bool) {
+        self.hover = hover; self.nearTop = nearTop
+    }
+}
+
 public enum NotchHoverRouter {
     /// How far outside the visible island still counts as "on it". Enough to
     /// forgive a wobble at the edge, nowhere near enough to be invisible.
@@ -67,6 +78,26 @@ public enum NotchHoverRouter {
                              expandedRect: CGRect) -> HoverInput {
         route(pointer: pointer, isExpanded: isExpanded,
               hoverRect: geometry.hoverRect, expandedRect: expandedRect)
+    }
+
+    /// The full sample, as the polling path takes it: one pointer position in,
+    /// hover state and sampling cadence out.
+    public static func read(pointer: CGPoint,
+                            isExpanded: Bool,
+                            geometry: NotchGeometry,
+                            expandedRect: CGRect) -> PointerReading {
+        PointerReading(
+            hover: route(pointer: pointer, isExpanded: isExpanded,
+                         geometry: geometry, expandedRect: expandedRect),
+            nearTop: isNearTop(pointer: pointer, screen: geometry.metrics.frame))
+    }
+
+    /// "Near the top" is deliberately much larger than the hover zone: it is not
+    /// a hit-test, it is the cue to start looking properly. A pointer heading for
+    /// the notch crosses this band first, so by the time it reaches the zone the
+    /// poll is already running at 20ms and cannot skip over it.
+    public static func isNearTop(pointer: CGPoint, screen: CGRect) -> Bool {
+        pointer.y >= screen.maxY - HoverTiming.fastBandDepth && pointer.y <= screen.maxY
     }
 
     /// Mouse opacity follows the routing exactly: the panel may intercept clicks

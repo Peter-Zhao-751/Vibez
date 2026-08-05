@@ -58,7 +58,9 @@ final class NotchWindowController {
         }
         // The one and only source of hover, installed last so nothing samples a
         // half-built controller.
-        model.pointerProvider = { [weak self] in self?.pollPointer() ?? .exited }
+        model.pointerProvider = { [weak self] in
+            self?.pollPointer() ?? PointerReading(hover: .exited, nearTop: false)
+        }
         log("init")
 
         NotificationCenter.default.addObserver(
@@ -116,12 +118,17 @@ final class NotchWindowController {
     /// Deliberately does NOT notify the model: the model is what called it, and
     /// it applies the returned input itself.
     @discardableResult
-    func pollPointer() -> HoverInput {
+    func pollPointer() -> PointerReading {
         // Cheap and guarded: the panel has to keep containing the island, and
         // the island's size follows the row count. While EXPANDED the row count
         // is frozen, so this can never resize the window mid-morph.
         layout()
-        return apply(route(pointerSource()), notifyModel: false)
+        let reading = NotchHoverRouter.read(pointer: pointerSource(),
+                                            isExpanded: model.isExpanded,
+                                            geometry: geometry,
+                                            expandedRect: expandedIslandRect)
+        apply(reading.hover, notifyModel: false)
+        return reading
     }
 
     /// The immediate path: something happened that must be reflected before the

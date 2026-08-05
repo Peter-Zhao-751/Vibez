@@ -20,7 +20,15 @@ public struct NotchGeometry: Sendable, Equatable {
     public static let maxBubbleWidth: CGFloat = 1040
     public static let maxBubbleHeightFraction: CGFloat = 0.62
     static let hoverPadX: CGFloat = 44
-    static let hoverPadY: CGFloat = 6
+    /// How far BELOW the collapsed island the hot zone reaches.
+    ///
+    /// Was 6pt, which made the target barely deeper than the notch itself: an
+    /// approach from below that stopped a few points short of the hardware
+    /// notch — the natural thing to do, since the notch is a hole you cannot
+    /// point at — landed in dead space and nothing happened. 24pt is roughly a
+    /// menu-bar height of forgiveness, still nowhere near the menu-bar items,
+    /// which sit outside the ±44pt x window.
+    static let hoverPadY: CGFloat = 24
 
     public let metrics: ScreenMetrics
     public let hasNotch: Bool

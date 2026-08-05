@@ -151,13 +151,16 @@ enum HoverVerification {
         check("the bubble has collapsed", model.isExpanded == false)
         check("collapsed is click-through again", panel.ignoresMouseEvents == true)
 
-        // 7. A flick through the notch must neither open nor latch opacity on.
+        // 7. A GRAZE through the notch must neither open nor latch opacity on.
+        //    The window is narrower than it used to be on purpose: a deliberate
+        //    pass onto the notch is now MEANT to open it (40ms, not 120ms), so
+        //    what has to stay closed is a single stray sample, not a brief dwell.
         move(to: notchCenter)
-        await sleepMs(40)
+        await sleepMs(10)
         move(to: farAway)
         await sleepMs(300)
-        check("a flick through the notch never opens", model.isExpanded == false)
-        check("a flick through the notch leaves click-through restored",
+        check("a graze through the notch never opens", model.isExpanded == false)
+        check("a graze through the notch leaves click-through restored",
               panel.ignoresMouseEvents == true)
 
         if CommandLine.arguments.contains("--click-probe") {

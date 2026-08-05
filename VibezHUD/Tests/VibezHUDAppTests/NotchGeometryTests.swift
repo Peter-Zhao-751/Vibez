@@ -38,6 +38,29 @@ private let external = ScreenMetrics(
     #expect(g.hoverRect.contains(CGPoint(x: g.notchRect.midX, y: g.notchRect.midY)))
 }
 
+/// The notch is a HOLE. You cannot point at it, so people aim just under it and
+/// stop — and with only 6pt of depth below the island that landed in dead space
+/// and nothing happened ("sometimes it doesn't activate"). The zone now reaches
+/// a menu-bar's height below the island's bottom edge.
+@Test func theHoverZoneReachesWellBelowTheIslandsBottomEdge() {
+    let g = NotchGeometry(metrics: mbp)
+    let islandBottom = g.notchRect.minY          // the collapsed island IS notch-height
+    #expect(islandBottom - g.hoverRect.minY >= 24)
+    // A pointer parked 20pt under the notch — the exact miss the user described.
+    #expect(g.hoverRect.contains(CGPoint(x: g.notchRect.midX, y: islandBottom - 20)))
+    // ...but it does not creep so far down that it owns a chunk of the desktop.
+    #expect(!g.hoverRect.contains(CGPoint(x: g.notchRect.midX, y: islandBottom - 40)))
+}
+
+/// Depth is forgiveness; WIDTH is not, and must not have grown with it. The
+/// menu-bar items and the status items start where the auxiliary areas do.
+@Test func theDeeperZoneDidNotGetWiderAndStillClearsTheMenuBar() {
+    let g = NotchGeometry(metrics: mbp)
+    #expect(g.hoverRect.width == g.notchRect.width + 88)
+    #expect(g.hoverRect.minX > mbp.auxLeft.minX)
+    #expect(g.hoverRect.maxX < mbp.auxRight.maxX)
+}
+
 @Test func theBubbleIsCappedAndCentered() {
     let g = NotchGeometry(metrics: mbp)
     let small = g.bubbleRect(rowCount: 2)

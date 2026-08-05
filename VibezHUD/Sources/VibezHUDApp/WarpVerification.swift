@@ -49,11 +49,55 @@ enum WarpVerification {
         check("resting: collapsed, click-through",
               model.isExpanded == false && c.panel.ignoresMouseEvents == true)
 
-        // 1. Entry, by hovering only.
-        await warp(to: notch, settle: 500)
+        // 1. Entry, by hovering only — and how LONG it takes, measured.
+        CGWarpMouseCursorPosition(toCG(notch))
+        let openMs = await waitFor(model, expanded: true)
+        line(String(format: "   OPEN  latency %.0fms (cursor placed -> isExpanded)", openMs))
         check("moving the real cursor onto the notch EXPANDS it — no click",
               model.isExpanded == true)
+        check(String(format: "...within 250ms  [%.0fms]", openMs), openMs <= 250)
         check("...and the panel is mouse-opaque there", c.panel.ignoresMouseEvents == false)
+
+        // 1b. And how long it takes to get OUT of the way.
+        CGWarpMouseCursorPosition(toCG(center))
+        let closeMs = await waitFor(model, expanded: false)
+        line(String(format: "   CLOSE latency %.0fms (cursor left -> collapsed)", closeMs))
+        check(String(format: "leaving collapses it within 250ms  [%.0fms]", closeMs), closeMs <= 250)
+
+        // 1c. THE ROUND-3 COMPLAINT: a quick deliberate swipe onto the notch,
+        //     three steps 20ms apart, the way a hand actually moves. At the old
+        //     50ms sampling this could be seen once or not at all, and one
+        //     sample can never clear an open delay — "sometimes it doesn't
+        //     activate". Nothing here waits for the pointer to sit still.
+        await warp(to: center, settle: 400)
+        check("precondition: collapsed before the swipe", model.isExpanded == false)
+        for p in [CGPoint(x: notch.x - 120, y: notch.y - 60),
+                  CGPoint(x: notch.x - 50, y: notch.y - 20),
+                  notch] {
+            CGWarpMouseCursorPosition(toCG(p))
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let swipeMs = await waitFor(model, expanded: true)
+        line(String(format: "   SWIPE-IN opened %.0fms after the last step", swipeMs))
+        check("a 3-step 20ms swipe onto the notch opens it", model.isExpanded == true)
+        check(String(format: "...promptly  [%.0fms after the swipe ended]", swipeMs), swipeMs <= 250)
+        await warp(to: center, settle: 500)
+
+        // 1d. The other half of "sometimes it doesn't activate": the notch is a
+        //     HOLE, so people aim just UNDER it and stop. With the old 6pt of
+        //     depth that landed in dead space. 15pt under the island's bottom
+        //     edge is inside the zone now and was not before.
+        let justUnder = CGPoint(x: g.notchRect.midX, y: g.notchRect.minY - 15)
+        check("precondition: 15pt under the notch is inside the hot zone",
+              g.hoverRect.contains(justUnder))
+        for p in [CGPoint(x: justUnder.x - 100, y: justUnder.y - 40), justUnder] {
+            CGWarpMouseCursorPosition(toCG(p))
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        let underMs = await waitFor(model, expanded: true)
+        line(String(format: "   AIM-UNDER opened %.0fms after stopping 15pt below the notch", underMs))
+        check("stopping just UNDER the notch opens it too", model.isExpanded == true)
+        await warp(to: center, settle: 500)
 
         // 2. THE REPORTED BUG. Pull away from the slab, still inside the window.
         await warp(to: belowIsland, settle: 700)
@@ -82,6 +126,19 @@ enum WarpVerification {
         if failures == 0 { line("WARP VERIFY: PASS"); exit(0) }
         line("WARP VERIFY: \(failures) FAILED")
         exit(1)
+    }
+
+    /// Poll the model every 5ms until it reaches `expanded`, and report how long
+    /// that took. This is the number the user is complaining about, so it is
+    /// measured rather than asserted by sleeping long enough to be safe.
+    private static func waitFor(_ model: HUDViewModel, expanded: Bool,
+                                timeoutMs: Int = 2_000) async -> Double {
+        let start = Date()
+        while model.isExpanded != expanded {
+            if Date().timeIntervalSince(start) * 1000 > Double(timeoutMs) { break }
+            try? await Task.sleep(nanoseconds: 5_000_000)
+        }
+        return Date().timeIntervalSince(start) * 1000
     }
 
     private static func warp(to p: CGPoint, settle ms: Int) async {

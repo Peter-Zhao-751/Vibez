@@ -26,8 +26,8 @@ final class HUDViewModel {
     /// reading it delivers no event, needs no permission and cannot be
     /// suppressed by another app, so a poll has no failure mode to have. The
     /// AppKit read and the hit-test both stay in the controller; this end only
-    /// knows about `HoverInput`.
-    @ObservationIgnored var pointerProvider: (() -> HoverInput)?
+    /// knows about `PointerReading`.
+    @ObservationIgnored var pointerProvider: (() -> PointerReading)?
 
     private let engine: HUDEngine?
     private var hover: HoverPolicy
@@ -48,22 +48,43 @@ final class HUDViewModel {
         refreezeRowsWhileCollapsed()
     }
 
-    func start() {
-        // One timer drives the pointer poll, the log drain and the hover clock.
-        //
-        // 50 ms, not 100: this timer is now the ONLY thing that notices the
-        // pointer, and its period is the worst-case lag on both edges — how long
-        // after arriving at the notch the HUD starts opening, and (the one that
-        // matters) how long after leaving it the panel is still swallowing
-        // clicks. Half a tenth of a second of that is cheap; the tick does
-        // nothing at all when nothing has changed. Still well under the 120 ms
-        // open delay, so the hysteresis is unaffected.
-        timer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+    func start() { schedule(fast: false) }
+
+    func stop() { timer?.invalidate(); timer = nil; isSampling = nil }
+
+    /// ADAPTIVE. One timer drives the pointer poll, the log drain and the hover
+    /// clock, and its period follows where the pointer is.
+    ///
+    /// A fixed rate cannot win here. Fast enough to catch a swipe across the
+    /// notch means 50 Hz, and 50 Hz forever is a timer waking a background agent
+    /// twenty-four hours a day for a pointer that is almost never near the top of
+    /// the screen. So: 100ms while the pointer is anywhere else — cheap, and
+    /// still enough to notice it approaching — and 20ms the moment it is near the
+    /// top edge or the HUD is open, which is exactly when a missed sample is the
+    /// difference between "it works" and "it only works sometimes". Reading
+    /// `NSEvent.mouseLocation` and testing a rect costs nanoseconds; the timer
+    /// wakeup is the whole cost, which is why it is the thing being managed.
+    private var isSampling: Bool?
+    private func schedule(fast: Bool) {
+        guard isSampling != fast else { return }
+        isSampling = fast
+        timer?.invalidate()
+        let interval = fast ? HoverTiming.fastSampleSeconds : HoverTiming.idleSampleSeconds
+        let t = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
+        // `.common` so the cadence survives menu tracking and scrolling, which
+        // put the run loop into event-tracking mode and would otherwise stall the
+        // only thing that notices the pointer.
+        RunLoop.main.add(t, forMode: .common)
+        timer = t
     }
 
-    func stop() { timer?.invalidate(); timer = nil }
+    /// Which cadence the current reading calls for. Pure so the rule is testable
+    /// without a screen or a clock.
+    nonisolated static func wantsFastSampling(reading: PointerReading, isExpanded: Bool) -> Bool {
+        reading.nearTop || isExpanded
+    }
 
     func hoverChanged(_ input: HoverInput) {
         hover.handle(input, nowMs: nowMs)
@@ -72,14 +93,17 @@ final class HUDViewModel {
 
     private var nowMs: Int64 { Int64(Date().timeIntervalSince1970 * 1000) }
 
-    private var pollCounter = 0
+    private var lastDrainMs: Int64 = 0
     private func tick() {
         let now = nowMs
         // Ask where the pointer is BEFORE advancing the hysteresis clock, so an
         // arrival is timestamped at this tick rather than the next one.
         // `HoverPolicy.handle` is idempotent for a repeated input, which is what
-        // makes polling the same signal ten times a second harmless.
-        if let input = pointerProvider?() { hover.handle(input, nowMs: now) }
+        // makes polling the same signal fifty times a second harmless.
+        if let reading = pointerProvider?() {
+            hover.handle(reading.hover, nowMs: now)
+            schedule(fast: HUDViewModel.wantsFastSampling(reading: reading, isExpanded: hover.isExpanded))
+        }
         if hover.tick(nowMs: now) {
             isExpanded = hover.isExpanded
             onExpansionChanged?(isExpanded)
@@ -92,10 +116,11 @@ final class HUDViewModel {
         // would invalidate them while the log is quiet.
         if ageClock.advance(toMs: now) { clockMs = now }
         guard !isDemo, let engine else { return }
-        // Drain the log ~5x/sec, unchanged, even though the pointer is now
-        // sampled at 20 Hz: reading the log is the expensive half.
-        pollCounter += 1
-        if pollCounter % 4 == 0 {
+        // Drained on the WALL CLOCK, not on a tick count: the tick rate is
+        // adaptive now, and counting ticks would silently drain the log five
+        // times more often whenever the pointer wandered near the menu bar.
+        if now - lastDrainMs >= HoverTiming.drainIntervalMs {
+            lastDrainMs = now
             let next = engine.poll()
             // @Observable invalidates on ASSIGNMENT, not on change, so an
             // unconditional store here re-renders the whole panel 5x/sec for as
