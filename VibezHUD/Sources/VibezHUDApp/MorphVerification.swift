@@ -45,7 +45,7 @@ enum MorphVerification {
             finish()
         }
         report("EXPAND (layer \(e.path))", e.series)
-        assess("expand", e.series, opening: true)
+        assess("expand", e.series, opening: true, window: 250...330)
         check("the bubble is open at the end of the expand window", model.isExpanded == true)
 
         // --- COLLAPSE ---------------------------------------------------------
@@ -60,7 +60,8 @@ enum MorphVerification {
             finish()
         }
         report("COLLAPSE (layer \(k.path))", k.series)
-        assess("collapse", k.series, opening: false)
+        // Deliberately shorter than the expand — see `HUDTheme.collapseDuration`.
+        assess("collapse", k.series, opening: false, window: 200...290)
         check("the bubble is closed at the end of the collapse window", model.isExpanded == false)
 
         finish()
@@ -164,7 +165,8 @@ enum MorphVerification {
     ///   this, and on a slab this big the rebound is the second "pop".
     /// - an OVERSHOOT past the final value.
     /// - a late SETTLE: motion still happening long after the eye expects it.
-    private static func assess(_ name: String, _ s: [Sample], opening: Bool) {
+    private static func assess(_ name: String, _ s: [Sample], opening: Bool,
+                               window: ClosedRange<Double>) {
         guard let last = s.last, s.count >= 2 else {
             return check("\(name): the island moved at all", false)
         }
@@ -201,8 +203,9 @@ enum MorphVerification {
               reversals.isEmpty)
         check(String(format: "%@: never travels past its target  [overshoot=%.2fpt]", name, overshoot),
               overshoot <= 1.0)
-        check(String(format: "%@: the morph itself takes 250-330ms  [%.0fms from onset]", name, travelMs),
-              travelMs >= 240 && travelMs <= 330)
+        check(String(format: "%@: the morph itself takes %.0f-%.0fms  [%.0fms from onset]",
+                     name, window.lowerBound, window.upperBound, travelMs),
+              window.contains(travelMs))
     }
 
     private static func sleepMs(_ ms: Int) async {

@@ -12,6 +12,11 @@ final class HUDViewModel {
     /// only by the expanded bubble — see `AgeClock` for why it exists at all.
     private(set) var clockMs: Int64
 
+    /// True when the menu bar is hidden on the HUD's screen — fullscreen, or the
+    /// auto-hide setting. The collapsed flanks take a small upward nudge in that
+    /// mode; see `HoverTuning.flankYNudgeFullscreen`.
+    private(set) var menuBarHidden = false
+
     /// Fired only when `isExpanded` actually flips. The window controller uses it
     /// to re-derive the panel's mouse opacity, which MUST track the collapsed /
     /// expanded state — see `NotchHoverRouter`.
@@ -101,8 +106,16 @@ final class HUDViewModel {
         // `HoverPolicy.handle` is idempotent for a repeated input, which is what
         // makes polling the same signal fifty times a second harmless.
         if let reading = pointerProvider?() {
-            hover.handle(reading.hover, nowMs: now)
+            // An `immediateExit` is reported to the policy as an exit that
+            // ALREADY aged out its grace period. This is not a change to the
+            // hysteresis — the policy's rules are untouched — it is the same
+            // `.exited` it always took, timestamped as of when waiting would
+            // have ended. A slow exit keeps the full delay and stays
+            // cancellable; only a decisive flick skips it.
+            let stamp = reading.immediateExit ? now - HoverTiming.closeDelayMs : now
+            hover.handle(reading.hover, nowMs: stamp)
             schedule(fast: HUDViewModel.wantsFastSampling(reading: reading, isExpanded: hover.isExpanded))
+            if menuBarHidden != reading.menuBarHidden { menuBarHidden = reading.menuBarHidden }
         }
         if hover.tick(nowMs: now) {
             isExpanded = hover.isExpanded
@@ -157,6 +170,12 @@ final class HUDViewModel {
     }
 
     var needsYouCount: Int { snapshot.needsYou.count }
+    var doneCount: Int { snapshot.done.count }
     var workingCount: Int { snapshot.working.count }
+
+    /// Live tuning values, so the view can read the fullscreen nudge. Replaced
+    /// by the window controller when `--tune-hover` re-reads UserDefaults.
+    private(set) var tuning = HoverTuning.load()
+    func updateTuning(_ t: HoverTuning) { if t != tuning { tuning = t } }
     var totalRows: Int { snapshot.needsYou.count + snapshot.done.count + snapshot.working.count }
 }

@@ -95,7 +95,9 @@ struct NotchIsland<Board: View>: View {
         .background(HUDTheme.islandFill)
         .clipShape(shape)
         .offset(x: isExpanded ? 0 : IslandMetrics.centerOffset(needsYou: needsYou, working: working))
-        .animation(HUDTheme.expand, value: isExpanded)
+        // Resolved from the NEW state, so growing uses the expand curve and
+        // shrinking uses the shorter collapse one.
+        .animation(isExpanded ? HUDTheme.expand : HUDTheme.collapse, value: isExpanded)
     }
 
     /// The content trails the shape: it fades in only once the growth is under

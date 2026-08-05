@@ -12,16 +12,27 @@ final class NotchWindowController {
     /// `HUDViewModel.hoverChanged` also drains the event log.
     private var lastRouting: HoverInput = .exited
 
+    /// When the HUD was last TOLD the pointer is leaving. Distinct from
+    /// `isExpanded`, which only flips once the close delay has run out — this is
+    /// the close ONSET, and it is the number the predictive-exit work is about.
+    private(set) var lastExitRoutedMs: Int64?
+
     private let logsHover: Bool
+    /// Motion history for the exit predictor, fed by the same 20ms samples the
+    /// hover poll already takes.
+    private var kinematics = PointerKinematics()
+    private var tuning = HoverTuning.load()
+    private let tunes: Bool
 
     /// Where the pointer is, indirected so `--verify-hover` can drive the REAL
     /// panel along a scripted path instead of wherever the physical mouse
     /// happens to be sitting. Production never replaces it.
     var pointerSource: () -> CGPoint = { NSEvent.mouseLocation }
 
-    init(model: HUDViewModel, logsHover: Bool = false) {
+    init(model: HUDViewModel, logsHover: Bool = false, tunes: Bool = false) {
         self.model = model
         self.logsHover = logsHover
+        self.tunes = tunes
         self.geometry = NotchWindowController.currentGeometry()
 
         panel = NSPanel(contentRect: .zero,
@@ -54,6 +65,9 @@ final class NotchWindowController {
             // change the answer for a pointer that has not moved at all, and the
             // answer decides mouse opacity — which cannot wait for the next poll.
             self.layout()
+            // A fresh gesture starts at every transition: motion recorded on the
+            // way IN must never be extrapolated into an immediate way OUT.
+            self.resetKinematics()
             _ = self.pollPointer()
         }
         // The one and only source of hover, installed last so nothing samples a
@@ -123,12 +137,63 @@ final class NotchWindowController {
         // the island's size follows the row count. While EXPANDED the row count
         // is frozen, so this can never resize the window mid-morph.
         layout()
-        let reading = NotchHoverRouter.read(pointer: pointerSource(),
+        if tunes { tuning = HoverTuning.load() }      // live-editable during a session
+
+        let pointer = pointerSource()
+        let nowMs = Int64(Date().timeIntervalSince1970 * 1000)
+        kinematics.record(pointer, tMs: nowMs)
+
+        var reading = NotchHoverRouter.read(pointer: pointer,
                                             isExpanded: model.isExpanded,
                                             geometry: geometry,
                                             expandedRect: expandedIslandRect)
+        reading.menuBarHidden = NotchWindowController.menuBarIsHidden(on: hudScreen)
+
+        // The predictor can only ever make the HUD close SOONER. It never opens
+        // anything and never keeps anything open, so a wrong call costs one
+        // 20ms sample of a collapse that the next inside sample cancels.
+        let zone = NotchHoverRouter.activeZone(isExpanded: model.isExpanded,
+                                               hoverRect: geometry.hoverRect,
+                                               expandedRect: expandedIslandRect)
+        let decision = ExitPredictor.decide(pointer: pointer, kinematics: kinematics,
+                                            zone: zone, isExpanded: model.isExpanded,
+                                            tuning: tuning)
+        if model.isExpanded && decision.exit {
+            reading.hover = .exited
+            reading.immediateExit = decision.immediate
+        }
+        tuneLog(pointer: pointer, decision: decision, reading: reading)
+
         apply(reading.hover, notifyModel: false)
         return reading
+    }
+
+    /// The pointer teleported (a warp, a space switch) or the HUD just opened —
+    /// either way the motion history describes a different gesture and must not
+    /// be extrapolated across the discontinuity.
+    func resetKinematics() { kinematics.reset() }
+
+    private var hudScreen: NSScreen { NSScreen.screens.first ?? NSScreen.main! }
+
+    static func menuBarIsHidden(on screen: NSScreen) -> Bool {
+        NotchHoverRouter.menuBarIsHidden(screenFrame: screen.frame,
+                                         visibleFrame: screen.visibleFrame)
+    }
+
+    private func tuneLog(pointer: CGPoint, decision: ExitPredictor.Decision, reading: PointerReading) {
+        guard tunes, let log = HoverTuneLog.shared else { return }
+        let v = kinematics.velocity, a = kinematics.acceleration
+        let p = decision.projected
+        log.line(String(format:
+            "pos=(%.0f,%.0f) v=(%.0f,%.0f)|%.0f a=(%.0f,%.0f) proj=%@ "
+            + "hover=%@ imm=%d pred=%d expanded=%d menuBarHidden=%d nudge=%.1f  %@",
+            pointer.x, pointer.y, v.dx, v.dy, kinematics.speed, a.dx, a.dy,
+            p.map { String(format: "(%.0f,%.0f)", $0.x, $0.y) } ?? "-",
+            reading.hover == .entered ? "in" : "out",
+            reading.immediateExit ? 1 : 0, decision.predicted ? 1 : 0,
+            model.isExpanded ? 1 : 0, reading.menuBarHidden ? 1 : 0,
+            reading.menuBarHidden ? tuning.flankYNudgeFullscreen : 0,
+            decision.reason))
     }
 
     /// The immediate path: something happened that must be reflected before the
@@ -157,6 +222,7 @@ final class NotchWindowController {
         }
         guard input != lastRouting else { return input }
         lastRouting = input
+        if input == .exited { lastExitRoutedMs = Int64(Date().timeIntervalSince1970 * 1000) }
         if notifyModel { model.hoverChanged(input) }
         return input
     }

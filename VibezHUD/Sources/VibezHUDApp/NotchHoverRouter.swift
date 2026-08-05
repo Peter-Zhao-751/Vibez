@@ -17,8 +17,15 @@ import CoreGraphics
 public struct PointerReading: Sendable, Equatable {
     public var hover: HoverInput
     public var nearTop: Bool
-    public init(hover: HoverInput, nearTop: Bool) {
+    /// The exit is certain and fast — collapse without waiting out the close
+    /// delay. See `ExitPredictor`.
+    public var immediateExit: Bool
+    /// The menu bar is hidden on the HUD's screen (fullscreen, or auto-hide).
+    public var menuBarHidden: Bool
+    public init(hover: HoverInput, nearTop: Bool,
+                immediateExit: Bool = false, menuBarHidden: Bool = false) {
         self.hover = hover; self.nearTop = nearTop
+        self.immediateExit = immediateExit; self.menuBarHidden = menuBarHidden
     }
 }
 
@@ -98,6 +105,24 @@ public enum NotchHoverRouter {
     /// poll is already running at 20ms and cannot skip over it.
     public static func isNearTop(pointer: CGPoint, screen: CGRect) -> Bool {
         pointer.y >= screen.maxY - HoverTiming.fastBandDepth && pointer.y <= screen.maxY
+    }
+
+    /// Is the menu bar hidden on this screen — fullscreen, or the auto-hide
+    /// setting?
+    ///
+    /// MEASURED on this machine (`--probe-screen`, round-4 report): desktop with
+    /// the menu bar showing gives `frame.maxY 982` against `visibleFrame.maxY
+    /// 949` — a 33pt gap, one menu-bar height. With the menu bar hidden the two
+    /// coincide. The threshold sits at 4pt rather than 0 because the gap is
+    /// reported as 32 or 33 depending on who is asking, and neither is close to
+    /// the margin.
+    ///
+    /// Pure, so BOTH modes are testable: the fullscreen input could not be
+    /// observed headlessly here (see the report), and a heuristic that can only
+    /// be exercised in the mode it does not apply to is not a heuristic, it is a
+    /// guess.
+    public static func menuBarIsHidden(screenFrame: CGRect, visibleFrame: CGRect) -> Bool {
+        screenFrame.maxY - visibleFrame.maxY < 4
     }
 
     /// Mouse opacity follows the routing exactly: the panel may intercept clicks

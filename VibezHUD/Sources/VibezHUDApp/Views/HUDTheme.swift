@@ -46,8 +46,14 @@ enum HUDTheme {
     /// of motion in two visibly distinct movements, which is what "it pops up
     /// twice" was describing. `bounce: 0` cannot overshoot at all.
     static let morphDuration: Double = 0.24
+    /// ASYMMETRIC on purpose. A big slab shrinking reads slower than the same
+    /// slab growing — the eye tracks the leading edge, and on the way out it is
+    /// travelling toward a place the user has already stopped looking. 0.20
+    /// against 0.24 measures as barely different and feels noticeably crisper.
+    static let collapseDuration: Double = 0.20
     static let expand = Animation.spring(duration: morphDuration, bounce: 0)
-    static let expandDescription = "spring(duration: 0.24, bounce: 0)"
+    static let collapse = Animation.spring(duration: collapseDuration, bounce: 0)
+    static let expandDescription = "spring(duration: 0.24 out / 0.20 back, bounce: 0)"
     /// The board arrives INSIDE the morph, not after it: at 0.09 + 0.14 it is
     /// fully in by 0.23s, before the shape settles at 0.28s, so the eye sees one
     /// event rather than a slab followed by its contents.

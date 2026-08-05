@@ -42,8 +42,12 @@ enum WarpVerification {
         check("precondition: belowIsland is inside the WINDOW but off the island",
               c.panel.frame.contains(belowIsland) && !island.contains(belowIsland))
 
-        let restore = NSEvent.mouseLocation
-        defer { CGWarpMouseCursorPosition(toCG(restore)) }
+        // Restored EXPLICITLY, not by `defer`: this function ends in `exit()`,
+        // and `exit` does not unwind the stack — the defer would never run and
+        // the user's cursor would be left wherever the last warp put it. That
+        // also made consecutive runs flaky, since each one started from the
+        // previous one's parking spot.
+        Self.restorePoint = NSEvent.mouseLocation
 
         await warp(to: center, settle: 700)
         check("resting: collapsed, click-through",
@@ -122,10 +126,116 @@ enum WarpVerification {
         await warp(to: center, settle: 700)
         check("third exit still collapses", model.isExpanded == false)
 
+        await predictiveExit(c, model, island: island, notch: notch, center: center)
+
         line("")
+        finish()
+    }
+
+    private static var restorePoint = CGPoint.zero
+
+    private static func finish() -> Never {
+        CGWarpMouseCursorPosition(toCG(restorePoint))
         if failures == 0 { line("WARP VERIFY: PASS"); exit(0) }
         line("WARP VERIFY: \(failures) FAILED")
         exit(1)
+    }
+
+    /// The round-4 complaint: leaving still felt delayed. Containment cannot
+    /// help — by the time the pointer is outside it has been outside for a
+    /// sample, and only then does the close delay start. So the collapse is now
+    /// predicted from the pointer's own velocity and acceleration, and these
+    /// three cases are the ones that matter: it must start early on a real
+    /// departure, it must NOT start early on a feint, and a slow drift must keep
+    /// its grace period.
+    private static func predictiveExit(_ c: NotchWindowController, _ model: HUDViewModel,
+                                       island: CGRect, notch: CGPoint, center: CGPoint) async {
+        line("")
+        line("--- predictive exit ---")
+
+        // 1. FAST SWIPE OUT, measured twice: once with the predictor disabled
+        //    (its margin pushed out of reach through the same UserDefaults knob
+        //    a tuning session uses) and once as shipped. The number that matters
+        //    is close ONSET — when the HUD is told the pointer is leaving — not
+        //    when `isExpanded` flips, which is onset plus the close delay plus
+        //    the morph and would be identical either way.
+        let d = UserDefaults.standard
+        d.set(1_000_000.0, forKey: HoverTuning.prefix + "exitMarginPt")
+        let baseline = await swipeOut(c, model, island: island, notch: notch)
+        d.removeObject(forKey: HoverTuning.prefix + "exitMarginPt")
+        let predicted = await swipeOut(c, model, island: island, notch: notch)
+
+        line(String(format: "   swipe-out  boundary crossed at step %d", predicted.crossed))
+        line(String(format: "   close onset  WITHOUT prediction: step %d   WITH: step %d",
+                    baseline.onset, predicted.onset))
+        check("the swipe-out closes at all", predicted.onset >= 0)
+        check("...and the close STARTS BEFORE the cursor leaves the island (+1 sample)  "
+              + "[onset@\(predicted.onset) vs crossed@\(predicted.crossed)]",
+              predicted.onset >= 0 && predicted.crossed >= 0 && predicted.onset <= predicted.crossed + 1)
+        check("...earlier than containment alone could ever manage  "
+              + "[\(predicted.onset) < \(baseline.onset)]",
+              predicted.onset < baseline.onset)
+
+        // 2. FEINT. Move outward fast enough to trip the prediction, then come
+        //    back INSIDE within 60ms. The prediction is allowed to be wrong; it
+        //    is not allowed to cost anything when it is. This works only because
+        //    `HoverPolicy`'s re-entry cancel is untouched.
+        await warp(to: notch, settle: 400)
+        check("precondition: expanded before the feint", model.isExpanded == true)
+        for p in [CGPoint(x: island.midX, y: island.maxY - 40),
+                  CGPoint(x: island.midX, y: island.maxY - 110),
+                  CGPoint(x: island.midX, y: island.maxY - 175)] {
+            CGWarpMouseCursorPosition(toCG(p))
+            try? await Task.sleep(nanoseconds: 20_000_000)
+        }
+        // ...and back, well inside, inside the close delay.
+        CGWarpMouseCursorPosition(toCG(CGPoint(x: island.midX, y: island.maxY - 30)))
+        try? await Task.sleep(nanoseconds: 60_000_000)
+        check("a feint back inside within 60ms does NOT collapse  [expanded=\(model.isExpanded)]",
+              model.isExpanded == true)
+
+        // 3. SLOW DRIFT across the boundary keeps the grace period: nothing about
+        //    this motion says the user has decided to leave.
+        await warp(to: notch, settle: 400)
+        let driftStart = Date()
+        var driftClosed: Double = -1
+        for i in 0..<12 {
+            let p = CGPoint(x: island.midX, y: island.maxY - CGFloat(i) * 6)   // ~300pt/s
+            CGWarpMouseCursorPosition(toCG(p))
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if driftClosed < 0 && !model.isExpanded {
+                driftClosed = Date().timeIntervalSince(driftStart) * 1000
+            }
+        }
+        line(String(format: "   slow drift: still open after %.0fms of crawling%@",
+                    Date().timeIntervalSince(driftStart) * 1000,
+                    driftClosed < 0 ? "" : String(format: " (closed at %.0fms)", driftClosed)))
+        check("a slow drift inside the island does not trip the predictor",
+              driftClosed < 0 || driftClosed > 150)
+        await warp(to: center, settle: 500)
+    }
+
+    /// One fast departure, sampled in 20ms steps. Returns the step at which the
+    /// cursor genuinely left the hover zone and the step at which the HUD was
+    /// told it was leaving.
+    private static func swipeOut(_ c: NotchWindowController, _ model: HUDViewModel,
+                                 island: CGRect, notch: CGPoint) async -> (crossed: Int, onset: Int) {
+        await warp(to: notch, settle: 450)
+        let zone = island.insetBy(dx: -NotchHoverRouter.forgiveness, dy: -NotchHoverRouter.forgiveness)
+        let before = c.lastExitRoutedMs
+        var crossed = -1, onset = -1
+        let step: CGFloat = 60          // 60pt per 20ms = 3000pt/s, a real flick
+        for i in 0..<14 {
+            // Start 30pt INSIDE the top edge: `CGRect.contains` excludes maxY, so
+            // beginning exactly on the boundary would report "already outside".
+            let p = CGPoint(x: island.midX, y: island.maxY - 30 - CGFloat(i) * step)
+            CGWarpMouseCursorPosition(toCG(p))
+            try? await Task.sleep(nanoseconds: 20_000_000)
+            if crossed < 0 && !zone.contains(p) { crossed = i }
+            if onset < 0 && c.lastExitRoutedMs != before { onset = i }
+        }
+        await warp(to: CGPoint(x: island.midX, y: 100), settle: 400)
+        return (crossed, onset)
     }
 
     /// Poll the model every 5ms until it reaches `expanded`, and report how long
