@@ -124,7 +124,8 @@ struct SessionColumn: View {
             // same as twelve — the bubble never grows to accommodate them.
             ScrollView(.vertical) {
                 VStack(spacing: HUDTheme.tileSpacing) {
-                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap) }
+                    // Rows inside the panel are bare — the panel is the surface.
+                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, bare: grouped) }
                 }
                 .padding(.bottom, 4)
             }

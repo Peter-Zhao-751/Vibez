@@ -34,17 +34,17 @@ enum HUDTheme {
     // seam, which is exactly what the first build got wrong.
     static let islandFill = Color.black
     static let tileFill = Color.white.opacity(0.075)
-    /// The NEEDS YOU section's grouping panel — Mail's sidebar trick: a lighter
-    /// rounded slab behind a whole section, not a marker on each row.
+    /// The NEEDS YOU section's grouping panel — Mail's sidebar trick: one
+    /// lighter rounded slab around the whole section, header and rows together.
     ///
-    /// TUNED AGAINST `tileFill`, not picked for its own sake. What the eye reads
-    /// is the STEP between a card and whatever is behind it, and that step has to
-    /// survive being moved onto a lighter background. On black a tile composites
-    /// to RGB 19, a step of 19. At 0.055 the panel is RGB 14, and a tile over it
-    /// lands at 32 — a step of 18. So a needs-you card stands off its panel by
-    /// almost exactly as much as a done card stands off the island, and the panel
-    /// still reads as a distinct surface rather than as fog.
-    static let sectionFill = Color.white.opacity(0.055)
+    /// The rows inside it are BARE (see `SessionTile.bare`): the panel is the
+    /// only surface, exactly like Mail's sidebar. The first attempt kept card
+    /// fills on the rows over a faint 0.055 wash, which read as "grayed-out
+    /// messages" rather than a containing element — the user's words. With no
+    /// cards competing, the panel itself carries the contrast: 0.09 composites
+    /// to RGB 23 on black, a bigger step off the island than a card's 19, so
+    /// the slab unmistakably reads as its own element.
+    static let sectionFill = Color.white.opacity(0.09)
     static let sectionCornerRadius: CGFloat = 16
     static let sectionPadding: CGFloat = 8
     /// One height for every tile in every column.

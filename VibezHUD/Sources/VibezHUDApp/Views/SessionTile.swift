@@ -24,6 +24,11 @@ struct SessionTile: View {
     /// it and the counter freezes with the panel open. See `AgeClock`.
     let nowMs: Int64
     let onTap: (Session) -> Void
+    /// Inside a `SectionPanel` the PANEL is the surface, so the row is bare —
+    /// no card fill, no border, just content. Mail's sidebar rows carry no
+    /// chrome of their own; giving them cards again is what made the panel
+    /// read as "grayed-out messages" instead of one containing element.
+    var bare = false
 
     private var isDim: Bool { session.state == .done || session.state == .ended }
 
@@ -58,8 +63,8 @@ struct SessionTile: View {
         // space rather than shrinking and breaking the row rhythm.
         .frame(maxWidth: .infinity, minHeight: HUDTheme.tileHeight,
                maxHeight: HUDTheme.tileHeight, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: 11).fill(HUDTheme.tileFill))
-        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
+        .background(bare ? nil : RoundedRectangle(cornerRadius: 11).fill(HUDTheme.tileFill))
+        .overlay(bare ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
         .opacity(isDim ? 0.48 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }
