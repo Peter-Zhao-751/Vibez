@@ -13,7 +13,9 @@ struct BubbleBoard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            column("NEEDS YOU", HUDTheme.needsYou, snapshot.needsYou)
+            // Only NEEDS YOU is panelled. The panel is the urgency marker, and
+            // a marker on all three marks nothing.
+            column("NEEDS YOU", HUDTheme.needsYou, snapshot.needsYou, grouped: true)
             column("DONE", HUDTheme.done, snapshot.done)
             column("WORKING", HUDTheme.working, snapshot.working)
         }
@@ -29,8 +31,9 @@ struct BubbleBoard: View {
     /// The column body moved to `SessionColumn`: each one now owns scroll state
     /// so it can decide whether its own edges have earned a fade, and `@State`
     /// cannot live in a method.
-    private func column(_ title: String, _ dot: Color, _ sessions: [Session]) -> some View {
+    private func column(_ title: String, _ dot: Color, _ sessions: [Session],
+                        grouped: Bool = false) -> some View {
         SessionColumn(title: title, dot: dot, sessions: sessions,
-                      nowMs: nowMs, onTap: onTap, forcedFade: forcedFade)
+                      nowMs: nowMs, onTap: onTap, grouped: grouped, forcedFade: forcedFade)
     }
 }

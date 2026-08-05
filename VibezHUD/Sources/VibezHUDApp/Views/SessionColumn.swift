@@ -44,6 +44,28 @@ public struct ScrollFadeState: Sendable, Equatable {
     }
 }
 
+/// Mail's sidebar panel: a lighter rounded slab wrapped around a whole SECTION —
+/// its header and its rows together — sitting on the darker background.
+///
+/// This is the urgency marker now. Marking each needs-you row individually (a
+/// bar, then a ring) said the same thing once per row and still did not group
+/// anything; a panel says it once, about the section, which is what the eye is
+/// actually looking for when it scans three columns.
+struct SectionPanel<Content: View>: View {
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        content()
+            .padding(HUDTheme.sectionPadding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius)
+                .fill(HUDTheme.sectionFill))
+            // Scrolling happens INSIDE the panel, so the panel's corners have to
+            // own the clip.
+            .clipShape(RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius))
+    }
+}
+
 /// One column of the expanded board.
 ///
 /// A view of its own, not a function on `BubbleBoard`, because each column now
@@ -54,6 +76,10 @@ struct SessionColumn: View {
     let sessions: [Session]
     let nowMs: Int64
     let onTap: (Session) -> Void
+    /// Wrap this column's header and tiles in a `SectionPanel`. Only NEEDS YOU
+    /// asks for it — the panel IS the urgency marker, so a panel on all three
+    /// would mark nothing.
+    var grouped = false
     /// Test seam: `--verify-pixels` forces a fade state, because `ImageRenderer`
     /// makes a single synchronous pass and `onScrollGeometryChange` never fires
     /// inside it. Nil in production.
@@ -64,6 +90,24 @@ struct SessionColumn: View {
     private var active: ScrollFadeState { forcedFade ?? fade }
 
     var body: some View {
+        Group {
+            if grouped { SectionPanel { section } } else { section }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// The scroll area asks for exactly the room its tiles need and no more, so
+    /// the panel HUGS its content the way Mail's does instead of stretching to
+    /// the full column height when the section is nearly empty. Tiles are a
+    /// fixed height now, so this is arithmetic rather than a guess.
+    private var naturalScrollHeight: CGFloat {
+        guard !sessions.isEmpty else { return 0 }
+        return CGFloat(sessions.count) * HUDTheme.tileHeight
+            + CGFloat(sessions.count - 1) * HUDTheme.tileSpacing
+            + 4                                    // the stack's own bottom padding
+    }
+
+    private var section: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Circle().fill(dot).frame(width: 6, height: 6)
@@ -95,7 +139,9 @@ struct SessionColumn: View {
             .mask(active.maskGradient)
             // Short enough not to lag the scroll, long enough not to blink.
             .animation(.easeInOut(duration: 0.15), value: active)
+            // At most what the tiles need; less when the board is short, and
+            // then it scrolls.
+            .frame(maxHeight: naturalScrollHeight)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

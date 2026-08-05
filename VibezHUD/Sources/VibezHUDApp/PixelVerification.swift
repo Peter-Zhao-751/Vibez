@@ -25,7 +25,7 @@ enum PixelVerification {
         orientationControl()
         everyTileIsTheSameHeight()
         theScrollFadeIsEarned()
-        needsYouIsRingedNotBarred()
+        theNeedsYouSectionIsPanelled()
         expandedIsPureBlack(notch: notch, bubble: bubble)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: true)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: false)
@@ -66,48 +66,96 @@ enum PixelVerification {
               Set(heights).count == 1)
     }
 
-    /// The 2pt amber bar down the left edge is gone — it lined up with nothing,
-    /// least of all the header dot above it. A needs-you tile is RINGED instead,
-    /// Mail-sidebar style: same fill as every other tile, amber border.
-    private static func needsYouIsRingedNotBarred() {
+    /// Round 5 ringed each needs-you TILE in amber. Wrong read: what Mail does,
+    /// and what was asked for, is to group the whole SECTION in a lighter panel.
+    /// So the rows are plain again and the panel carries the meaning.
+    ///
+    /// Two things have to be true and only one of them is about colour: the gap
+    /// BETWEEN tiles inside the section must show the panel (not the island's
+    /// black), the same gap in an unpanelled column must show black, and no
+    /// amber may survive on a tile at all.
+    private static func theNeedsYouSectionIsPanelled() {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         let demo = DemoData.snapshot()
-        guard let ring = rasterize(tile(demo.needsYou[0], now)),
-              let plain = rasterize(tile(demo.working[0], now))
-        else { return check("needs-you and plain tiles rendered", false) }
 
-        // The border runs the whole way round, so the TOP edge — where the old
-        // bar never was — is where to look.
-        // `strokeBorder` draws inside the edge, so the amber occupies the first
-        // ~1pt of rows; take the best of them rather than betting on one.
-        let topAmber = (0..<Int(2 * scale)).map { amberRun(ring, row: $0) }.max() ?? 0
-        let plainTopAmber = (0..<Int(2 * scale)).map { amberRun(plain, row: $0) }.max() ?? 0
-        check("a needs-you tile is ringed in amber along its top edge  [\(topAmber)px]",
-              topAmber > Int(150 * scale))
-        check("...and an ordinary tile is not  [\(plainTopAmber)px]", plainTopAmber == 0)
-
-        // ...and the old bar is really gone: a 2pt-wide amber column running the
-        // full height at the leading edge would show up as amber deep inside the
-        // tile, well below the border's corner radius.
-        let midRow = ring.height / 2
-        let inset = Int(3 * scale)
-        let p = ring.px(inset, midRow)
-        check("no amber bar survives inside the leading edge  [\(rgb(p))]",
-              !(p.r > 150 && p.g > 90 && p.b < 90))
-    }
-
-    private static func tile(_ s: Session, _ now: Int64) -> some View {
-        SessionTile(session: s, nowMs: now) { _ in }
-            .fixedSize(horizontal: false, vertical: true)
+        // The panel's own composition, rendered with a plain stack in place of
+        // the ScrollView — a ScrollView's content does not render under
+        // ImageRenderer at all (round-5 finding), and the claim here is about
+        // what sits BEHIND the tiles, which the stack reproduces exactly.
+        func stack(_ sessions: [Session]) -> some View {
+            VStack(spacing: HUDTheme.tileSpacing) {
+                ForEach(sessions) { SessionTile(session: $0, nowMs: now) { _ in } }
+            }
             .frame(width: 300)
+        }
+        guard let panelled = rasterize(SectionPanel { stack(demo.needsYou) }
+                                        .background(HUDTheme.islandFill)),
+              // WORKING, not DONE: done/ended tiles render at 0.48 opacity, so
+              // comparing a full-strength needs-you card against a dimmed one
+              // would measure the dimming, not the panel.
+              let plain = rasterize(stack(demo.working).background(HUDTheme.islandFill))
+        else { return check("panelled and plain sections rendered", false) }
+
+        // Between the first and second tile: inside the panel that band is the
+        // panel's fill; with no panel it is the island's black.
+        let gapPt = Double(HUDTheme.sectionPadding + HUDTheme.tileHeight) + Double(HUDTheme.tileSpacing) / 2
+        let inGap = panelled.px(panelled.width / 2, Int(gapPt * scale))
+        let plainGapPt = Double(HUDTheme.tileHeight) + Double(HUDTheme.tileSpacing) / 2
+        let plainGap = plain.px(plain.width / 2, Int(plainGapPt * scale))
+        line("     between-tile gap: panelled=\(rgb(inGap))  unpanelled=\(rgb(plainGap))")
+        check("the gap between needs-you tiles shows the section panel, not black  [\(rgb(inGap))]",
+              inGap.r > 6 && inGap.r < 30 && inGap.r == inGap.g && inGap.g == inGap.b)
+        check("the same gap in an unpanelled column is pure black  [\(rgb(plainGap))]",
+              plainGap.r == 0 && plainGap.g == 0 && plainGap.b == 0)
+
+        // A card has to keep standing off whatever is behind it. The STEP is the
+        // tuned quantity — see `HUDTheme.sectionFill`.
+        let tileOnPanel = panelled.px(panelled.width / 2, Int((HUDTheme.sectionPadding + 30) * scale))
+        let tileOnBlack = plain.px(plain.width / 2, Int(30 * scale))
+        let stepOnPanel = tileOnPanel.r - inGap.r
+        let stepOnBlack = tileOnBlack.r - plainGap.r
+        line("     card step: on panel \(tileOnPanel.r)-\(inGap.r)=\(stepOnPanel)  "
+             + "on island \(tileOnBlack.r)-\(plainGap.r)=\(stepOnBlack)")
+        check("a card stands off its panel about as much as it stands off the island  "
+              + "[\(stepOnPanel) vs \(stepOnBlack)]", abs(stepOnPanel - stepOnBlack) <= 3)
+
+        // ...and the ring is gone. Checked on the tile's EDGES, where a
+        // `strokeBorder` lives — not "anywhere", because Claude's agent chip is
+        // legitimately orange and sits well inside the tile. The round-5 ring
+        // measured 570px along the top edge alone.
+        guard let tileOnly = rasterize(SessionTile(session: demo.needsYou[0], nowMs: now) { _ in }
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(width: 300))
+        else { return check("needs-you tile rendered", false) }
+        let edge = amberOnEdges(tileOnly, inset: Int(2 * scale))
+        let inside = (0..<tileOnly.height).reduce(0) { $0 + amberRun(tileOnly, row: $1) } - edge
+        line("     needs-you tile amber: edges=\(edge)px  interior=\(inside)px (the agent chip)")
+        check("no amber ring survives on a needs-you tile's edges  [\(edge)px]", edge == 0)
+        check("...while the agent chip is untouched  [\(inside)px]", inside > 0)
     }
 
-    /// Pixels in one row that look like the needs-you amber.
+    /// Pixels in one row that look like the needs-you amber. Kept from the round-5
+    /// ring check, now used to prove the opposite: that there is none left.
     private static func amberRun(_ r: Raster, row: Int) -> Int {
         var n = 0
         for x in 0..<r.width {
             let p = r.px(x, row)
             if p.r > 120 && p.g > 60 && p.g < 170 && p.b < 90 { n += 1 }
+        }
+        return n
+    }
+
+    /// Amber pixels in the outermost `inset` frame of the raster — the band a
+    /// `strokeBorder` occupies.
+    private static func amberOnEdges(_ r: Raster, inset: Int) -> Int {
+        var n = 0
+        for y in 0..<r.height {
+            for x in 0..<r.width {
+                let onEdge = x < inset || x >= r.width - inset || y < inset || y >= r.height - inset
+                guard onEdge else { continue }
+                let p = r.px(x, y)
+                if p.r > 120 && p.g > 60 && p.g < 170 && p.b < 90 { n += 1 }
+            }
         }
         return n
     }

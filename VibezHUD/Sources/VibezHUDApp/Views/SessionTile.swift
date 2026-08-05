@@ -6,10 +6,12 @@ import VibezSessionKit
 /// the state is — a row wash says it twice, louder, and was rejected outright in
 /// the mockups.
 ///
-/// A needs-you row is marked by RINGING it — the same trick Mail's sidebar uses
-/// for a selected mailbox: identical fill, a coloured border. The 2pt hairline
-/// that used to sit down the left edge is gone; it did not line up with anything
-/// (least of all the column header's dot) and read as a stray mark.
+/// Nothing marks a needs-you row at the ROW level any more. First it was a 2pt
+/// amber hairline down the left edge (lined up with nothing), then an amber ring
+/// around each tile (louder, and still per-row). What Mail actually does — and
+/// what was asked for — is group the whole SECTION in a panel: see
+/// `SectionPanel`. Urgency belongs to the section, not to every row in it, so
+/// every tile in every column now uses one identical neutral treatment.
 ///
 /// Every tile is EXACTLY `HUDTheme.tileHeight` tall, whether it has a detail line
 /// or not. Intrinsic heights made the three columns ragged — a two-line done tile
@@ -23,7 +25,6 @@ struct SessionTile: View {
     let nowMs: Int64
     let onTap: (Session) -> Void
 
-    private var isNeedsYou: Bool { session.state == .needsYou }
     private var isDim: Bool { session.state == .done || session.state == .ended }
 
     var body: some View {
@@ -58,11 +59,7 @@ struct SessionTile: View {
         .frame(maxWidth: .infinity, minHeight: HUDTheme.tileHeight,
                maxHeight: HUDTheme.tileHeight, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: 11).fill(HUDTheme.tileFill))
-        .overlay(
-            RoundedRectangle(cornerRadius: 11)
-                .strokeBorder(isNeedsYou ? HUDTheme.needsYou.opacity(0.6) : HUDTheme.tileStroke,
-                              lineWidth: 1)
-        )
+        .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
         .opacity(isDim ? 0.48 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }
