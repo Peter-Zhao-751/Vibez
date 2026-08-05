@@ -9,5 +9,6 @@ let package = Package(
         .executableTarget(name: "vibez-hud-probe", dependencies: ["VibezSessionKit"]),
         .executableTarget(name: "VibezHUDApp", dependencies: ["VibezSessionKit"]),
         .testTarget(name: "VibezSessionKitTests", dependencies: ["VibezSessionKit"]),
+        .testTarget(name: "VibezHUDAppTests", dependencies: ["VibezHUDApp"]),
     ]
 )
