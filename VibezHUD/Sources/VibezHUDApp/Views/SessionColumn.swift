@@ -130,9 +130,10 @@ struct SessionColumn: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
                 Circle().fill(dot).frame(width: 6, height: 6)
-                Text(title).font(.system(size: 8.5, weight: .bold)).kerning(0.9)
-                Spacer(minLength: 4)
-                Text("\(sessions.count)").font(.system(size: 8.5, weight: .bold)).opacity(0.55)
+                // Count LEADS the title in one run of the same font — "2 NEEDS
+                // YOU" — instead of trailing at the column's far edge.
+                Text("\(sessions.count) \(title)")
+                    .font(.system(size: 8.5, weight: .bold)).kerning(0.9)
             }
             .foregroundStyle(.white.opacity(0.55))
             // Forced height: BoardLayout adds these numbers up to size the

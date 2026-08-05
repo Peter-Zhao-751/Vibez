@@ -13,10 +13,12 @@ struct BubbleBoard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            // NEEDS YOU is the filled slab (the urgency marker); DONE gets the
-            // same wrap as an outline; WORKING stays bare.
+            // NEEDS YOU is the filled slab (the urgency marker). DONE keeps the
+            // panel-grey bubbles but NO section outline — DONE is the middle
+            // column and an outlined box's top edge runs under the hardware
+            // notch, which chopped it visibly (user round). WORKING stays bare.
             column("NEEDS YOU", HUDTheme.needsYou, snapshot.needsYou, panel: .filled, style: .panelCell)
-            column("DONE", HUDTheme.done, snapshot.done, panel: .outlined, style: .doneCard)
+            column("DONE", HUDTheme.done, snapshot.done, style: .doneCard)
             column("WORKING", HUDTheme.working, snapshot.working, style: .workingCard)
         }
         // Sides and bottom are EQUAL and small — BoardLayout sizes the island

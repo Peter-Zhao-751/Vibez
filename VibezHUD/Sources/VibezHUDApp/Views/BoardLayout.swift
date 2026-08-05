@@ -53,14 +53,14 @@ enum BoardLayout {
     /// The whole board, margins included — what the island's height should be
     /// when it is not capped by the screen.
     ///
-    /// Panelled columns (NEEDS YOU filled, DONE outlined — same geometry) are
-    /// LIFTED by `sectionPadding` so their headers sit on the bare column's
-    /// header line (see BubbleBoard); their contribution to the needed height
-    /// is therefore their own height minus the lift.
+    /// The panelled column (NEEDS YOU) is LIFTED by `sectionPadding` so its
+    /// header sits on the bare columns' header line (see BubbleBoard); its
+    /// contribution to the needed height is therefore its own height minus
+    /// the lift. DONE is bare again — its outlined panel died under the
+    /// hardware notch.
     static func boardHeight(_ counts: BoardCounts) -> CGFloat {
-        let lift = HUDTheme.sectionPadding
-        let tallest = max(columnHeight(rows: counts.needsYou, panelled: true) - lift,
-                          max(columnHeight(rows: counts.done, panelled: true) - lift,
+        let tallest = max(columnHeight(rows: counts.needsYou, panelled: true) - HUDTheme.sectionPadding,
+                          max(columnHeight(rows: counts.done, panelled: false),
                               columnHeight(rows: counts.working, panelled: false)))
         return HUDTheme.boardTopMargin + tallest + HUDTheme.boardBottomMargin
     }
