@@ -19,12 +19,12 @@ struct BubbleBoard: View {
             column("DONE", HUDTheme.done, snapshot.done)
             column("WORKING", HUDTheme.working, snapshot.working)
         }
-        // Top rides the headers up beside the notch (verified: the middle
-        // column's header clears the 185pt cutout by ~30pt at 1040 wide).
         // Sides and bottom are EQUAL and small — BoardLayout sizes the island
         // so the bottom black is exactly boardBottomMargin, like the sides.
-        // (The top padding was once silently reverted by a refactor: 8097a7d.)
-        .padding(.top, HUDTheme.boardTopMargin)
+        // The TOP margin is applied per column (see `column`): the panelled
+        // one starts sectionPadding higher so its header lands on the same
+        // line as the bare columns' headers. (The top padding was once
+        // silently reverted by a refactor: 8097a7d.)
         .padding(.horizontal, HUDTheme.boardSideMargin)
         .padding(.bottom, HUDTheme.boardBottomMargin)
     }
@@ -36,5 +36,11 @@ struct BubbleBoard: View {
                         grouped: Bool = false) -> some View {
         SessionColumn(title: title, dot: dot, sessions: sessions,
                       nowMs: nowMs, onTap: onTap, grouped: grouped, forcedFade: forcedFade)
+            // "Make the NEEDS YOU text the same level as the rest": the panel
+            // wraps its header in sectionPadding, so the panelled column starts
+            // that much higher — header tops align across all three columns.
+            // BoardLayout.boardHeight mirrors this lift; keep them in step.
+            .padding(.top, grouped ? HUDTheme.boardTopMargin - HUDTheme.sectionPadding
+                                   : HUDTheme.boardTopMargin)
     }
 }

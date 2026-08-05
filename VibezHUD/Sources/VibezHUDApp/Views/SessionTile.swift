@@ -58,6 +58,10 @@ struct SessionTile: View {
             }
             Spacer(minLength: 0)
         }
+        // The dim is CONTENT-only: dimming the whole tile made done cards
+        // darker than working cards, and once the user chose that darker
+        // shade for both, the card color had to stop depending on state.
+        .opacity(isDim ? 0.48 : 1)
         .padding(.horizontal, 10)
         .padding(.vertical, HUDTheme.tileVerticalPadding)
         // Fixed height, content top-aligned: a two-line tile carries the empty
@@ -65,9 +69,8 @@ struct SessionTile: View {
         .frame(maxWidth: .infinity, minHeight: HUDTheme.tileHeight,
                maxHeight: HUDTheme.tileHeight, alignment: .topLeading)
         .background(RoundedRectangle(cornerRadius: inPanel ? HUDTheme.panelCellRadius : 11)
-            .fill(inPanel ? HUDTheme.panelCellFill : HUDTheme.tileFill))
-        .overlay(inPanel ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
-        .opacity(isDim ? 0.48 : 1)
+            .fill(inPanel ? HUDTheme.panelCellFill : HUDTheme.mutedCardFill))
+        .overlay(inPanel ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.mutedCardStroke, lineWidth: 1))
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }
     }

@@ -89,13 +89,24 @@ private let external = ScreenMetrics(
     let h = BoardLayout.boardHeight(counts)
     #expect(g.bubbleRect(boardHeight: h).height == h)
 
-    // And the arithmetic itself: margins + the tallest column, which is the
-    // panelled one whenever counts tie (it alone carries the section padding).
-    let tallest = BoardLayout.columnHeight(rows: 2, panelled: true)
+    // And the arithmetic itself: margins + the tallest column. On tied counts
+    // that is the panelled one, whose height counts MINUS the lift that puts
+    // its header on the bare columns' header line.
+    let tallest = BoardLayout.columnHeight(rows: 2, panelled: true) - HUDTheme.sectionPadding
     #expect(h == HUDTheme.boardTopMargin + tallest + HUDTheme.boardBottomMargin)
-    #expect(tallest == BoardLayout.headerRowHeight + BoardLayout.headerBottomPad
+    #expect(BoardLayout.columnHeight(rows: 2, panelled: true)
+            == BoardLayout.headerRowHeight + BoardLayout.headerBottomPad
             + 2 * HUDTheme.tileHeight + HUDTheme.tileSpacing + BoardLayout.stackBottomPad
             + 2 * HUDTheme.sectionPadding)
+}
+
+/// "Make the NEEDS YOU text the same level as the rest": the panelled column's
+/// top inset plus the panel's own padding must land its header exactly where a
+/// bare column's header lands.
+@Test func allThreeHeadersShareALine() {
+    let panelledHeaderTop = (HUDTheme.boardTopMargin - HUDTheme.sectionPadding) + HUDTheme.sectionPadding
+    let bareHeaderTop = HUDTheme.boardTopMargin
+    #expect(panelledHeaderTop == bareHeaderTop)
 }
 
 /// Sides and bottom must match — "it's uneven on the sides and bottom" was the

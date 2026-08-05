@@ -118,10 +118,25 @@ enum PixelVerification {
         let stepOnPanel = tileOnPanel.r - inGap.r
         let stepOnBlack = tileOnBlack.r - plainGap.r
         line("     cell step: on panel \(tileOnPanel.r)-\(inGap.r)=\(stepOnPanel)  "
-             + "card on island \(tileOnBlack.r)-\(plainGap.r)=\(stepOnBlack)")
+             + "muted card on island \(tileOnBlack.r)-\(plainGap.r)=\(stepOnBlack)")
         check("cells inside the panel are Mail-grey — clearly lighter than the panel  "
               + "[\(stepOnPanel)]", stepOnPanel >= 15)
-        check("rows outside the panel keep their card  [\(stepOnBlack)]", stepOnBlack >= 10)
+        check("rows outside the panel keep a (muted) card  [\(stepOnBlack)]",
+              stepOnBlack >= 4 && stepOnBlack <= 14)
+
+        // Done and Working bubbles are ONE color — done's. The dim is content-
+        // only now, so a done card and a working card must sample identically
+        // away from the ink.
+        if let doneStack = rasterize(stack(demo.done).background(HUDTheme.islandFill)) {
+            let doneCard = doneStack.px(doneStack.width - Int(6 * scale), Int(30 * scale))
+            let workingCard = plain.px(plain.width - Int(6 * scale), Int(30 * scale))
+            line("     card color: done=\(rgb(doneCard))  working=\(rgb(workingCard))")
+            check("done and working cards are the same color  [\(rgb(doneCard)) vs \(rgb(workingCard))]",
+                  abs(doneCard.r - workingCard.r) <= 1 && abs(doneCard.g - workingCard.g) <= 1
+                  && abs(doneCard.b - workingCard.b) <= 1)
+        } else {
+            check("done stack rendered for the card-color check", false)
+        }
 
         // The tightened tile height must still FIT three lines: render the
         // 3-line variant unconstrained and require it no taller than the fixed
@@ -266,20 +281,29 @@ enum PixelVerification {
         // The complaint: "a visible blur/gradient band across the top". The old
         // build's specular overlay was `.white.opacity(0.055)` at the very top —
         // RGB 14 — and the 0.5pt rim was brighter still. Both die here.
+        //
+        // The NEEDS YOU panel legitimately starts at y=4 now (lifted so its
+        // header shares the bare columns' header line), so its grey enters the
+        // top band in the LEFT third. A resurrected gradient would be full
+        // width, so purity is asserted on the top 3pt everywhere (above the
+        // lifted panel) and on the full 8pt to the right of the panel column.
         var worst = (x: 0, y: 0, v: 0)
         var opaque = true
         let topRows = Int(8 * scale)                      // the top 8 POINTS
+        let panelSafeRows = Int(3 * scale)                // above the lifted panel
+        let rightOfPanel = r.width * 2 / 5                // past the left column
         for y in 0..<topRows {
             for x in 0..<r.width {
                 let p = r.px(x, y)
                 if p.a != 255 { opaque = false }
+                guard y < panelSafeRows || x > rightOfPanel else { continue }
                 let v = max(p.r, max(p.g, p.b))
                 if v > worst.v { worst = (x, y, v) }
             }
         }
         check("the top 8pt (\(topRows) rows x \(r.width) px) are fully opaque", opaque)
-        check("the top 8pt are pure #000000  [brightest=\(worst.v) at (\(worst.x),\(worst.y))]",
-              worst.v == 0)
+        check("the top band is pure #000000 outside the lifted panel  "
+              + "[brightest=\(worst.v) at (\(worst.x),\(worst.y))]", worst.v == 0)
 
         // The rim ran the whole border, so sample the border itself, not just
         // near it. Skip the bottom corner arcs, where partial alpha is the

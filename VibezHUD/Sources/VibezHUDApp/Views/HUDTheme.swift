@@ -53,6 +53,13 @@ enum HUDTheme {
     /// the panel to RGB 51 — a 28-step, close to Mail's own.
     static let panelCellFill = Color.white.opacity(0.12)
     static let panelCellRadius: CGFloat = 10
+    /// Done and Working cards share ONE color — done's. Done tiles used to dim
+    /// the whole tile to 48%, which made their cards darker than Working's;
+    /// the user preferred that darker shade and asked for both columns to
+    /// match it. So the card chrome is muted for both (7.5% x 0.48 ≈ 3.6%),
+    /// and the 48% dim now applies to done/ended CONTENT only.
+    static let mutedCardFill = Color.white.opacity(0.036)
+    static let mutedCardStroke = Color.white.opacity(0.04)
     /// Board margins. Sides and bottom are EQUAL and small — the island hugs
     /// its content Mail-style instead of trailing a black apron. Top stays
     /// larger only because the headers ride beside the notch.
