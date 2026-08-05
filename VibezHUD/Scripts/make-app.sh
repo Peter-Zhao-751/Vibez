@@ -18,6 +18,9 @@ swift build -c release --product VibezHUDApp
 rm -rf "${OUT}"
 mkdir -p "${OUT}/Contents/MacOS" "${OUT}/Contents/Resources"
 cp "${HERE}/.build/release/VibezHUDApp" "${OUT}/Contents/MacOS/VibezHUD"
+# SwiftPM resources (the agent-chip artwork): Bundle.module resolves against
+# Contents/Resources inside an .app, so the bundle must ship there.
+cp -R "${HERE}/.build/release/VibezHUD_VibezHUDApp.bundle" "${OUT}/Contents/Resources/"
 
 cat > "${OUT}/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

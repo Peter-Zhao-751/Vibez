@@ -125,13 +125,8 @@ struct SessionTile: View {
         )
     }
 
-    private var chip: some View {
-        Text(HUDTheme.glyph(session.agent))
-            .font(.system(size: 8, weight: .bold))
-            .foregroundStyle(.white)
-            .frame(width: 15, height: 15)
-            .background(RoundedRectangle(cornerRadius: 5).fill(HUDTheme.chip(session.agent)))
-    }
+    private var chip: some View { AgentChip(agent: session.agent) }
+
 
     private var detailLine: String? {
         if session.state == .ended { return "ended" }

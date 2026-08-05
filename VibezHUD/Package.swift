@@ -7,7 +7,8 @@ let package = Package(
     targets: [
         .target(name: "VibezSessionKit"),
         .executableTarget(name: "vibez-hud-probe", dependencies: ["VibezSessionKit"]),
-        .executableTarget(name: "VibezHUDApp", dependencies: ["VibezSessionKit"]),
+        .executableTarget(name: "VibezHUDApp", dependencies: ["VibezSessionKit"],
+                          resources: [.process("Resources")]),
         .testTarget(name: "VibezSessionKitTests", dependencies: ["VibezSessionKit"]),
         .testTarget(name: "VibezHUDAppTests", dependencies: ["VibezHUDApp"]),
     ]
