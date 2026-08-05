@@ -16,6 +16,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let controller = NotchWindowController(model: model,
                                                logsHover: verifying || args.contains("--debug-hover"))
         self.controller = controller
+        // Before start(): the poll must not race the probe's cursor warping.
+        if args.contains("--verify-pointer") { HoverVerification.probePointerSpace(controller: controller) }
         model.start()
 
         if verifying {

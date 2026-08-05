@@ -7,13 +7,11 @@ final class NotchWindowController {
     private let model: HUDViewModel
     private var geometry: NotchGeometry
 
-    /// The last signal handed to `HoverPolicy`. Pointer monitors fire at motion
-    /// frequency; only transitions are worth forwarding, because
+    /// The last signal handed to `HoverPolicy`. The pointer is sampled twenty
+    /// times a second; only transitions are worth forwarding, because
     /// `HUDViewModel.hoverChanged` also drains the event log.
     private var lastRouting: HoverInput = .exited
 
-    private var globalMonitor: Any?
-    private var localMonitor: Any?
     private let logsHover: Bool
 
     /// Where the pointer is, indirected so `--verify-hover` can drive the REAL
@@ -35,7 +33,6 @@ final class NotchWindowController {
         panel.backgroundColor = .clear
         panel.isMovable = false
         panel.hidesOnDeactivate = false
-        panel.acceptsMouseMovedEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         // Collapsed is the resting state, and collapsed MUST be click-through:
         // this window covers the menu bar.
@@ -45,11 +42,7 @@ final class NotchWindowController {
             .environment(\.notchGeometry, geometry)
         let host = NSHostingView(rootView: root)
         host.autoresizingMask = [.width, .height]
-        panel.contentView = TrackingContainer(child: host) { [weak self] in
-            // The tracking area only ever means "the pointer did something over
-            // the panel"; where it actually is decides the rest.
-            self?.handlePointer(self?.pointerSource() ?? .zero)
-        }
+        panel.contentView = host
 
         layout()
         panel.orderFrontRegardless()
@@ -58,11 +51,14 @@ final class NotchWindowController {
             guard let self else { return }
             // The active zone is state-dependent: expanding grows it from the
             // notch hot spot to the whole panel, collapsing shrinks it back. Both
-            // change the answer for a pointer that has not moved at all.
+            // change the answer for a pointer that has not moved at all, and the
+            // answer decides mouse opacity — which cannot wait for the next poll.
             self.layout()
-            self.handlePointer(self.pointerSource())
+            _ = self.pollPointer()
         }
-        installPointerMonitors()
+        // The one and only source of hover, installed last so nothing samples a
+        // half-built controller.
+        model.pointerProvider = { [weak self] in self?.pollPointer() ?? .exited }
         log("init")
 
         NotificationCenter.default.addObserver(
@@ -73,13 +69,6 @@ final class NotchWindowController {
                     self?.layout()
                 }
             }
-    }
-
-    // `isolated deinit` because the monitor handles are MainActor state; a
-    // nonisolated deinit cannot touch them.
-    isolated deinit {
-        if let globalMonitor { NSEvent.removeMonitor(globalMonitor) }
-        if let localMonitor { NSEvent.removeMonitor(localMonitor) }
     }
 
     static func currentGeometry() -> NotchGeometry {
@@ -93,7 +82,7 @@ final class NotchWindowController {
     }
 
     /// The panel is always sized for the EXPANDED bubble; the SwiftUI content
-    /// draws the collapsed ears inside it. That keeps the morph inside one view
+    /// draws the collapsed island inside it. That keeps the morph inside one view
     /// hierarchy instead of resizing a window mid-animation.
     func layout() {
         let rect = geometry.bubbleRect(rowCount: max(model.totalRows, 3))
@@ -109,47 +98,51 @@ final class NotchWindowController {
 
     // MARK: - Pointer routing
 
-    /// Mouse monitors, not tracking areas, are what make the collapsed panel
-    /// usable: a click-through window receives no tracking callbacks at all, so
-    /// something outside the window has to notice the pointer arriving.
+    /// Sample the pointer and re-derive mouse opacity from it. Called from the
+    /// view model's timer — see `HUDViewModel.pointerProvider`.
     ///
-    /// A GLOBAL monitor sees events delivered to other applications, which is
-    /// every event while the HUD is click-through and the app is inactive. Mouse
-    /// events need no permission — only keyboard monitoring prompts. The LOCAL
-    /// monitor covers the case where our own app is frontmost and the events
-    /// never reach the global monitor.
-    private func installPointerMonitors() {
-        let mask: NSEvent.EventTypeMask = [
-            .mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged,
-        ]
-        globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
-            Task { @MainActor in guard let self else { return }; self.handlePointer(self.pointerSource()) }
-        }
-        localMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            Task { @MainActor in guard let self else { return }; self.handlePointer(self.pointerSource()) }
-            return event
-        }
+    /// POLLING, not monitors. The previous build detected hover with global and
+    /// local `.mouseMoved` monitors; on the user's Mac they never fired, so the
+    /// HUD had to be clicked open. `NSEvent.mouseLocation` is a plain class
+    /// property — it reads the window server's current cursor position with no
+    /// event delivery, no run-loop dependency and no permission — so there is
+    /// nothing left to go wrong. One mechanism, both directions.
+    ///
+    /// Deliberately does NOT notify the model: the model is what called it, and
+    /// it applies the returned input itself.
+    @discardableResult
+    func pollPointer() -> HoverInput {
+        apply(route(pointerSource()), notifyModel: false)
+    }
+
+    /// The immediate path: something happened that must be reflected before the
+    /// next poll. `--verify-hover` drives the panel exclusively through this.
+    func handlePointer(_ pointer: CGPoint) {
+        apply(route(pointer), notifyModel: true)
     }
 
     /// `pointer` is in AppKit screen coordinates (origin bottom-left of the
     /// primary display), the same space `NSScreen.frame` and therefore
     /// `NotchGeometry` live in — no conversion needed, and none must be added.
-    func handlePointer(_ pointer: CGPoint) {
-        apply(NotchHoverRouter.route(pointer: pointer,
-                                     isExpanded: model.isExpanded,
-                                     hoverRect: geometry.hoverRect,
-                                     panelFrame: panel.frame))
+    /// `--verify-pointer` proves that against the live cursor.
+    private func route(_ pointer: CGPoint) -> HoverInput {
+        NotchHoverRouter.route(pointer: pointer,
+                               isExpanded: model.isExpanded,
+                               geometry: geometry,
+                               panelFrame: panel.frame)
     }
 
-    private func apply(_ input: HoverInput) {
+    @discardableResult
+    private func apply(_ input: HoverInput, notifyModel: Bool) -> HoverInput {
         let ignores = NotchHoverRouter.ignoresMouseEvents(for: input)
         if panel.ignoresMouseEvents != ignores {
             panel.ignoresMouseEvents = ignores
             log("routing=\(input) ignoresMouseEvents=\(ignores)")
         }
-        guard input != lastRouting else { return }
+        guard input != lastRouting else { return input }
         lastRouting = input
-        model.hoverChanged(input)
+        if notifyModel { model.hoverChanged(input) }
+        return input
     }
 
     // MARK: - Diagnostics
@@ -167,39 +160,4 @@ final class NotchWindowController {
     }
 
     var debugGeometry: NotchGeometry { geometry }
-}
-
-/// Hosts the SwiftUI content and reports pointer activity with `.activeAlways`,
-/// which is what makes tracking fire while the app is inactive. It is the exit
-/// half of the story only: while the panel is click-through it receives nothing,
-/// so entry is detected by the controller's global monitor instead.
-private final class TrackingContainer: NSView {
-    private let child: NSView
-    private let onHover: () -> Void
-
-    init(child: NSView, onHover: @escaping () -> Void) {
-        self.child = child
-        self.onHover = onHover
-        super.init(frame: .zero)
-        addSubview(child)
-        child.frame = bounds
-    }
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func layout() {
-        super.layout()
-        child.frame = bounds
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        trackingAreas.forEach(removeTrackingArea)
-        addTrackingArea(NSTrackingArea(rect: bounds,
-                                       options: [.mouseEnteredAndExited, .mouseMoved,
-                                                 .activeAlways, .inVisibleRect],
-                                       owner: self, userInfo: nil))
-    }
-    override func mouseEntered(with event: NSEvent) { onHover() }
-    override func mouseExited(with event: NSEvent) { onHover() }
-    override func mouseMoved(with event: NSEvent) { onHover() }
 }

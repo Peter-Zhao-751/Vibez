@@ -20,6 +20,58 @@ enum HoverVerification {
     private static var clicksReceived = 0
     private static var controller: NotchWindowController!
 
+    /// `--verify-pointer`: proves the coordinate space of the polling path
+    /// against the LIVE cursor, rather than trusting the documentation.
+    ///
+    /// Hover now depends on exactly one claim — that `NSEvent.mouseLocation` and
+    /// `NotchGeometry`'s rects are the same space — and a y-flip there looks
+    /// identical to "the events never fire", which is the bug being fixed. So
+    /// the cursor is warped onto the notch (`CGWarpMouseCursorPosition` needs no
+    /// Accessibility grant; posting events would) and the routed answer is read
+    /// back. The flipped twin is checked too: if it ALSO routes `.entered`, the
+    /// hot zone is symmetric enough to be meaningless and the probe says so.
+    static func probePointerSpace(controller c: NotchWindowController) -> Never {
+        let g = c.debugGeometry
+        let screen = g.metrics.frame
+        line("screen        \(fmt(screen))  hasNotch=\(g.hasNotch)")
+        line("notchRect     \(fmt(g.notchRect))")
+        line("hoverRect     \(fmt(g.hoverRect))")
+        line("panel.frame   \(fmt(c.panel.frame))")
+        line("")
+
+        let restoreTo = NSEvent.mouseLocation
+        defer { warp(to: restoreTo) }
+        let target = CGPoint(x: g.notchRect.midX, y: g.notchRect.midY)
+
+        warp(to: target)
+        usleep(200_000)                       // let the window server settle
+        let live = NSEvent.mouseLocation
+        line("warped to     \(fmtP(target))  (AppKit space, assumed bottom-left origin)")
+        line("mouseLocation \(fmtP(live))")
+        check("NSEvent.mouseLocation reads back the point we warped to (±2pt)",
+              abs(live.x - target.x) <= 2 && abs(live.y - target.y) <= 2)
+        check("...and it is near the TOP of the screen, not the bottom  "
+              + "[y=\(Int(live.y)) of \(Int(screen.maxY))]",
+              live.y > screen.midY)
+        check("...so the live cursor hit-tests INSIDE hoverRect",
+              g.hoverRect.contains(live))
+        check("...and routes .entered while collapsed",
+              NotchHoverRouter.route(pointer: live, isExpanded: false,
+                                     geometry: g, panelFrame: c.panel.frame) == .entered)
+
+        // The trap, on real numbers: what a y-flip would have produced.
+        let flipped = CGPoint(x: live.x, y: screen.maxY - live.y)
+        line("flipped twin  \(fmtP(flipped))  (what a CG-space conversion would hand in)")
+        check("the flipped twin routes .exited — a y-flip would kill hover outright",
+              NotchHoverRouter.route(pointer: flipped, isExpanded: false,
+                                     geometry: g, panelFrame: c.panel.frame) == .exited)
+
+        line("")
+        if failures == 0 { line("POINTER SPACE: PASS"); exit(0) }
+        line("POINTER SPACE: \(failures) FAILED")
+        exit(1)
+    }
+
     static func run(controller c: NotchWindowController, model: HUDViewModel) async {
         controller = c
         // Take the pointer away from the physical mouse: every read inside the

@@ -101,3 +101,67 @@ private func route(_ p: CGPoint, expanded: Bool) -> HoverInput {
     #expect(geo.hoverRect.maxX < mbp.auxRight.maxX)
     #expect(geo.hoverRect.width < 300)
 }
+
+// MARK: - The polling overload
+//
+// Hover is now sampled from `NSEvent.mouseLocation` every tick instead of
+// arriving on a mouse-moved monitor, and this overload is the entire hit-test
+// that sampling runs through. Everything below feeds it FAKE points, which is
+// the only way to state the coordinate-space contract as a test at all.
+
+private func poll(_ p: CGPoint, expanded: Bool) -> HoverInput {
+    NotchHoverRouter.route(pointer: p, isExpanded: expanded, geometry: geo, panelFrame: panelFrame)
+}
+
+@Test func pollingTheNotchWhileCollapsedEntersTheHUD() {
+    #expect(poll(CGPoint(x: geo.notchRect.midX, y: geo.notchRect.midY), expanded: false) == .entered)
+}
+
+@Test func pollingAnywhereElseWhileCollapsedDoesNot() {
+    #expect(poll(CGPoint(x: 220, y: geo.notchRect.midY), expanded: false) == .exited)     // menu bar
+    #expect(poll(CGPoint(x: mbp.frame.midX, y: mbp.frame.midY), expanded: false) == .exited)
+    #expect(poll(.zero, expanded: false) == .exited)   // bottom-left corner of the display
+}
+
+@Test func pollingInsideThePanelWhileExpandedKeepsItOpen() {
+    let deepInside = CGPoint(x: panelFrame.midX, y: panelFrame.minY + 40)
+    #expect(poll(deepInside, expanded: true) == .entered)
+    #expect(poll(deepInside, expanded: false) == .exited)   // ...but only while expanded
+}
+
+/// THE Y-FLIP TRAP.
+///
+/// `NSEvent.mouseLocation` is AppKit screen space: origin BOTTOM-left, so the
+/// notch — physically at the top of the display — is at HIGH y. CoreGraphics
+/// display space is the other way up. Convert on the way in and every real hover
+/// hit-tests against the bottom edge of the screen instead, which presents
+/// exactly as "hover never fires" — the bug this whole change is fixing. So the
+/// notch point and its flipped twin are pinned to OPPOSITE answers: no
+/// implementation can satisfy both and still contain a flip.
+@Test func aFlippedPointerIsNotOnTheNotchAndMustNeverRegisterAsHover() {
+    let onTheNotch = CGPoint(x: geo.notchRect.midX, y: geo.notchRect.midY)
+    let flipped = CGPoint(x: onTheNotch.x, y: mbp.frame.maxY - onTheNotch.y)
+
+    #expect(onTheNotch.y > mbp.frame.midY, "precondition: the notch is at HIGH y in AppKit space")
+    #expect(flipped.y < mbp.frame.midY, "precondition: its CG twin is near the bottom of the display")
+
+    #expect(poll(onTheNotch, expanded: false) == .entered)
+    #expect(poll(flipped, expanded: false) == .exited)
+    // ...and the same trap while expanded: the panel is top-anchored too.
+    #expect(poll(onTheNotch, expanded: true) == .entered)
+    #expect(poll(flipped, expanded: true) == .exited)
+}
+
+/// The two overloads are the same function; the geometry one just spares the
+/// caller a member lookup. If they ever disagree, one call site is hit-testing
+/// something else.
+@Test func theGeometryOverloadAgreesWithTheRectOverloadEverywhere() {
+    for x in stride(from: mbp.frame.minX, to: mbp.frame.maxX, by: 37) {
+        for y in stride(from: mbp.frame.minY, to: mbp.frame.maxY, by: 37) {
+            for expanded in [true, false] {
+                let p = CGPoint(x: x, y: y)
+                #expect(poll(p, expanded: expanded) == route(p, expanded: expanded))
+            }
+        }
+    }
+}

@@ -34,6 +34,29 @@ public enum NotchHoverRouter {
             .contains(pointer) ? .entered : .exited
     }
 
+    /// The form the polling path calls: hand it `NSEvent.mouseLocation` and the
+    /// geometry, get back the signal.
+    ///
+    /// `pointer` MUST be in AppKit screen coordinates — origin at the BOTTOM-left
+    /// of the primary display, y increasing upwards — which is the space both
+    /// `NSEvent.mouseLocation` and `NSScreen.frame` (and therefore every rect in
+    /// `NotchGeometry`) already live in. No conversion belongs here.
+    ///
+    /// This is the y-flip trap, and it is worth naming because its symptom is
+    /// indistinguishable from a dead event mechanism: convert to CoreGraphics
+    /// display space (top-left origin) on the way in and the notch — which sits
+    /// at the TOP of the screen, i.e. at HIGH y in this space — hit-tests against
+    /// the bottom of the display instead. Hover then never fires anywhere the
+    /// user would think to put the pointer. `NotchHoverRouterTests` pins both a
+    /// notch point and its flipped twin.
+    public static func route(pointer: CGPoint,
+                             isExpanded: Bool,
+                             geometry: NotchGeometry,
+                             panelFrame: CGRect) -> HoverInput {
+        route(pointer: pointer, isExpanded: isExpanded,
+              hoverRect: geometry.hoverRect, panelFrame: panelFrame)
+    }
+
     /// Mouse opacity follows the routing exactly: the panel may intercept clicks
     /// only while the pointer is inside the active zone.
     ///
