@@ -1,0 +1,82 @@
+import SwiftUI
+import VibezSessionKit
+
+/// Every tile uses the SAME neutral material regardless of state. Apple does not
+/// tint whole rows on a black surface, and the column header already says what
+/// the state is — a row wash says it twice, louder. A needs-you row gets a 2pt
+/// hairline and nothing else.
+struct SessionTile: View {
+    let session: Session
+    let onTap: (Session) -> Void
+
+    private var isNeedsYou: Bool { session.state == .needsYou }
+    private var isDim: Bool { session.state == .done || session.state == .ended }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if isNeedsYou {
+                Capsule().fill(HUDTheme.needsYou).frame(width: 2).padding(.vertical, 1)
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) {
+                    chip
+                    Text(session.proj)
+                        .font(.system(size: 10.5, weight: .bold))
+                        .lineLimit(1).truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    Text(elapsed)
+                        .font(.system(size: 8.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.45))
+                }
+                Text(session.title)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.74))
+                    .lineLimit(1).truncationMode(.tail)
+                if let detail = detailLine {
+                    Text(detail)
+                        .font(.system(size: 9))
+                        .foregroundStyle(.white.opacity(session.state == .ended ? 0.4 : 0.52))
+                        .italic(session.state == .ended)
+                        .lineLimit(1).truncationMode(.middle)
+                }
+            }
+            .padding(.leading, isNeedsYou ? 7 : 9)
+            .padding(.trailing, 9)
+            .padding(.vertical, 8)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 11)
+                .fill(HUDTheme.tileFill)
+                .overlay(RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke))
+        )
+        .opacity(isDim ? 0.48 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap(session) }
+    }
+
+    private var chip: some View {
+        Text(HUDTheme.glyph(session.agent))
+            .font(.system(size: 8, weight: .bold))
+            .foregroundStyle(.white)
+            .frame(width: 15, height: 15)
+            .background(RoundedRectangle(cornerRadius: 5).fill(HUDTheme.chip(session.agent)))
+    }
+
+    private var detailLine: String? {
+        if session.state == .ended { return "ended" }
+        switch (session.tool, session.detail) {
+        case let (tool?, detail?): return "\(tool) · \(detail)"
+        case let (tool?, nil):     return tool
+        case let (nil, detail?):   return detail
+        default:                   return nil
+        }
+    }
+
+    private var elapsed: String {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        let secs = max(0, (now - session.stateSinceMs) / 1000)
+        if secs < 60 { return "\(secs)s" }
+        if secs < 3600 { return "\(secs / 60)m" }
+        return "\(secs / 3600)h"
+    }
+}
