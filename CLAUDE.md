@@ -212,16 +212,33 @@ VibezExtension/               Chrome (MV3) browser companion (TypeScript). Mirro
   src/config.ts               Shared config; mirrors VIBEZ_ID_PATTERN (see Conventions).
 VibezHUD/                     macOS notch HUD (SwiftPM, LSUIElement agent app). Tails the
                               plugins' HUD sidecar log and renders every live agent session
-                              in a panel that drops out of the notch on hover. Never talks to
-                              the network — the log file is its only input.
+                              in a panel that drops out of the notch on hover. The log is
+                              still the only LOCAL input, but the HUD is no longer offline:
+                              since 2026-08-05 it also polls the backend's event log so the
+                              user's OTHER Macs show up as machine-badged rows (see
+                              Conventions).
   Sources/VibezSessionKit/    Foundation-only reducer: EventLogReader (rotation-safe tail),
-                              SessionStore (state machine, column sorts, retention),
+                              SessionStore (state machine, column sorts, retention —
+                              done/ended rows expire after 5 min and evict; a committed
+                              done is sticky, and a `start` after one resets the row),
                               LivenessProbe (kill(2) every call + ONE memoized
                               `ps -o lstart=` per pid — a process's start time is immutable,
-                              and snapshot() runs at 5 Hz on the main actor).
+                              and snapshot() runs at 5 Hz on the main actor),
+                              RemoteEvents (Firestore REST parser + the remote reducer)
+                              and RemoteSessionSource (the polling loop + registration).
   Sources/VibezHUDApp/        App shell, notch geometry, hover hysteresis, click-to-jump
                               back to the terminal/app that owns a session.
   Sources/vibez-hud-probe/    Headless dump of what the panel would render (test seam).
+                              Optional 2nd arg is a remote-doc fixture, so the merge is
+                              exercised end-to-end with no network.
+  Scripts/make-app.sh         Assembles VibezHUD.app (LSUIElement needs an Info.plist,
+                              so the HUD has to be a bundle, not a bare SwiftPM binary).
+  Scripts/install-launch-agent.sh  Builds the app and bootstraps `lol.vibez.hud` as a
+                              LaunchAgent (RunAtLoad, no KeepAlive) so the HUD is live at
+                              login. ProgramArguments is deliberately argument-free:
+                              `--demo` is a dev flag, and a login item carrying it would
+                              pin fake sessions to the notch forever. `--uninstall` boots
+                              it out and removes the plist.
 Tests/run-all.sh              One command, one verdict: the Swift unit tests, the probe
                               build, every plugin's hook + HUD-writer suites, and the
                               cross-plugin end-to-end (hooks → log → probe).
@@ -409,6 +426,29 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   running `/ultracode` is exactly what the panel must show. **The phone suppresses,
   the HUD records everything.** (The one skip they share: Claude's 60s idle-reminder
   notification, which isn't a new transition at all.)
+- **The HUD is no longer network-free (2026-08-05).** `RemoteSessionSource` polls the
+  backend's event log every 15s so sessions from the user's OTHER Macs land in the same
+  panel, machine-badged. `FirestoreRESTClient` reads `events/{vibezId}/items` in the
+  non-default "tokens" db anonymously over the REST API (the same mechanism the Chrome
+  extension uses, minus the SDK: the API key is the iOS app's non-secret one, the rules
+  allow the read, and the Vibez ID is the only secret) — newest 50 docs by `createdAtMs`.
+  On the first poll it registers itself ONCE as a `platform:"web"` device through
+  `registerPushToken`, persisting a 32-hex client id at
+  `~/.config/vibez/hud/web-client-id`. That file must survive relaunches: the id IS the
+  device-doc id, so a fresh one every launch would burn the Vibez ID's 10 device slots.
+  The registration is also what turns the server-side log write ON (`/notify`'s `hasWeb`
+  gate) — no web device, no event docs, no remote rows. Kill switch:
+  `VIBEZ_HUD_NO_REMOTE=1`, or simply no valid 4-word ID in `~/.config/vibez/vibez-id`,
+  and the HUD is fully offline again (`RemoteSessionSource.makeDefault()` returns nil).
+  Remote rows merge in `SessionStore.snapshot(remote:)` and **the local row wins on a sid
+  collision** — the local record is the richer one (cwd, pid liveness, tool detail).
+- **`machine` rides every push and is mirrored across four places.** All three plugins
+  derive it identically — `hostname -s | tr -cd 'A-Za-z0-9.-' | cut -c1-64` — and
+  `Backend/functions/src/validation.ts` re-checks it against `MACHINE_PATTERN`
+  (`^[A-Za-z0-9.-]{1,64}$`), **dropping the field rather than rejecting the request**: a
+  weird hostname must never kill the push it rides on. It is stored on the Firestore
+  event doc only; it is deliberately NOT in the APNs payload, because the phone has no
+  use for it — the HUD is the only consumer.
 - **Agent tags:** `cc` (Claude Code), `cx` (Codex), `cu` (Cursor, 2026-06-11) — whitelisted server-side in `Backend/functions/src/validation.ts` `AGENTS`. The iOS app only themes `cc`/`cx`; unknown tags (`VibezAgent(rawValue:)` → nil) deliberately fall back to the Claude card/banner, which is how `cu` renders today — Cursor-specific theming would be an iOS-side addition, not a backend one.
 - **Same-conversation block debounce (all three plugins, mirrored):** `notify.sh` skips a
   `shield:on` send when an AGENT event (`shield:on`, sent or suppressed) for the same
