@@ -22,6 +22,20 @@ public struct Session: Sendable, Equatable, Identifiable {
     public var app: String?
 
     public var id: String { sid }
+
+    /// The memberwise initialiser is internal by default, which puts `Session`
+    /// out of reach of the app target (`--demo` seeding, previews). Same order,
+    /// same semantics — only the access level differs.
+    public init(sid: String, agent: AgentTag, proj: String, cwd: String, title: String,
+                detail: String?, tool: String?, state: SessionState,
+                startedAtMs: Int64, lastActivityMs: Int64, stateSinceMs: Int64,
+                agentPid: Int32?, agentStart: String?, appPid: Int32?, app: String?) {
+        self.sid = sid; self.agent = agent; self.proj = proj; self.cwd = cwd
+        self.title = title; self.detail = detail; self.tool = tool; self.state = state
+        self.startedAtMs = startedAtMs; self.lastActivityMs = lastActivityMs
+        self.stateSinceMs = stateSinceMs; self.agentPid = agentPid
+        self.agentStart = agentStart; self.appPid = appPid; self.app = app
+    }
 }
 
 /// Exactly the three columns the UI renders. ENDED lives inside `done`.

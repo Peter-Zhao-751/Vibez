@@ -1,9 +1,21 @@
-// Placeholder entry point.
-//
-// VibezHUDApp is an executable target, so it needs a linkable `main` the moment
-// it has any source files. Tasks 15-16 add pure, AppKit-free logic (NotchGeometry,
-// HoverPolicy) here well before there's an app shell to run — Task 17 replaces this
-// file with the real AppKit entry point (NSApplication + NotchWindowController).
-// Until then this only exists so `swift build`/`swift test` link cleanly for the
-// whole package from a stone-cold `.build` directory, not just incrementally.
-print("VibezHUDApp: no UI yet — the app shell lands in Task 17.")
+import AppKit
+
+@MainActor
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    private var controller: NotchWindowController?
+    private var model: HUDViewModel?
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        let demo = CommandLine.arguments.contains("--demo")
+        let model = HUDViewModel(demo: demo)
+        self.model = model
+        controller = NotchWindowController(model: model)
+        model.start()
+    }
+}
+
+let app = NSApplication.shared
+app.setActivationPolicy(.accessory)      // no Dock icon, no menu bar item
+let delegate = AppDelegate()
+app.delegate = delegate
+app.run()
