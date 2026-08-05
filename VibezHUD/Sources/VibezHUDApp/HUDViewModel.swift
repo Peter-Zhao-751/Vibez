@@ -143,30 +143,35 @@ final class HUDViewModel {
         }
     }
 
-    /// Rows the EXPANDED island is sized from — the longest column, since the
-    /// three columns sit side by side.
+    /// Column counts the EXPANDED island is sized from — per column now, not
+    /// just the longest, because the panelled column carries different chrome
+    /// (BoardLayout adds the section padding) and the island's height is exact
+    /// arithmetic rather than a guess.
     ///
     /// FROZEN while open, and recomputed only while collapsed. Two reasons, one
-    /// of which is a bug that would have been very hard to catch by eye: this
-    /// number decides the island's target height, the log is drained five times
+    /// of which is a bug that would have been very hard to catch by eye: these
+    /// numbers decide the island's target height, the log is drained five times
     /// a second, and a new session landing mid-morph would move the target the
     /// animation is flying toward — a genuine second movement in the middle of
-    /// the first. Freezing it also stops the island resizing under a pointer
+    /// the first. Freezing also stops the island resizing under a pointer
     /// that is already reading it; the columns scroll, so nothing is lost.
-    private(set) var bubbleRowCount: Int = 1
+    private(set) var bubbleCounts = BoardCounts(needsYou: 0, done: 0, working: 1)
+
+    /// The exact board height for the frozen counts — what the island renders at.
+    var boardHeight: CGFloat { BoardLayout.boardHeight(bubbleCounts) }
 
     private func refreezeRowsWhileCollapsed() {
-        let next = HUDViewModel.rowCount(current: bubbleRowCount,
-                                         snapshot: snapshot, isExpanded: isExpanded)
-        if next != bubbleRowCount { bubbleRowCount = next }
+        let next = HUDViewModel.counts(current: bubbleCounts,
+                                       snapshot: snapshot, isExpanded: isExpanded)
+        if next != bubbleCounts { bubbleCounts = next }
     }
 
     /// Pure, so the freeze is a testable rule rather than an ordering accident.
     /// `nonisolated` because it touches nothing but its arguments.
-    nonisolated static func rowCount(current: Int, snapshot: HUDSnapshot, isExpanded: Bool) -> Int {
+    nonisolated static func counts(current: BoardCounts, snapshot: HUDSnapshot,
+                                   isExpanded: Bool) -> BoardCounts {
         guard !isExpanded else { return current }
-        return max(1, max(snapshot.needsYou.count,
-                          max(snapshot.done.count, snapshot.working.count)))
+        return BoardCounts(snapshot)
     }
 
     var needsYouCount: Int { snapshot.needsYou.count }

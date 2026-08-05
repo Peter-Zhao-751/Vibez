@@ -40,7 +40,7 @@ struct HUDRootView: View {
     }
 
     private var bubbleSize: CGSize {
-        let r = geometry.bubbleRect(rowCount: model.bubbleRowCount)
+        let r = geometry.bubbleRect(boardHeight: model.boardHeight)
         return CGSize(width: r.width, height: r.height)
     }
 }

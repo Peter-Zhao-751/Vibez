@@ -19,14 +19,8 @@ public struct NotchGeometry: Sendable, Equatable {
     public static let fallbackPillHeight: CGFloat = 24
     public static let maxBubbleWidth: CGFloat = 1040
     public static let maxBubbleHeightFraction: CGFloat = 0.62
-    /// Height of one row in the expanded board: a tile plus the gap under it.
-    /// MUST equal `HUDTheme.tileHeight + HUDTheme.tileSpacing`; they live apart
-    /// because this file is deliberately AppKit-free, and
-    /// `NotchGeometryTests.theRowHeightMatchesTheTilesItIsSizingFor` is what
-    /// keeps them honest.
-    public static let rowHeight: CGFloat = 70
-    /// Column header, top padding that clears the notch, bottom padding.
-    public static let boardChrome: CGFloat = 78
+    // Row/chrome constants are gone: the island's height now comes from
+    // BoardLayout's exact arithmetic, passed in via bubbleRect(boardHeight:).
     static let hoverPadX: CGFloat = 44
     /// How far BELOW the collapsed island the hot zone reaches.
     ///
@@ -67,11 +61,13 @@ public struct NotchGeometry: Sendable, Equatable {
 
     /// The expanded bubble: top-anchored, wider than the notch so it swallows it,
     /// capped so it can never take over the screen.
-    public func bubbleRect(rowCount: Int) -> CGRect {
+    /// The expanded island. `boardHeight` is BoardLayout's exact arithmetic —
+    /// margins included — so the island hugs its content to the point: the
+    /// black below the last row is `boardBottomMargin`, not a guess's slack.
+    public func bubbleRect(boardHeight: CGFloat) -> CGRect {
         let f = metrics.frame
         let width = min(Self.maxBubbleWidth, f.width * 0.84)
-        let contentHeight = Self.boardChrome + CGFloat(max(rowCount, 1)) * Self.rowHeight
-        let height = min(contentHeight, f.height * Self.maxBubbleHeightFraction)
+        let height = min(max(boardHeight, 72), f.height * Self.maxBubbleHeightFraction)
         return CGRect(x: f.midX - width / 2, y: f.maxY - height, width: width, height: height)
     }
 }

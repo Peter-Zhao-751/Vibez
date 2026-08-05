@@ -101,10 +101,7 @@ struct SessionColumn: View {
     /// the full column height when the section is nearly empty. Tiles are a
     /// fixed height now, so this is arithmetic rather than a guess.
     private var naturalScrollHeight: CGFloat {
-        guard !sessions.isEmpty else { return 0 }
-        return CGFloat(sessions.count) * HUDTheme.tileHeight
-            + CGFloat(sessions.count - 1) * HUDTheme.tileSpacing
-            + 4                                    // the stack's own bottom padding
+        BoardLayout.scrollHeight(rows: sessions.count)
     }
 
     private var section: some View {
@@ -116,18 +113,22 @@ struct SessionColumn: View {
                 Text("\(sessions.count)").font(.system(size: 8.5, weight: .bold)).opacity(0.55)
             }
             .foregroundStyle(.white.opacity(0.55))
+            // Forced height: BoardLayout adds these numbers up to size the
+            // island exactly, and a text line's intrinsic height is not a
+            // number you can do arithmetic with.
+            .frame(height: BoardLayout.headerRowHeight)
             // No horizontal padding: the header's dot has to start exactly where
             // the tiles below it start, and the tiles start at the column's edge.
-            .padding(.bottom, 9)
+            .padding(.bottom, BoardLayout.headerBottomPad)
 
             // Each column scrolls on its own, so a hundred sessions look the
             // same as twelve — the bubble never grows to accommodate them.
             ScrollView(.vertical) {
                 VStack(spacing: HUDTheme.tileSpacing) {
-                    // Rows inside the panel are bare — the panel is the surface.
-                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, bare: grouped) }
+                    // Rows inside the panel are Mail cells — see SessionTile.inPanel.
+                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, inPanel: grouped) }
                 }
-                .padding(.bottom, 4)
+                .padding(.bottom, BoardLayout.stackBottomPad)
             }
             .scrollIndicators(.automatic)
             .onScrollGeometryChange(for: ScrollFadeState.self) { geo in

@@ -63,8 +63,8 @@ private let external = ScreenMetrics(
 
 @Test func theBubbleIsCappedAndCentered() {
     let g = NotchGeometry(metrics: mbp)
-    let small = g.bubbleRect(rowCount: 2)
-    let huge = g.bubbleRect(rowCount: 500)
+    let small = g.bubbleRect(boardHeight: BoardLayout.boardHeight(.init(needsYou: 2, done: 1, working: 1)))
+    let huge = g.bubbleRect(boardHeight: BoardLayout.boardHeight(.init(needsYou: 500, done: 0, working: 0)))
     #expect(huge.height <= mbp.frame.height * 0.62 + 0.001)
     #expect(huge.height >= small.height)
     #expect(huge.width <= 1040)
@@ -77,12 +77,29 @@ private let external = ScreenMetrics(
     let tiny = ScreenMetrics(frame: CGRect(x: 0, y: 0, width: 900, height: 600),
                              safeAreaTopInset: 0, auxLeft: .zero, auxRight: .zero)
     let g = NotchGeometry(metrics: tiny)
-    #expect(g.bubbleRect(rowCount: 10).width <= 900)
+    #expect(g.bubbleRect(boardHeight: 800).width <= 900)
 }
 
-/// The bubble's height math and the tiles it is sizing for live in different
-/// files on purpose — `NotchGeometry` is AppKit-free so the geometry is testable
-/// with no display attached. That only works if the two agree.
-@Test func theRowHeightMatchesTheTilesItIsSizingFor() {
-    #expect(NotchGeometry.rowHeight == HUDTheme.tileHeight + HUDTheme.tileSpacing)
+/// The island's height IS BoardLayout's arithmetic when under the cap — that
+/// identity is the whole fix for the uneven bottom apron: content bottom edge
+/// to island bottom edge equals boardBottomMargin exactly, matching the sides.
+@Test func underTheCapTheIslandHeightIsExactlyTheBoardArithmetic() {
+    let g = NotchGeometry(metrics: mbp)
+    let counts = BoardCounts(needsYou: 2, done: 2, working: 2)
+    let h = BoardLayout.boardHeight(counts)
+    #expect(g.bubbleRect(boardHeight: h).height == h)
+
+    // And the arithmetic itself: margins + the tallest column, which is the
+    // panelled one whenever counts tie (it alone carries the section padding).
+    let tallest = BoardLayout.columnHeight(rows: 2, panelled: true)
+    #expect(h == HUDTheme.boardTopMargin + tallest + HUDTheme.boardBottomMargin)
+    #expect(tallest == BoardLayout.headerRowHeight + BoardLayout.headerBottomPad
+            + 2 * HUDTheme.tileHeight + HUDTheme.tileSpacing + BoardLayout.stackBottomPad
+            + 2 * HUDTheme.sectionPadding)
+}
+
+/// Sides and bottom must match — "it's uneven on the sides and bottom" was the
+/// complaint, and equality is what "even" means.
+@Test func sideAndBottomMarginsAreEqual() {
+    #expect(HUDTheme.boardSideMargin == HUDTheme.boardBottomMargin)
 }

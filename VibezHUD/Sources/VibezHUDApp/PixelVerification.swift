@@ -82,14 +82,14 @@ enum PixelVerification {
         // the ScrollView — a ScrollView's content does not render under
         // ImageRenderer at all (round-5 finding), and the claim here is about
         // what sits BEHIND the tiles, which the stack reproduces exactly.
-        func stack(_ sessions: [Session], bare: Bool = false) -> some View {
+        func stack(_ sessions: [Session], inPanel: Bool = false) -> some View {
             VStack(spacing: HUDTheme.tileSpacing) {
-                ForEach(sessions) { SessionTile(session: $0, nowMs: now, onTap: { _ in }, bare: bare) }
+                ForEach(sessions) { SessionTile(session: $0, nowMs: now, onTap: { _ in }, inPanel: inPanel) }
             }
             .frame(width: 300)
         }
-        // bare: true mirrors production — SessionColumn passes bare when grouped.
-        guard let panelled = rasterize(SectionPanel { stack(demo.needsYou, bare: true) }
+        // inPanel: true mirrors production — SessionColumn passes it when grouped.
+        guard let panelled = rasterize(SectionPanel { stack(demo.needsYou, inPanel: true) }
                                         .background(HUDTheme.islandFill)),
               // WORKING, not DONE: done/ended tiles render at 0.48 opacity, so
               // comparing a full-strength needs-you card against a dimmed one
@@ -109,19 +109,33 @@ enum PixelVerification {
         check("the same gap in an unpanelled column is pure black  [\(rgb(plainGap))]",
               plainGap.r == 0 && plainGap.g == 0 && plainGap.b == 0)
 
-        // Rows inside the panel are BARE — the panel is the only surface. A
-        // card step inside the panel is exactly the "grayed-out messages" look
-        // the user rejected twice, so it is asserted to ZERO. Rows outside the
-        // panel keep their cards, and that step must survive.
+        // Two greys, like Mail: the panel encompasses the section, and each row
+        // inside it is its own clearly-lighter cell (the Inbox-highlight look).
+        // Bare rows read as "individual black cells" on the panel; a cell step
+        // well above the panel is what makes both surfaces look deliberate.
         let tileOnPanel = panelled.px(panelled.width / 2, Int((HUDTheme.sectionPadding + 30) * scale))
         let tileOnBlack = plain.px(plain.width / 2, Int(30 * scale))
         let stepOnPanel = tileOnPanel.r - inGap.r
         let stepOnBlack = tileOnBlack.r - plainGap.r
-        line("     row step: inside panel \(tileOnPanel.r)-\(inGap.r)=\(stepOnPanel)  "
+        line("     cell step: on panel \(tileOnPanel.r)-\(inGap.r)=\(stepOnPanel)  "
              + "card on island \(tileOnBlack.r)-\(plainGap.r)=\(stepOnBlack)")
-        check("rows inside the panel are bare — no card step, the panel is the surface  "
-              + "[\(stepOnPanel)]", abs(stepOnPanel) <= 1)
+        check("cells inside the panel are Mail-grey — clearly lighter than the panel  "
+              + "[\(stepOnPanel)]", stepOnPanel >= 15)
         check("rows outside the panel keep their card  [\(stepOnBlack)]", stepOnBlack >= 10)
+
+        // The tightened tile height must still FIT three lines: render the
+        // 3-line variant unconstrained and require it no taller than the fixed
+        // height — if the tightening ever clips a line, this fails, not the UI.
+        if let intrinsic = rasterize(SessionTile(session: demo.needsYou[0], nowMs: now, onTap: { _ in })
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .frame(width: 300)) {
+            let intrinsicPt = Double(intrinsic.height) / scale
+            line("     3-line intrinsic height: \(intrinsicPt)pt vs fixed \(HUDTheme.tileHeight)pt")
+            check("three lines fit the tightened tile height  [\(intrinsicPt) <= \(HUDTheme.tileHeight)]",
+                  intrinsicPt <= Double(HUDTheme.tileHeight) + 0.5)
+        } else {
+            check("3-line tile rendered for the fit check", false)
+        }
 
         // ...and the ring is gone. Checked on the tile's EDGES, where a
         // `strokeBorder` lives — not "anywhere", because Claude's agent chip is

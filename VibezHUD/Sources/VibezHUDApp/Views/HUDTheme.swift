@@ -46,16 +46,30 @@ enum HUDTheme {
     /// the slab unmistakably reads as its own element.
     static let sectionFill = Color.white.opacity(0.09)
     static let sectionCornerRadius: CGFloat = 16
-    static let sectionPadding: CGFloat = 8
+    static let sectionPadding: CGFloat = 10
+    /// Mail's second grey: each row inside the panel is its own lighter rounded
+    /// cell, like the Inbox row's highlight in the sidebar. Two surfaces, both
+    /// unmistakably deliberate: panel composites to RGB 23 on black, a cell on
+    /// the panel to RGB 51 — a 28-step, close to Mail's own.
+    static let panelCellFill = Color.white.opacity(0.12)
+    static let panelCellRadius: CGFloat = 10
+    /// Board margins. Sides and bottom are EQUAL and small — the island hugs
+    /// its content Mail-style instead of trailing a black apron. Top stays
+    /// larger only because the headers ride beside the notch.
+    static let boardTopMargin: CGFloat = 14
+    static let boardSideMargin: CGFloat = 10
+    static let boardBottomMargin: CGFloat = 10
     /// One height for every tile in every column.
     ///
-    /// MEASURED, not guessed: unconstrained, the three-line variant (chip +
-    /// project, title, detail) renders 63.0pt and the two-line variant 48.0pt —
-    /// a 15pt gap, which is exactly the raggedness across columns the user
-    /// screenshotted. 63 is the taller of the two, so nothing is ever clipped
-    /// and short tiles carry theempty space. `--verify-pixels` re-measures both.
-    static let tileHeight: CGFloat = 63
-    static let tileSpacing: CGFloat = 7
+    /// Tightened Mail-ward from the measured 63: the three-line content fits 58
+    /// with 6pt vertical padding and 3pt line spacing (lines ≈ 13+13+12 plus
+    /// gaps = 47, +12 padding = 59… the intrinsic fit is re-measured by
+    /// `--verify-pixels`, which fails if the tightening ever clips a line).
+    /// Uniform across columns as before — short tiles carry the empty space.
+    static let tileHeight: CGFloat = 58
+    static let tileSpacing: CGFloat = 5
+    static let tileVerticalPadding: CGFloat = 6
+    static let tileLineSpacing: CGFloat = 3
     static let tileStroke = Color.white.opacity(0.085)
     static let expandedCornerRadius: CGFloat = 30
     /// Matches the notch's own bottom-corner radius, so the resting island's

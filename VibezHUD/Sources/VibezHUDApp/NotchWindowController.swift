@@ -244,7 +244,7 @@ final class NotchWindowController {
     /// Where the EXPANDED island is actually drawn — top-anchored, centred, and
     /// sized from the same row count the view uses. Distinct from `panel.frame`,
     /// which is deliberately larger.
-    var expandedIslandRect: CGRect { geometry.bubbleRect(rowCount: model.bubbleRowCount) }
+    var expandedIslandRect: CGRect { geometry.bubbleRect(boardHeight: model.boardHeight) }
 
     var debugGeometry: NotchGeometry { geometry }
 }

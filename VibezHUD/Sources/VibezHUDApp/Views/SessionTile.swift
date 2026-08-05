@@ -24,16 +24,17 @@ struct SessionTile: View {
     /// it and the counter freezes with the panel open. See `AgeClock`.
     let nowMs: Int64
     let onTap: (Session) -> Void
-    /// Inside a `SectionPanel` the PANEL is the surface, so the row is bare —
-    /// no card fill, no border, just content. Mail's sidebar rows carry no
-    /// chrome of their own; giving them cards again is what made the panel
-    /// read as "grayed-out messages" instead of one containing element.
-    var bare = false
+    /// Inside a `SectionPanel` each row is a Mail-style CELL: a lighter grey
+    /// rounded rect on the panel (like the Inbox row's highlight in Mail's
+    /// sidebar), with no hairline stroke. Two greys, both deliberate — the
+    /// panel encompasses, the cell delineates. Outside a panel a tile is the
+    /// usual card on black.
+    var inPanel = false
 
     private var isDim: Bool { session.state == .done || session.state == .ended }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: HUDTheme.tileLineSpacing) {
                 HStack(spacing: 6) {
                     chip
                     Text(session.proj)
@@ -57,14 +58,15 @@ struct SessionTile: View {
             }
             Spacer(minLength: 0)
         }
-        .padding(.horizontal, 9)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 10)
+        .padding(.vertical, HUDTheme.tileVerticalPadding)
         // Fixed height, content top-aligned: a two-line tile carries the empty
         // space rather than shrinking and breaking the row rhythm.
         .frame(maxWidth: .infinity, minHeight: HUDTheme.tileHeight,
                maxHeight: HUDTheme.tileHeight, alignment: .topLeading)
-        .background(bare ? nil : RoundedRectangle(cornerRadius: 11).fill(HUDTheme.tileFill))
-        .overlay(bare ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: inPanel ? HUDTheme.panelCellRadius : 11)
+            .fill(inPanel ? HUDTheme.panelCellFill : HUDTheme.tileFill))
+        .overlay(inPanel ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.tileStroke, lineWidth: 1))
         .opacity(isDim ? 0.48 : 1)
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }

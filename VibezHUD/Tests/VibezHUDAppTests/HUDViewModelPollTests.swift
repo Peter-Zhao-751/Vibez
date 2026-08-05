@@ -88,21 +88,27 @@ private func snap(needsYou: Int, done: Int, working: Int) -> HUDSnapshot {
                        working: rows(working, .working))
 }
 
-@Test func collapsedTheRowCountFollowsTheLongestColumn() {
-    #expect(HUDViewModel.rowCount(current: 1, snapshot: snap(needsYou: 2, done: 5, working: 3),
-                                 isExpanded: false) == 5)
-    // Never zero: an empty island still has a minimum height.
-    #expect(HUDViewModel.rowCount(current: 4, snapshot: snap(needsYou: 0, done: 0, working: 0),
-                                 isExpanded: false) == 1)
+@Test func collapsedTheCountsFollowTheSnapshot() {
+    #expect(HUDViewModel.counts(current: .init(needsYou: 0, done: 0, working: 1),
+                                snapshot: snap(needsYou: 2, done: 5, working: 3),
+                                isExpanded: false) == BoardCounts(needsYou: 2, done: 5, working: 3))
+    // An empty board still has a minimum island height — that floor now lives
+    // in bubbleRect's clamp, not in the counts.
+    let empty = HUDViewModel.counts(current: .init(needsYou: 4, done: 0, working: 0),
+                                    snapshot: snap(needsYou: 0, done: 0, working: 0),
+                                    isExpanded: false)
+    #expect(empty == BoardCounts(needsYou: 0, done: 0, working: 0))
 }
 
-@Test func expandedTheRowCountIsFrozenNoMatterWhatArrives() {
+@Test func expandedTheCountsAreFrozenNoMatterWhatArrives() {
     let busy = snap(needsYou: 9, done: 9, working: 9)
-    #expect(HUDViewModel.rowCount(current: 2, snapshot: busy, isExpanded: true) == 2)
+    let frozen = BoardCounts(needsYou: 2, done: 1, working: 0)
+    #expect(HUDViewModel.counts(current: frozen, snapshot: busy, isExpanded: true) == frozen)
     // ...including shrinking, which would yank the floor out from under a
     // pointer already inside the board.
-    #expect(HUDViewModel.rowCount(current: 6, snapshot: snap(needsYou: 1, done: 0, working: 0),
-                                  isExpanded: true) == 6)
+    let tall = BoardCounts(needsYou: 6, done: 0, working: 0)
+    #expect(HUDViewModel.counts(current: tall, snapshot: snap(needsYou: 1, done: 0, working: 0),
+                                isExpanded: true) == tall)
 }
 
 // MARK: - Adaptive sampling

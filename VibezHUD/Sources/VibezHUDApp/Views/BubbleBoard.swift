@@ -19,13 +19,14 @@ struct BubbleBoard: View {
             column("DONE", HUDTheme.done, snapshot.done)
             column("WORKING", HUDTheme.working, snapshot.working)
         }
-        // 14pt rides the headers up beside the notch rather than below it. The
-        // outer columns sit left/right of the hardware cutout, and the middle
-        // column's header starts ~30pt clear of the notch's left edge at the
-        // 1040pt island width — verified against this machine's 185pt notch.
-        // (Restored after the SessionColumn refactor accidentally reverted it.)
-        .padding(.top, 14)
-        .padding([.horizontal, .bottom], 14)
+        // Top rides the headers up beside the notch (verified: the middle
+        // column's header clears the 185pt cutout by ~30pt at 1040 wide).
+        // Sides and bottom are EQUAL and small — BoardLayout sizes the island
+        // so the bottom black is exactly boardBottomMargin, like the sides.
+        // (The top padding was once silently reverted by a refactor: 8097a7d.)
+        .padding(.top, HUDTheme.boardTopMargin)
+        .padding(.horizontal, HUDTheme.boardSideMargin)
+        .padding(.bottom, HUDTheme.boardBottomMargin)
     }
 
     /// The column body moved to `SessionColumn`: each one now owns scroll state

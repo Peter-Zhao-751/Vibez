@@ -12,7 +12,7 @@ private let mbp = ScreenMetrics(
 private let geo = NotchGeometry(metrics: mbp)
 
 /// The VISIBLE island when expanded — the black slab the user can see.
-private let islandRect = geo.bubbleRect(rowCount: 6)
+private let islandRect = geo.bubbleRect(boardHeight: 400)
 
 /// The WINDOW that contains it, which is deliberately bigger. Keeping both here
 /// is the point: routing against the window instead of the island is the bug
