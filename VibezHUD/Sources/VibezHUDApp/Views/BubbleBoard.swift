@@ -13,10 +13,10 @@ struct BubbleBoard: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 11) {
-            // Only NEEDS YOU is panelled. The panel is the urgency marker, and
-            // a marker on all three marks nothing.
-            column("NEEDS YOU", HUDTheme.needsYou, snapshot.needsYou, grouped: true, style: .panelCell)
-            column("DONE", HUDTheme.done, snapshot.done, style: .doneCard)
+            // NEEDS YOU is the filled slab (the urgency marker); DONE gets the
+            // same wrap as an outline; WORKING stays bare.
+            column("NEEDS YOU", HUDTheme.needsYou, snapshot.needsYou, panel: .filled, style: .panelCell)
+            column("DONE", HUDTheme.done, snapshot.done, panel: .outlined, style: .doneCard)
             column("WORKING", HUDTheme.working, snapshot.working, style: .workingCard)
         }
         // Sides and bottom are EQUAL and small — BoardLayout sizes the island
@@ -33,15 +33,15 @@ struct BubbleBoard: View {
     /// so it can decide whether its own edges have earned a fade, and `@State`
     /// cannot live in a method.
     private func column(_ title: String, _ dot: Color, _ sessions: [Session],
-                        grouped: Bool = false, style: TileStyle = .workingCard) -> some View {
+                        panel: PanelKind = .none, style: TileStyle = .workingCard) -> some View {
         SessionColumn(title: title, dot: dot, sessions: sessions,
-                      nowMs: nowMs, onTap: onTap, grouped: grouped, tileStyle: style,
+                      nowMs: nowMs, onTap: onTap, panel: panel, tileStyle: style,
                       forcedFade: forcedFade)
-            // "Make the NEEDS YOU text the same level as the rest": the panel
-            // wraps its header in sectionPadding, so the panelled column starts
-            // that much higher — header tops align across all three columns.
-            // BoardLayout.boardHeight mirrors this lift; keep them in step.
-            .padding(.top, grouped ? HUDTheme.boardTopMargin - HUDTheme.sectionPadding
-                                   : HUDTheme.boardTopMargin)
+            // Header alignment: a panel (filled or outlined) wraps its header
+            // in sectionPadding, so panelled columns start that much higher —
+            // header tops align across all three columns. BoardLayout.boardHeight
+            // mirrors this lift; keep them in step.
+            .padding(.top, panel != .none ? HUDTheme.boardTopMargin - HUDTheme.sectionPadding
+                                          : HUDTheme.boardTopMargin)
     }
 }

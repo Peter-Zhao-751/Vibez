@@ -51,15 +51,33 @@ public struct ScrollFadeState: Sendable, Equatable {
 /// bar, then a ring) said the same thing once per row and still did not group
 /// anything; a panel says it once, about the section, which is what the eye is
 /// actually looking for when it scans three columns.
+/// How a column's section is wrapped, if at all.
+enum PanelKind {
+    case none
+    /// The filled Mail-sidebar slab (NEEDS YOU).
+    case filled
+    /// Same geometry, but drawn as an OUTLINE in the working-card stroke color
+    /// (DONE — user round: "an outline in the exact same way, same color as
+    /// the outline for the individual bubbles in Working").
+    case outlined
+}
+
 struct SectionPanel<Content: View>: View {
+    var kind: PanelKind = .filled
     @ViewBuilder var content: () -> Content
 
     var body: some View {
         content()
             .padding(HUDTheme.sectionPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius)
-                .fill(HUDTheme.sectionFill))
+            .background(kind == .filled
+                ? RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius)
+                    .fill(HUDTheme.sectionFill)
+                : nil)
+            .overlay(kind == .outlined
+                ? RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius)
+                    .strokeBorder(HUDTheme.mutedCardStroke, lineWidth: 1)
+                : nil)
             // Scrolling happens INSIDE the panel, so the panel's corners have to
             // own the clip.
             .clipShape(RoundedRectangle(cornerRadius: HUDTheme.sectionCornerRadius))
@@ -79,7 +97,9 @@ struct SessionColumn: View {
     /// Wrap this column's header and tiles in a `SectionPanel`. Only NEEDS YOU
     /// asks for it — the panel IS the urgency marker, so a panel on all three
     /// would mark nothing.
-    var grouped = false
+    var panel = PanelKind.none
+    /// Convenience for the layout paths that only care whether a panel exists.
+    var grouped: Bool { panel != .none }
     /// Bubble treatment for this column's rows — see `TileStyle`.
     var tileStyle = TileStyle.workingCard
     /// Test seam: `--verify-pixels` forces a fade state, because `ImageRenderer`
@@ -93,7 +113,7 @@ struct SessionColumn: View {
 
     var body: some View {
         Group {
-            if grouped { SectionPanel { section } } else { section }
+            if grouped { SectionPanel(kind: panel) { section } } else { section }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

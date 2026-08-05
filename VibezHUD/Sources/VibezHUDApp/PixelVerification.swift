@@ -133,18 +133,29 @@ enum PixelVerification {
               + "[edge \(edgePx.r) vs fill \(tileOnBlack.r)]",
               edgePx.r >= tileOnBlack.r + 10)
 
-        // Experiment round: done bubbles wear the PANEL's grey with no outline;
-        // working keeps the muted card + outline for comparison.
-        if let doneStack = rasterize(stack(demo.done, style: .doneCard).background(HUDTheme.islandFill)) {
-            let doneCard = doneStack.px(doneStack.width - Int(6 * scale), Int(30 * scale))
-            let doneEdge = doneStack.px(doneStack.width / 2, Int(0.5 * scale))
-            line("     done card: fill=\(rgb(doneCard))  edge=\(rgb(doneEdge))  panel=\(rgb(inGap))")
+        // DONE mirrors production: panel-grey bubbles, no per-bubble outline,
+        // the whole section wrapped in an OUTLINED panel drawn in the working-
+        // card stroke color.
+        if let doneSection = rasterize(SectionPanel(kind: .outlined) { stack(demo.done, style: .doneCard) }
+                                        .background(HUDTheme.islandFill)) {
+            let pad = Int(HUDTheme.sectionPadding * scale)
+            let doneCard = doneSection.px(doneSection.width - pad - Int(6 * scale), pad + Int(30 * scale))
+            let bubbleEdge = doneSection.px(doneSection.width / 2, pad + Int(0.5 * scale))
+            let panelEdge = doneSection.px(doneSection.width / 2, Int(0.5 * scale))
+            let interGap = doneSection.px(doneSection.width / 2,
+                                          pad + Int((Double(HUDTheme.tileHeight) + Double(HUDTheme.tileSpacing) / 2) * scale))
+            line("     done section: bubble=\(rgb(doneCard))  bubbleEdge=\(rgb(bubbleEdge))  "
+                 + "panelEdge=\(rgb(panelEdge))  gap=\(rgb(interGap))")
             check("done bubbles are the panel grey  [\(rgb(doneCard)) vs \(rgb(inGap))]",
                   abs(doneCard.r - inGap.r) <= 1)
-            check("done bubbles have no outline  [edge \(doneEdge.r) vs fill \(doneCard.r)]",
-                  abs(doneEdge.r - doneCard.r) <= 3)
+            check("done bubbles have no outline of their own  [\(bubbleEdge.r) vs \(doneCard.r)]",
+                  abs(bubbleEdge.r - doneCard.r) <= 3)
+            check("the done SECTION wears the working-stroke outline  [edge \(panelEdge.r)]",
+                  panelEdge.r >= 15)
+            check("inside the outlined panel the background stays black  [\(rgb(interGap))]",
+                  interGap.r == 0 && interGap.g == 0 && interGap.b == 0)
         } else {
-            check("done stack rendered for the card-color check", false)
+            check("done section rendered for the outline check", false)
         }
 
         // The tightened tile height must still FIT three lines: render the
@@ -291,21 +302,22 @@ enum PixelVerification {
         // build's specular overlay was `.white.opacity(0.055)` at the very top —
         // RGB 14 — and the 0.5pt rim was brighter still. Both die here.
         //
-        // The NEEDS YOU panel legitimately starts at y=4 now (lifted so its
-        // header shares the bare columns' header line), so its grey enters the
-        // top band in the LEFT third. A resurrected gradient would be full
-        // width, so purity is asserted on the top 3pt everywhere (above the
-        // lifted panel) and on the full 8pt to the right of the panel column.
+        // BOTH panelled sections (NEEDS YOU filled, DONE outlined) legitimately
+        // start at y=4 now — lifted so their headers share the bare column's
+        // header line — so their ink enters the top band in the left TWO
+        // thirds. A resurrected gradient would be full width, so purity is
+        // asserted on the top 3pt everywhere (above the lifted panels) and on
+        // the full 8pt over the bare WORKING column's right region.
         var worst = (x: 0, y: 0, v: 0)
         var opaque = true
         let topRows = Int(8 * scale)                      // the top 8 POINTS
-        let panelSafeRows = Int(3 * scale)                // above the lifted panel
-        let rightOfPanel = r.width * 2 / 5                // past the left column
+        let panelSafeRows = Int(3 * scale)                // above the lifted panels
+        let rightOfPanels = r.width * 7 / 10              // inside the bare column
         for y in 0..<topRows {
             for x in 0..<r.width {
                 let p = r.px(x, y)
                 if p.a != 255 { opaque = false }
-                guard y < panelSafeRows || x > rightOfPanel else { continue }
+                guard y < panelSafeRows || x > rightOfPanels else { continue }
                 let v = max(p.r, max(p.g, p.b))
                 if v > worst.v { worst = (x, y, v) }
             }
