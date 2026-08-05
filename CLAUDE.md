@@ -210,6 +210,21 @@ VibezExtension/               Chrome (MV3) browser companion (TypeScript). Mirro
   src/content/                Content script + injected block overlay.
   src/popup/                  React popup (toggle, setup card, analytics, recent triggers).
   src/config.ts               Shared config; mirrors VIBEZ_ID_PATTERN (see Conventions).
+VibezHUD/                     macOS notch HUD (SwiftPM, LSUIElement agent app). Tails the
+                              plugins' HUD sidecar log and renders every live agent session
+                              in a panel that drops out of the notch on hover. Never talks to
+                              the network — the log file is its only input.
+  Sources/VibezSessionKit/    Foundation-only reducer: EventLogReader (rotation-safe tail),
+                              SessionStore (state machine, column sorts, retention),
+                              LivenessProbe (kill(2) every call + ONE memoized
+                              `ps -o lstart=` per pid — a process's start time is immutable,
+                              and snapshot() runs at 5 Hz on the main actor).
+  Sources/VibezHUDApp/        App shell, notch geometry, hover hysteresis, click-to-jump
+                              back to the terminal/app that owns a session.
+  Sources/vibez-hud-probe/    Headless dump of what the panel would render (test seam).
+Tests/run-all.sh              One command, one verdict: the Swift unit tests, the probe
+                              build, every plugin's hook + HUD-writer suites, and the
+                              cross-plugin end-to-end (hooks → log → probe).
 ClaudePlugin/                 Claude Code plugin source.
   scripts/setup.sh            Generates the 4-word Vibez ID, embeds the 2016-word wordlist,
                               prints instructions. /vibez:setup invokes this.
@@ -228,7 +243,11 @@ ClaudePlugin/                 Claude Code plugin source.
                               pending marker by raw existence because THIS plugin's
                               has_pending TTLs + deletes at 30s, Codex's never expires),
                               user-prompt-submit. Falls back to setup.sh for first-run ID gen.
-  hooks/hooks.json            Registers notify.sh against 8 Claude Code lifecycle hooks.
+                              Every handler ALSO appends its transition to the HUD sidecar
+                              log (see Conventions) — a separate path from the push.
+  hooks/hooks.json            Registers notify.sh against 9 Claude Code lifecycle hooks
+                              (SessionEnd included — it writes the HUD's `end` record and
+                              never touches the network).
   test/hooks.e2e.sh           E2e: realistic hook payloads → real dispatch → stub /notify
                               capture (permission-grant shield lifecycle incl. failure leg
                               + approval-watcher grant/deny/slow-grant cases).
@@ -378,6 +397,18 @@ Vibez.xcodeproj/              PBXFileSystemSynchronizedRootGroup — drop a .swi
   private String extension in `VibezPushService/NotificationService.swift`
   (separate targets can't share source) — keep in sync.
 - **Vibez ID format:** `^[a-z]{3,5}(-[a-z]{3,5}){3}$` — 4 hyphen-separated 3-5 letter lowercase words. ~44 bits of entropy (2016-word list). Enforced client- and server-side. The pattern is mirrored across four runtimes — keep them in sync: `PushTokenRegistrar.vibezIdPattern` (Swift), `Backend/functions/src/validation.ts` `VIBEZ_ID_PATTERN` (TS), `VibezExtension/src/config.ts` `VIBEZ_ID_PATTERN` (TS), and the plugins' `setup.sh` wordlist generator (bash — three near-identical copies: ClaudePlugin/, CodexPlugin/, CursorPlugin/).
+- **The HUD sidecar log is written by all three plugins, and the writer block is
+  mirrored byte-for-byte.** `hud_record` / `hud_rotate_if_needed` /
+  `hud_process_chain` in `ClaudePlugin/`, `CodexPlugin/` and `CursorPlugin/`
+  `scripts/notify.sh` are identical apart from `--arg agent` (`cc`/`cx`/`cu`) — keep
+  them that way. One JSONL record per lifecycle transition appended to
+  `~/.config/vibez/hud/events.jsonl` (rotates at 2 MB to `.1`; VibezHUD stitches
+  both). It is called at the EVENT SITE, never from inside `post_vibez`, and always
+  ABOVE the push path's suppressions: the block debounce, the slash-command gates,
+  the excerpt skip and the stop-pending gate all exist to protect the PHONE, while a
+  running `/ultracode` is exactly what the panel must show. **The phone suppresses,
+  the HUD records everything.** (The one skip they share: Claude's 60s idle-reminder
+  notification, which isn't a new transition at all.)
 - **Agent tags:** `cc` (Claude Code), `cx` (Codex), `cu` (Cursor, 2026-06-11) — whitelisted server-side in `Backend/functions/src/validation.ts` `AGENTS`. The iOS app only themes `cc`/`cx`; unknown tags (`VibezAgent(rawValue:)` → nil) deliberately fall back to the Claude card/banner, which is how `cu` renders today — Cursor-specific theming would be an iOS-side addition, not a backend one.
 - **Same-conversation block debounce (all three plugins, mirrored):** `notify.sh` skips a
   `shield:on` send when an AGENT event (`shield:on`, sent or suppressed) for the same
