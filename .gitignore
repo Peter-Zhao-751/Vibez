@@ -22,3 +22,10 @@ node_modules/
 # into the iOS target. Anchor to root so the bundled one is unaffected.
 /GoogleService-Info.plist
 .superpowers/
+
+# SwiftPM build products for the macOS notch HUD, and the assembled
+# VibezHUD.app that Scripts/make-app.sh writes. Listed explicitly rather than
+# leaning on the `build/` rule above and on SwiftPM's generated
+# VibezHUD/.gitignore, either of which could change out from under us.
+VibezHUD/.build/
+VibezHUD/build/
