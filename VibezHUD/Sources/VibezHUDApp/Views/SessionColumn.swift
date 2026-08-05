@@ -129,11 +129,21 @@ struct SessionColumn: View {
     /// The live drag, if any: which tile and its RAW gesture translation.
     /// The column owns this — repulsion needs one brain over all the tiles.
     @State private var drag: (id: Session.ID, translation: CGSize)?
+    /// Test seam, nil in production: `--verify-clip` needs a deterministic
+    /// drag state without synthesizing mouse events (posted CGEvents are
+    /// dropped without Accessibility on this machine).
+    var forcedDrag: (id: Session.ID, translation: CGSize)?
+
+    /// How far past the scroll bounds the mask lets ink live: the biggest
+    /// possible drag excursion, plus a hair.
+    static let dragSlack = max(HUDTheme.bubbleDragLimit, HUDTheme.columnSpacing) + 2
+
+    private var activeDrag: (id: Session.ID, translation: CGSize)? { forcedDrag ?? drag }
 
     /// Per-tile visual offsets: the dragged tile gets the rubber-banded 2D
     /// offset, everyone else gets BubblePhysics' cascaded vertical push.
     private func tileOffsets() -> [CGSize] {
-        guard let drag, let idx = sessions.firstIndex(where: { $0.id == drag.id }) else {
+        guard let drag = activeDrag, let idx = sessions.firstIndex(where: { $0.id == drag.id }) else {
             return Array(repeating: .zero, count: sessions.count)
         }
         let banded = RubberBand.offset(for: drag.translation,
@@ -183,6 +193,13 @@ struct SessionColumn: View {
                 .padding(.bottom, BoardLayout.stackBottomPad)
             }
             .scrollIndicators(.automatic)
+            // A ScrollView clips to its own bounds, and tiles are full column
+            // width — so ANY horizontal drag offset was being cut off at the
+            // column edge (proved by --verify-clip: pulled ink ended at
+            // exactly the rest edge). The wall the bubble must respect is the
+            // panel/column geometry, which the drag limits encode — not the
+            // scroll clip.
+            .scrollClipDisabled()
             .onScrollGeometryChange(for: ScrollFadeState.self) { geo in
                 ScrollFadeState.from(offsetY: geo.contentOffset.y,
                                      contentHeight: geo.contentSize.height,
@@ -190,7 +207,14 @@ struct SessionColumn: View {
             } action: { _, next in
                 fade = next
             }
-            .mask(active.maskGradient)
+            // The mask is a clipper too. Give it horizontal slack so dragged
+            // bubbles can overflow sideways, and slack on any UNFADED vertical
+            // edge; a faded edge keeps its exact boundary — the fade must sit
+            // where the scroll cuts off.
+            .mask(active.maskGradient
+                .padding(.horizontal, -Self.dragSlack)
+                .padding(.top, active.top ? 0 : -Self.dragSlack)
+                .padding(.bottom, active.bottom ? 0 : -Self.dragSlack))
             // Short enough not to lag the scroll, long enough not to blink.
             .animation(.easeInOut(duration: 0.15), value: active)
             // At most what the tiles need; less when the board is short, and

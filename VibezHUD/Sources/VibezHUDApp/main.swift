@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let args = CommandLine.arguments
         if args.contains("--verify-jump") { JumpVerification.run() }
         if args.contains("--verify-pixels") { PixelVerification.run() }
+        if args.contains("--verify-clip") { ClipVerification.run() }
         if args.contains("--probe-screen") { ScreenProbe.run() }
         // Live tuning session: every pointer decision to a file, and every
         // threshold re-read from UserDefaults on each sample.
