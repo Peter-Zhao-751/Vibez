@@ -38,12 +38,24 @@ private let notch = CGSize(width: 200, height: 32)
             + IslandMetrics.flankWidth(count: 2) + IslandMetrics.flankWidth(count: 3))
 }
 
-/// Digits are monospaced on purpose: 1 and 8 must produce the same island, or
-/// the shape twitches every time a count changes value without changing length.
-@Test func theIslandWidthDependsOnDigitCountNotOnWhichDigits() {
-    #expect(IslandMetrics.flankWidth(count: 1) == IslandMetrics.flankWidth(count: 8))
-    #expect(IslandMetrics.flankWidth(count: 10) > IslandMetrics.flankWidth(count: 9))
-    #expect(IslandMetrics.flankWidth(count: 10) == IslandMetrics.flankWidth(count: 99))
+/// The resting island carries DOTS, not counts, so its width no longer depends
+/// on the numbers at all: one session waiting and ninety-nine waiting look
+/// identical from the menu bar, and the island never twitches when a count
+/// ticks over. The numbers themselves are one hover away, in the expanded
+/// column headers.
+@Test func theIslandWidthDoesNotDependOnTheCountAtAll() {
+    let widths = Set([1, 8, 9, 10, 99, 1000].map { IslandMetrics.flankWidth(count: $0) })
+    #expect(widths.count == 1)
+    #expect(widths.first == IslandMetrics.dotPadding * 2 + IslandMetrics.dotDiameter)
+}
+
+/// ...and it is SMALL. The whole complaint was that the island read as a wide
+/// pill rather than the notch grown a whisker.
+@Test func aFlankCostsSixteenPointsNotForty() {
+    #expect(IslandMetrics.flankWidth(count: 1) == 16)
+    let both = IslandMetrics.collapsedSize(needsYou: 3, working: 4, notchSize: notch)
+    #expect(both.width == notch.width + 32)
+    #expect(both.width < notch.width * 1.2, "the island stays close to the notch's own width")
 }
 
 /// The centring correction. The flanks are independent, so an island that were

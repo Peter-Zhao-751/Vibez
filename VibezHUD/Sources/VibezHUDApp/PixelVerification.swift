@@ -161,18 +161,33 @@ enum PixelVerification {
               + "[\(r.width)x\(r.height) px, expected \(Int(expected.width * scale))x\(Int(expected.height * scale))]",
               r.width == Int(expected.width * scale) && r.height == Int(expected.height * scale))
 
+        // The island is now the notch plus two 16pt flanks and nothing else —
+        // minimal enough to read as the notch grown a whisker rather than a pill.
+        check(String(format: "each flank costs %.0fpt, so the island is notch+%.0fpt",
+                     IslandMetrics.flankWidth(count: 1), expected.width - notch.width),
+              expected.width - notch.width == 32)
+
         guard let box = inkBounds(r) else { return check("the collapsed island has visible ink", false) }
-        let inkCentre = Double(box.minY + box.maxY) / 2 / Double(scale)
+        let inkCentre = Double(box.minY + box.maxY + 1) / 2 / Double(scale)
         let shapeCentre = Double(r.height) / 2 / Double(scale)
         let delta = inkCentre - shapeCentre
-        check(String(format: "ink centre %.2fpt vs shape centre %.2fpt — off by %+.2fpt (±1pt)",
+        check(String(format: "dot centre %.2fpt vs shape centre %.2fpt — off by %+.2fpt (±1pt)",
                      inkCentre, shapeCentre, delta), abs(delta) <= 1.0)
-        line(String(format: "     ink rows %d..%d of %d px; %d ink pixels",
+        line(String(format: "     dot rows %d..%d of %d px; %d ink pixels",
                     box.minY, box.maxY, r.height, box.count))
+        check(String(format: "the dots are %.0fpt tall, not a text run  [%.1fpt of ink]",
+                     IslandMetrics.dotDiameter, Double(box.maxY - box.minY + 1) / Double(scale)),
+              abs(Double(box.maxY - box.minY + 1) / Double(scale) - Double(IslandMetrics.dotDiameter)) <= 1.5)
 
-        // ...and it is WHITE ink, which is the readability half of the fix: the
-        // counts no longer sit on glass over the wallpaper.
-        check("the counts are drawn in white  [brightest=\(box.brightest)]", box.brightest >= 230)
+        // ...and each dot is the RIGHT dot. Colour is the only thing carrying
+        // meaning in the resting state now, so it is asserted, not assumed.
+        let midRow = r.height / 2
+        let left = r.px(Int(IslandMetrics.flankWidth(count: 1) / 2 * scale), midRow)
+        let right = r.px(r.width - 1 - Int(IslandMetrics.flankWidth(count: 1) / 2 * scale), midRow)
+        check("left flank is the amber needs-you dot #FF9F0A  [\(rgb(left))]",
+              left.r > 230 && left.g > 130 && left.g < 190 && left.b < 60)
+        check("right flank is the teal working dot #64D2FF  [\(rgb(right))]",
+              right.r > 70 && right.r < 130 && right.g > 190 && right.b > 230)
     }
 
     // MARK: - 3. Quiet is invisible

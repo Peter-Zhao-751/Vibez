@@ -5,23 +5,22 @@ import SwiftUI
 /// these, never from whatever the text engine happens to measure, so the black
 /// shape's width is knowable before it is drawn.
 enum IslandMetrics {
-    /// Breathing room on each side of a flank's content.
-    static let flankPadding: CGFloat = 9
-    /// Both glyphs (the needs-you dot, the working bars) are drawn into a box of
-    /// exactly this width, so one constant covers both flanks.
-    static let glyphWidth: CGFloat = 10
-    static let glyphGap: CGFloat = 5
-    /// Advance of one monospaced digit at `countFontSize` — monospaced on
-    /// purpose: "1" and "8" must not resize the island.
-    static let digitWidth: CGFloat = 7
-    static let countFontSize: CGFloat = 11
+    /// One dot, and nothing else.
+    ///
+    /// The flanks used to carry a dot AND the count, which made the resting
+    /// island a wide pill hanging off both sides of the notch — legible, but
+    /// nothing like "the notch, grown a whisker". A count is a number you read;
+    /// a dot is a thing you notice. The numbers still exist one hover away, in
+    /// the expanded column headers, where there is room for them.
+    static let dotDiameter: CGFloat = 6
+    /// Breathing room on each side of the dot. 5 + 6 + 5 = 16pt per flank,
+    /// against the 40pt a single-digit flank used to cost.
+    static let dotPadding: CGFloat = 5
 
     /// Zero means GONE, not narrow: a flank with nothing to say contributes no
     /// width at all, which is what lets the quiet state collapse onto the notch.
     static func flankWidth(count: Int) -> CGFloat {
-        guard count > 0 else { return 0 }
-        let digits = CGFloat(String(count).count)
-        return flankPadding * 2 + glyphWidth + glyphGap + digitWidth * digits
+        count > 0 ? dotPadding * 2 + dotDiameter : 0
     }
 
     /// The collapsed island is exactly the notch's height and the notch's width
@@ -112,47 +111,30 @@ struct NotchIsland<Board: View>: View {
 
     private var flanks: some View {
         HStack(spacing: 0) {
-            flank(count: needsYou) { needsYouGlyph }
+            flank(count: needsYou, color: HUDTheme.needsYou)
             // The notch itself: a hole in the layout, so nothing is ever drawn
             // into the physical cutout.
             Color.clear.frame(width: notchSize.width, height: collapsedSize.height)
-            flank(count: working) { workingGlyph }
+            flank(count: working, color: HUDTheme.working)
         }
         .frame(width: collapsedSize.width, height: collapsedSize.height)
     }
 
-    /// White on black is legible over any wallpaper — that is the entire reason
-    /// the counts live inside the black shape instead of on a glass ear.
+    /// A single dot, present or absent. Colour carries the meaning — amber for
+    /// waiting on you, teal for still working — and its presence carries the
+    /// only quantity the resting state needs: any, or none.
+    ///
+    /// Static, like everything else here. A dot that pulses in the corner of
+    /// every screen forever is not ambience, it is a fidget spinner.
     @ViewBuilder
-    private func flank<G: View>(count: Int, @ViewBuilder glyph: () -> G) -> some View {
+    private func flank(count: Int, color: Color) -> some View {
         if count > 0 {
-            HStack(spacing: IslandMetrics.glyphGap) {
-                glyph().frame(width: IslandMetrics.glyphWidth)
-                Text("\(count)")
-                    .font(.system(size: IslandMetrics.countFontSize, weight: .bold).monospacedDigit())
-                    .foregroundStyle(.white)
-            }
-            // Centred in the FULL notch height, which is what puts the ink on the
-            // notch's own centre line instead of a few points above it.
-            .frame(width: IslandMetrics.flankWidth(count: count), height: collapsedSize.height)
+            Circle().fill(color)
+                .frame(width: IslandMetrics.dotDiameter, height: IslandMetrics.dotDiameter)
+                // Centred in the FULL notch height, which is what puts the dot on
+                // the notch's own centre line instead of a few points above it.
+                .frame(width: IslandMetrics.flankWidth(count: count), height: collapsedSize.height)
         }
-    }
-
-    // Both glyphs are static. Nothing on this surface animates while the machine
-    // is idle: a pulsing dot and a dancing equaliser in the corner of every
-    // screen, forever, is not ambience, it is a fidget spinner.
-    private var needsYouGlyph: some View {
-        Circle().fill(HUDTheme.needsYou).frame(width: 7, height: 7)
-    }
-
-    private var workingGlyph: some View {
-        HStack(alignment: .center, spacing: 2) {
-            bar(5); bar(9); bar(6)
-        }
-    }
-
-    private func bar(_ height: CGFloat) -> some View {
-        Capsule().fill(HUDTheme.working).frame(width: 2, height: height)
     }
 }
 
