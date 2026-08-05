@@ -231,6 +231,13 @@ if [ ! -f "${MARKER}" ]; then
 else
     bad "grant-clears-pending-marker" "marker survived"
 fi
+hud_log="${HOME}/.config/vibez/hud/events.jsonl"
+watch_rec="$(grep '"kind":"tool"' "${hud_log}" 2>/dev/null | tail -1)"
+if printf '%s' "${watch_rec}" | jq -e '.tool == "Bash" and (.body | startswith("(approved:"))' >/dev/null 2>&1; then
+    ok "watcher grant writes a HUD tool record"
+else
+    bad "watcher grant writes a HUD tool record" "got: ${watch_rec:-<none>}"
+fi
 kill "${GRANT_PID}" 2>/dev/null; wait "${GRANT_PID}" 2>/dev/null
 
 # --- denial: command never starts → no shield:off, marker survives so the

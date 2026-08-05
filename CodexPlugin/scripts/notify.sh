@@ -543,6 +543,12 @@ watch_approval_start() {
             case " ${baseline} " in
                 *" ${pid} "*) continue ;;
             esac
+            # HUD: the approved command is RUNNING — flip the row
+            # needs-input → working at start, not at completion. Recorded
+            # ABOVE the push per the convention (the phone suppresses,
+            # the HUD records everything). Empty proj/cwd/title: identity
+            # fill-in keeps the session's existing name.
+            hud_record "tool" "${sid}" "" "" "" "(approved: ${tool_name})" "${tool_name}"
             if post_vibez "${title}" "(approved: ${tool_name})" \
                 "replied" "off" "${sid}" "cx"; then
                 clear_pending "${sid}"
