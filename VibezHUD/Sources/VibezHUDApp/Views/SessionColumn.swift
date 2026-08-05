@@ -80,6 +80,8 @@ struct SessionColumn: View {
     /// asks for it — the panel IS the urgency marker, so a panel on all three
     /// would mark nothing.
     var grouped = false
+    /// Bubble treatment for this column's rows — see `TileStyle`.
+    var tileStyle = TileStyle.workingCard
     /// Test seam: `--verify-pixels` forces a fade state, because `ImageRenderer`
     /// makes a single synchronous pass and `onScrollGeometryChange` never fires
     /// inside it. Nil in production.
@@ -125,8 +127,7 @@ struct SessionColumn: View {
             // same as twelve — the bubble never grows to accommodate them.
             ScrollView(.vertical) {
                 VStack(spacing: HUDTheme.tileSpacing) {
-                    // Rows inside the panel are Mail cells — see SessionTile.inPanel.
-                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, inPanel: grouped) }
+                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, style: tileStyle) }
                 }
                 .padding(.bottom, BoardLayout.stackBottomPad)
             }

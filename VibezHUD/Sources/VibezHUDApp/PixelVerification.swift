@@ -82,14 +82,14 @@ enum PixelVerification {
         // the ScrollView — a ScrollView's content does not render under
         // ImageRenderer at all (round-5 finding), and the claim here is about
         // what sits BEHIND the tiles, which the stack reproduces exactly.
-        func stack(_ sessions: [Session], inPanel: Bool = false) -> some View {
+        func stack(_ sessions: [Session], style: TileStyle = .workingCard) -> some View {
             VStack(spacing: HUDTheme.tileSpacing) {
-                ForEach(sessions) { SessionTile(session: $0, nowMs: now, onTap: { _ in }, inPanel: inPanel) }
+                ForEach(sessions) { SessionTile(session: $0, nowMs: now, onTap: { _ in }, style: style) }
             }
             .frame(width: 300)
         }
-        // inPanel: true mirrors production — SessionColumn passes it when grouped.
-        guard let panelled = rasterize(SectionPanel { stack(demo.needsYou, inPanel: true) }
+        // .panelCell mirrors production — SessionColumn's needs-you column.
+        guard let panelled = rasterize(SectionPanel { stack(demo.needsYou, style: .panelCell) }
                                         .background(HUDTheme.islandFill)),
               // WORKING, not DONE: an arbitrary unpanelled column (the dim is
               // gone entirely now — done rows render exactly like working), so
@@ -133,16 +133,16 @@ enum PixelVerification {
               + "[edge \(edgePx.r) vs fill \(tileOnBlack.r)]",
               edgePx.r >= tileOnBlack.r + 10)
 
-        // Done and Working bubbles are ONE color — done's. The dim is content-
-        // only now, so a done card and a working card must sample identically
-        // away from the ink.
-        if let doneStack = rasterize(stack(demo.done).background(HUDTheme.islandFill)) {
+        // Experiment round: done bubbles wear the PANEL's grey with no outline;
+        // working keeps the muted card + outline for comparison.
+        if let doneStack = rasterize(stack(demo.done, style: .doneCard).background(HUDTheme.islandFill)) {
             let doneCard = doneStack.px(doneStack.width - Int(6 * scale), Int(30 * scale))
-            let workingCard = plain.px(plain.width - Int(6 * scale), Int(30 * scale))
-            line("     card color: done=\(rgb(doneCard))  working=\(rgb(workingCard))")
-            check("done and working cards are the same color  [\(rgb(doneCard)) vs \(rgb(workingCard))]",
-                  abs(doneCard.r - workingCard.r) <= 1 && abs(doneCard.g - workingCard.g) <= 1
-                  && abs(doneCard.b - workingCard.b) <= 1)
+            let doneEdge = doneStack.px(doneStack.width / 2, Int(0.5 * scale))
+            line("     done card: fill=\(rgb(doneCard))  edge=\(rgb(doneEdge))  panel=\(rgb(inGap))")
+            check("done bubbles are the panel grey  [\(rgb(doneCard)) vs \(rgb(inGap))]",
+                  abs(doneCard.r - inGap.r) <= 1)
+            check("done bubbles have no outline  [edge \(doneEdge.r) vs fill \(doneCard.r)]",
+                  abs(doneEdge.r - doneCard.r) <= 3)
         } else {
             check("done stack rendered for the card-color check", false)
         }

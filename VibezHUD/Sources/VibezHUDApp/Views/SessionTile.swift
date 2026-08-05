@@ -1,6 +1,29 @@
 import SwiftUI
 import VibezSessionKit
 
+/// Per-column bubble treatment.
+enum TileStyle {
+    /// Working: muted card with a visible outline.
+    case workingCard
+    /// Done (experiment, user round): the PANEL's grey, no outline — the same
+    /// surface color that wraps the needs-you section.
+    case doneCard
+    /// Needs-you rows inside the section panel: the lighter Mail-cell grey.
+    case panelCell
+
+    var fill: Color {
+        switch self {
+        case .workingCard: HUDTheme.mutedCardFill
+        case .doneCard: HUDTheme.sectionFill
+        case .panelCell: HUDTheme.panelCellFill
+        }
+    }
+    var cornerRadius: CGFloat {
+        self == .panelCell ? HUDTheme.panelCellRadius : 11
+    }
+    var hasOutline: Bool { self == .workingCard }
+}
+
 /// Every tile uses the SAME neutral material regardless of state. Apple does not
 /// tint whole rows on a black surface, and the column header already says what
 /// the state is — a row wash says it twice, louder, and was rejected outright in
@@ -29,7 +52,7 @@ struct SessionTile: View {
     /// sidebar), with no hairline stroke. Two greys, both deliberate — the
     /// panel encompasses, the cell delineates. Outside a panel a tile is the
     /// usual card on black.
-    var inPanel = false
+    var style = TileStyle.workingCard
 
     // No dim anywhere: done rows look exactly like working rows (user call).
     // A finished session is still marked by its column and, for ended, the
@@ -66,9 +89,11 @@ struct SessionTile: View {
         // space rather than shrinking and breaking the row rhythm.
         .frame(maxWidth: .infinity, minHeight: HUDTheme.tileHeight,
                maxHeight: HUDTheme.tileHeight, alignment: .topLeading)
-        .background(RoundedRectangle(cornerRadius: inPanel ? HUDTheme.panelCellRadius : 11)
-            .fill(inPanel ? HUDTheme.panelCellFill : HUDTheme.mutedCardFill))
-        .overlay(inPanel ? nil : RoundedRectangle(cornerRadius: 11).strokeBorder(HUDTheme.mutedCardStroke, lineWidth: 1))
+        .background(RoundedRectangle(cornerRadius: style.cornerRadius).fill(style.fill))
+        .overlay(style.hasOutline
+            ? RoundedRectangle(cornerRadius: style.cornerRadius)
+                .strokeBorder(HUDTheme.mutedCardStroke, lineWidth: 1)
+            : nil)
         .contentShape(Rectangle())
         .onTapGesture { onTap(session) }
     }
