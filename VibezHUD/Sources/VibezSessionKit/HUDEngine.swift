@@ -7,6 +7,7 @@ public final class HUDEngine {
     private let store: SessionStore
     private let clock: any Clock
     private let remote: RemoteSessionSource?
+    private let config: StoreConfig
 
     public init(logURL: URL = HUDPaths.defaultLogURL,
                 config: StoreConfig = StoreConfig(),
@@ -17,6 +18,7 @@ public final class HUDEngine {
         self.store = SessionStore(config: config, clock: clock, liveness: liveness)
         self.clock = clock
         self.remote = remote
+        self.config = config
     }
 
     /// Begin the remote polling loop (no-op when the feature is off).
@@ -39,7 +41,7 @@ public final class HUDEngine {
     /// Probe seam: merge CANNED remote docs (fixture-injected) instead of
     /// live-polled ones — the probe never touches the network.
     public func snapshotMerging(remoteDocs: [RemoteEventDoc], now: Int64) -> HUDSnapshot {
-        store.snapshot(remote: RemoteReducer.sessions(docs: remoteDocs, now: now))
+        store.snapshot(remote: RemoteReducer.sessions(docs: remoteDocs, now: now, config: config))
     }
 
     private func snapshotWithRemote() -> HUDSnapshot {

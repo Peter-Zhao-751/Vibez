@@ -50,3 +50,39 @@ private func remoteSession(sid: String, state: SessionState, machine: String = "
     s.apply(makeEvent(.prompt, ts: 99_000))
     #expect(s.snapshot().working.first?.machine == nil)
 }
+
+@Test func localEvictionDoesNotResurrectTheRemoteEcho() {
+    // A session this Mac owned, asked, and then ended: once its row evicts
+    // (past retention), the sid must stay dead even though the server's
+    // event log can still hold a needs-input/replied doc for it for up to
+    // staleMs. Without a tombstone, eviction un-does "local wins" and a
+    // stale remote row resurrects as a phantom NEEDS YOU.
+    let clock = FakeClock(100_000)
+    let s = SessionStore(config: StoreConfig(), clock: clock, liveness: FakeLiveness())
+    s.apply(makeEvent(.prompt, ts: 100_000, sid: "shared"))
+    s.apply(makeEvent(.end, ts: 101_000, sid: "shared"))
+    clock.advance(ms: 5 * 60_000 + 1_001)   // past retention
+    _ = s.snapshot()                        // the evicting pass — stamps the tombstone
+    let snap = s.snapshot(remote: [
+        remoteSession(sid: "shared", state: .needsYou, atMs: clock.nowMs - 1_000),
+    ])
+    #expect(snap.needsYou.isEmpty)
+}
+
+@Test func tombstonesExpireAfterStaleMs() {
+    // The tombstone itself must not leak forever — once staleMs has passed
+    // since eviction, a FRESH remote row for the same sid is a legitimately
+    // new session (e.g. resumed on another machine) and should appear.
+    let clock = FakeClock(100_000)
+    let s = SessionStore(config: StoreConfig(), clock: clock, liveness: FakeLiveness())
+    s.apply(makeEvent(.prompt, ts: 100_000, sid: "shared"))
+    s.apply(makeEvent(.end, ts: 101_000, sid: "shared"))
+    clock.advance(ms: 5 * 60_000 + 1_001)   // past retention
+    _ = s.snapshot()                        // evicts, stamps the tombstone
+    clock.advance(ms: 30 * 60_000 + 1)      // past staleMs beyond the eviction
+    _ = s.snapshot()                        // prunes the expired tombstone
+    let snap = s.snapshot(remote: [
+        remoteSession(sid: "shared", state: .needsYou, atMs: clock.nowMs - 1_000),
+    ])
+    #expect(snap.needsYou.map(\.sid) == ["shared"])
+}

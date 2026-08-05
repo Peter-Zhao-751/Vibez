@@ -68,6 +68,10 @@ the HUD (`post-tool-use-failure` also emits `kind=tool`); Codex sessions never w
 - Collapsed green count drops automatically as rows expire (snapshot-driven).
 - Known kept quirk: a row expiring while the panel is expanded leaves its allocated
   height until collapse (island sizing is deliberately frozen mid-hover).
+- Known kept quirk: because retention (5 min, from `lastActivityMs`) is shorter than
+  staleness (30 min), a session whose liveness/staleness path flips it to `.ended`
+  more than 5 minutes after its last activity is pruned in the same snapshot —
+  some sessions never visibly display "ended" at all. Accepted consequence.
 
 ## D. Cross-device sessions
 

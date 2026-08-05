@@ -24,6 +24,11 @@ public final class SessionStore {
     }
 
     private var entries: [String: Entry] = [:]
+    /// sid -> evictedAtMs. A remote doc can outlive local retention by up to
+    /// staleMs (server keeps needs-input/replied alive for staleMs; local
+    /// retention is only 5 min) — without this, evicting a sid re-opens the
+    /// "local wins" dedupe and a stale remote row resurrects as a phantom.
+    private var tombstones: [String: Int64] = [:]
     private let config: StoreConfig
     private let clock: any Clock
     private let liveness: any LivenessProbe
@@ -35,6 +40,9 @@ public final class SessionStore {
     }
 
     public func apply(_ e: HUDEvent) {
+        // A resumed session re-enters `entries` regardless; clearing the
+        // tombstone here is hygiene, not correctness.
+        tombstones.removeValue(forKey: e.sid)
         guard var entry = entries[e.sid] else {
             entries[e.sid] = Entry(session: seed(from: e),
                                    lastAppliedTs: e.ts,
@@ -89,12 +97,19 @@ public final class SessionStore {
         commitPendingDones(now: now)
         var needsYou: [Session] = [], done: [Session] = [], working: [Session] = []
 
+        // Prune expired tombstones first — they must not leak forever.
+        for (sid, evictedAtMs) in tombstones where now - evictedAtMs > config.staleMs {
+            tombstones.removeValue(forKey: sid)
+        }
+
         var evicted: [String] = []
         for (sid, entry) in entries {
             guard var s = resolve(entry, now: now) else {
                 // resolve() returns nil ONLY for retention-pruned done/ended
                 // rows — evict, or a long-lived HUD accumulates one Entry
-                // per sid forever.
+                // per sid forever. Tombstone it: the server's event log can
+                // still hold a needs-input/replied doc for this sid for up
+                // to staleMs after local retention has already dropped it.
                 evicted.append(sid)
                 continue
             }
@@ -106,13 +121,17 @@ public final class SessionStore {
             case .idle: continue
             }
         }
-        for sid in evicted { entries.removeValue(forKey: sid) }
+        for sid in evicted {
+            entries.removeValue(forKey: sid)
+            tombstones[sid] = now
+        }
 
         // Remote rows — server-derived sessions from OTHER machines,
         // pre-resolved by RemoteReducer. Local wins: a sid the local log
-        // already knows is dropped (the local reducer is strictly richer,
-        // and every local push echoes back through the server log).
-        for var s in remote where entries[s.sid] == nil {
+        // already knows (or JUST evicted — see tombstones above) is dropped
+        // (the local reducer is strictly richer, and every local push
+        // echoes back through the server log).
+        for var s in remote where entries[s.sid] == nil && tombstones[s.sid] == nil {
             s.detail = s.detail?.isEmpty == true ? nil : s.detail
             switch s.state {
             case .needsYou: needsYou.append(s)
