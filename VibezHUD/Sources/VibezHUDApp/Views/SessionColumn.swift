@@ -126,6 +126,25 @@ struct SessionColumn: View {
         BoardLayout.scrollHeight(rows: sessions.count)
     }
 
+    /// The live drag, if any: which tile and its RAW gesture translation.
+    /// The column owns this — repulsion needs one brain over all the tiles.
+    @State private var drag: (id: Session.ID, translation: CGSize)?
+
+    /// Per-tile visual offsets: the dragged tile gets the rubber-banded 2D
+    /// offset, everyone else gets BubblePhysics' cascaded vertical push.
+    private func tileOffsets() -> [CGSize] {
+        guard let drag, let idx = sessions.firstIndex(where: { $0.id == drag.id }) else {
+            return Array(repeating: .zero, count: sessions.count)
+        }
+        let banded = RubberBand.offset(for: drag.translation, limit: HUDTheme.bubbleDragLimit)
+        let pushes = BubblePhysics.verticalDisplacements(
+            count: sessions.count, draggedIndex: idx, dragY: banded.height,
+            spacing: HUDTheme.tileSpacing, minGap: HUDTheme.bubbleMinGap)
+        return sessions.indices.map { i in
+            i == idx ? banded : CGSize(width: 0, height: pushes[i])
+        }
+    }
+
     private var section: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 6) {
@@ -147,8 +166,17 @@ struct SessionColumn: View {
             // Each column scrolls on its own, so a hundred sessions look the
             // same as twelve — the bubble never grows to accommodate them.
             ScrollView(.vertical) {
+                let offsets = tileOffsets()
                 VStack(spacing: HUDTheme.tileSpacing) {
-                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap, style: tileStyle) }
+                    ForEach(Array(sessions.enumerated()), id: \.element.id) { i, session in
+                        SessionTile(session: session, nowMs: nowMs, onTap: onTap,
+                                    style: tileStyle,
+                                    dragOffset: offsets[i],
+                                    onDrag: { drag = (session.id, $0) },
+                                    onDragEnd: {
+                                        withAnimation(HUDTheme.bubbleSnapBack) { drag = nil }
+                                    })
+                    }
                 }
                 .padding(.bottom, BoardLayout.stackBottomPad)
             }

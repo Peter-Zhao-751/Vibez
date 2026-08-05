@@ -54,10 +54,14 @@ struct SessionTile: View {
     /// usual card on black.
     var style = TileStyle.workingCard
 
-    /// Elastic drag: the bubble follows the pointer through the rubber-band
-    /// curve and springs back on release. A real drag never fires the tap —
-    /// the 4pt minimumDistance keeps clicks-to-jump intact.
-    @State private var dragOffset: CGSize = .zero
+    /// Elastic drag, owned by the COLUMN: the tile reports raw translations
+    /// and renders whatever offset it is handed back, because neighbors have
+    /// to feel the drag too (BubblePhysics repulsion) and a tile can't see
+    /// its neighbors. A real drag never fires the tap — the 4pt
+    /// minimumDistance keeps clicks-to-jump intact.
+    var dragOffset: CGSize = .zero
+    var onDrag: ((CGSize) -> Void)? = nil
+    var onDragEnd: (() -> Void)? = nil
 
     // No dim anywhere: done rows look exactly like working rows (user call).
     // A finished session is still marked by its column and, for ended, the
@@ -104,13 +108,8 @@ struct SessionTile: View {
         .onTapGesture { onTap(session) }
         .gesture(
             DragGesture(minimumDistance: 4)
-                .onChanged { value in
-                    dragOffset = RubberBand.offset(for: value.translation,
-                                                   limit: HUDTheme.bubbleDragLimit)
-                }
-                .onEnded { _ in
-                    withAnimation(HUDTheme.bubbleSnapBack) { dragOffset = .zero }
-                }
+                .onChanged { value in onDrag?(value.translation) }
+                .onEnded { _ in onDragEnd?() }
         )
     }
 

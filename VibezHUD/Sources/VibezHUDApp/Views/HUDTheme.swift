@@ -69,6 +69,9 @@ enum HUDTheme {
     /// while the island morph stays bounce-free.
     static let bubbleDragLimit: CGFloat = 14
     static let bubbleSnapBack = Animation.spring(response: 0.32, dampingFraction: 0.55)
+    /// The gap two bubbles asymptotically approach under repulsion and can
+    /// never close — "they should never touch" as arithmetic.
+    static let bubbleMinGap: CGFloat = 2
 
     static let mutedCardFill = Color.white.opacity(0.036)
     /// Visible on purpose: at 0.04 the outline vanished into the fill (user:
