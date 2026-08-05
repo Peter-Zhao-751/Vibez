@@ -40,7 +40,11 @@ struct HUDRootView: View {
     }
 
     private var bubble: some View {
-        BubbleBoard(snapshot: model.snapshot) { TerminalJumper.jump(to: $0) }
+        // Reading model.clockMs here is what keeps the tiles' age labels ticking:
+        // it is the ONLY observable that changes while the log is quiet, and it
+        // changes at most once a second. Only the expanded bubble reads it, so
+        // the collapsed ears still never re-render on the clock.
+        BubbleBoard(snapshot: model.snapshot, nowMs: model.clockMs) { TerminalJumper.jump(to: $0) }
             .frame(width: bubbleSize.width, height: bubbleSize.height)
             .background(
                 // Opaque black, top-anchored, wider than the notch so it

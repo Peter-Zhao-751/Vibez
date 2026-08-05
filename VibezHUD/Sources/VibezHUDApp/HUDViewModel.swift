@@ -8,6 +8,10 @@ final class HUDViewModel {
     private(set) var snapshot: HUDSnapshot = HUDSnapshot()
     private(set) var isExpanded = false
 
+    /// Whole-second wall clock the tiles derive their age labels from. Observed
+    /// only by the expanded bubble — see `AgeClock` for why it exists at all.
+    private(set) var clockMs: Int64
+
     /// Fired only when `isExpanded` actually flips. The window controller uses it
     /// to re-derive the panel's mouse opacity, which MUST track the collapsed /
     /// expanded state — see `NotchHoverRouter`.
@@ -15,12 +19,16 @@ final class HUDViewModel {
 
     private let engine: HUDEngine?
     private var hover: HoverPolicy
+    private var ageClock: AgeClock
     private var timer: Timer?
     private let isDemo: Bool
 
     init(demo: Bool) {
         isDemo = demo
         hover = HoverPolicy()
+        let startMs = Int64(Date().timeIntervalSince1970 * 1000)
+        ageClock = AgeClock(nowMs: startMs)
+        clockMs = startMs
         engine = demo ? nil : HUDEngine()
         if demo { snapshot = DemoData.snapshot() } else { snapshot = engine?.primeAndDrain() ?? HUDSnapshot() }
     }
@@ -44,10 +52,15 @@ final class HUDViewModel {
 
     private var pollCounter = 0
     private func tick() {
-        if hover.tick(nowMs: nowMs) {
+        let now = nowMs
+        if hover.tick(nowMs: now) {
             isExpanded = hover.isExpanded
             onExpansionChanged?(isExpanded)
         }
+        // At most one assignment per second: the tiles' age labels are
+        // wall-clock derived, and the snapshot guard below means nothing else
+        // would invalidate them while the log is quiet.
+        if ageClock.advance(toMs: now) { clockMs = now }
         guard !isDemo, let engine else { return }
         // Drain the log ~5x/sec; the hover clock still ticks at 10Hz.
         pollCounter += 1

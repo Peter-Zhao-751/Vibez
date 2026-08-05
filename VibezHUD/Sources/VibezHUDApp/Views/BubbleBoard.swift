@@ -3,6 +3,10 @@ import VibezSessionKit
 
 struct BubbleBoard: View {
     let snapshot: HUDSnapshot
+    /// Whole-second wall clock from the view model — the tiles' age labels are
+    /// derived from it rather than from `Date()` at render time, so they keep
+    /// ticking even when the snapshot is unchanged. See `AgeClock`.
+    let nowMs: Int64
     let onTap: (Session) -> Void
 
     var body: some View {
@@ -31,7 +35,7 @@ struct BubbleBoard: View {
             // same as twelve — the bubble never grows to accommodate them.
             ScrollView(.vertical) {
                 VStack(spacing: 7) {
-                    ForEach(sessions) { SessionTile(session: $0, onTap: onTap) }
+                    ForEach(sessions) { SessionTile(session: $0, nowMs: nowMs, onTap: onTap) }
                 }
                 .padding(.bottom, 4)
             }

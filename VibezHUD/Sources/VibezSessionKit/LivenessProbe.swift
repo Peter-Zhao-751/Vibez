@@ -53,9 +53,18 @@ public struct POSIXLivenessProbe: LivenessProbe {
         // This stays live on every call — it is a cheap syscall (no fork) and it
         // is the thing that actually detects death.
         if kill(pid, 0) != 0 && errno != EPERM {
-            // Evict on death so a RECYCLED pid re-probes: the memo below is only
-            // sound while the pid keeps identifying the same process, and the
+            // Evict on death so a RECYCLED pid re-probes: the memo is only sound
+            // while the pid keeps identifying the same process, and the
             // start-time comparison is what catches the reuse.
+            //
+            // The residual hole is NEW — re-running `ps` every call, as this
+            // used to, had none. If a pid dies AND is recycled entirely between
+            // two polls (200 ms), no call ever observes the death, the stale
+            // memo matches the recorded start time, and the row resurrects for
+            // good: SessionStore.resolve() never falls back to the staleness
+            // path while agentPid is non-nil. Accepted deliberately — macOS
+            // hands out pids sequentially through a five-digit space, so that
+            // needs on the order of 500k forks a second.
             cache.forget(pid)
             return false
         }

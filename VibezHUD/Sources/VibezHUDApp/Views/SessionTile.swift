@@ -7,6 +7,10 @@ import VibezSessionKit
 /// hairline and nothing else.
 struct SessionTile: View {
     let session: Session
+    /// Passed in, never read from `Date()` at render time: the age label has to
+    /// change when an OBSERVED value changes, or SwiftUI has no reason to redraw
+    /// it and the counter freezes with the panel open. See `AgeClock`.
+    let nowMs: Int64
     let onTap: (Session) -> Void
 
     private var isNeedsYou: Bool { session.state == .needsYou }
@@ -72,9 +76,10 @@ struct SessionTile: View {
         }
     }
 
-    private var elapsed: String {
-        let now = Int64(Date().timeIntervalSince1970 * 1000)
-        let secs = max(0, (now - session.stateSinceMs) / 1000)
+    /// Internal, not private: SessionTileAgeTests pins it to the PASSED clock,
+    /// which is the assertion that fails if this ever reads `Date()` again.
+    var elapsed: String {
+        let secs = max(0, (nowMs - session.stateSinceMs) / 1000)
         if secs < 60 { return "\(secs)s" }
         if secs < 3600 { return "\(secs / 60)m" }
         return "\(secs / 3600)h"
