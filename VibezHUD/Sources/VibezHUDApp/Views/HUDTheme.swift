@@ -46,11 +46,12 @@ enum HUDTheme {
     /// the slab unmistakably reads as its own element.
     static let sectionFill = Color.white.opacity(0.09)
     static let sectionCornerRadius: CGFloat = 16
-    /// Uniform on every side AND equal to the gap between message bubbles —
-    /// the panel's breathing room is the same 5pt rhythm as the cells' own
-    /// spacing (user ask). The scroll stack's extra bottom padding is gone for
-    /// the same reason: it made the bottom inset 4pt deeper than the sides.
-    static let sectionPadding: CGFloat = tileSpacing
+    /// ONE spacing unit, two places: cells-to-panel-edge equals panel-to-
+    /// island-edge (boardSideMargin), uniform on every side. Tying it to the
+    /// tile gap (5pt) made the cells "way too close to the side and top" —
+    /// the harmony the user asked for is bubbles→panel == panel→island, with
+    /// the tighter 5pt rhythm living only BETWEEN bubbles.
+    static let sectionPadding: CGFloat = boardSideMargin
     /// Mail's second grey: each row inside the panel is its own lighter rounded
     /// cell, like the Inbox row's highlight in the sidebar. Two surfaces, both
     /// unmistakably deliberate: panel composites to RGB 23 on black, a cell on

@@ -114,3 +114,10 @@ private let external = ScreenMetrics(
 @Test func sideAndBottomMarginsAreEqual() {
     #expect(HUDTheme.boardSideMargin == HUDTheme.boardBottomMargin)
 }
+
+/// The harmony rule: bubbles→panel-edge equals panel→island-edge, one unit
+/// everywhere ("make everything just look uniform and in harmony").
+@Test func panelPaddingMatchesTheIslandMargins() {
+    #expect(HUDTheme.sectionPadding == HUDTheme.boardSideMargin)
+    #expect(HUDTheme.sectionPadding == HUDTheme.boardBottomMargin)
+}
