@@ -403,8 +403,8 @@ export const notify = onRequest(
       res.status(400).json({error: validation.error});
       return;
     }
-    const {vibezId, title, body: bodyText, event, shield, session, agent} =
-      validation.fields;
+    const {vibezId, title, body: bodyText, event, shield, session, agent,
+      machine} = validation.fields;
 
     const nowMs = Date.now();
     const ip = clientIp(req);
@@ -605,6 +605,7 @@ export const notify = onRequest(
       if (shield !== undefined) item.shield = shield;
       if (session !== undefined) item.session = session;
       if (agent !== undefined) item.agent = agent;
+      if (machine !== undefined) item.machine = machine;
       await tokensDb
         .collection("events").doc(vibezId)
         .collection("items").add(item);

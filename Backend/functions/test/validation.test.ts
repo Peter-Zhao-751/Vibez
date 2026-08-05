@@ -149,3 +149,37 @@ describe("validateNotifyBody", () => {
     }
   });
 });
+
+describe("machine field", () => {
+  const base = {vibezId: "moss-pine-fox-jazz", title: "t", body: "b"};
+
+  it("accepts a valid hostname", () => {
+    const r = validateNotifyBody({...base, machine: "Peters-MacBook-Pro"});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.fields.machine).toBe("Peters-MacBook-Pro");
+  });
+
+  it("drops an invalid machine without rejecting the request", () => {
+    const r = validateNotifyBody({...base, machine: "bad host!$"});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.fields.machine).toBeUndefined();
+  });
+
+  it("drops an over-long machine without rejecting the request", () => {
+    const r = validateNotifyBody({...base, machine: "a".repeat(65)});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.fields.machine).toBeUndefined();
+  });
+
+  it("drops a non-string machine without rejecting the request", () => {
+    const r = validateNotifyBody({...base, machine: 42});
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.fields.machine).toBeUndefined();
+  });
+
+  it("omits machine when absent", () => {
+    const r = validateNotifyBody(base);
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.fields.machine).toBeUndefined();
+  });
+});

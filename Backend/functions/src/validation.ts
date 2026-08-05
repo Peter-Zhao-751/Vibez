@@ -15,6 +15,13 @@ export const VIBEZ_ID_PATTERN = /^[a-z]{3,5}(-[a-z]{3,5}){3}$/;
 /** CLI session ids (UUIDs and similar) — bounded charset + length. */
 export const SESSION_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 
+/**
+ * Source-Mac label for the HUD's cross-device rows (design spec
+ * 2026-08-05). Advisory metadata: an invalid value is DROPPED, never a
+ * rejection — a weird hostname must not kill the push it rides on.
+ */
+export const MACHINE_PATTERN = /^[A-Za-z0-9.-]{1,64}$/;
+
 /** Server cap sits above the plugins' 72-char title clip. */
 export const MAX_TITLE_CHARS = 100;
 
@@ -77,6 +84,7 @@ export interface NotifyFields {
   shield?: string;
   session?: string;
   agent?: string;
+  machine?: string;
 }
 
 /** Validation outcome: fields on success, an error string on failure. */
@@ -136,6 +144,9 @@ export function validateNotifyBody(raw: unknown): NotifyValidation {
       return {ok: false, error: "invalid agent"};
     }
     fields.agent = body.agent;
+  }
+  if (typeof body.machine === "string" && MACHINE_PATTERN.test(body.machine)) {
+    fields.machine = body.machine;
   }
   return {ok: true, fields};
 }
