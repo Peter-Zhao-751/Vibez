@@ -72,6 +72,10 @@ enum HUDTheme {
     /// The gap two bubbles asymptotically approach under repulsion and can
     /// never close — "basically touching, but with one pixel in between".
     static let bubbleMinGap: CGFloat = 1
+    /// Gap between the three columns; also the space a sideways-dragged card
+    /// can asymptotically eat (minus bubbleMinGap) before it would touch the
+    /// neighboring column.
+    static let columnSpacing: CGFloat = 11
 
     static let mutedCardFill = Color.white.opacity(0.036)
     /// Visible on purpose: at 0.04 the outline vanished into the fill (user:

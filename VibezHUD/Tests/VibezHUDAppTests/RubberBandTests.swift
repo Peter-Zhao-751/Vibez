@@ -19,8 +19,11 @@ private let limit: CGFloat = 14
 @Test func theBubbleCanNeverPassTheLimit() {
     #expect(RubberBand.stretch(50, limit: limit) < limit)
     #expect(RubberBand.stretch(10_000, limit: limit) < limit)
+    // Per-axis contract: each COMPONENT stays inside its limit (the walls are
+    // axis-aligned; a diagonal's magnitude may legitimately exceed one axis's
+    // limit while touching neither wall).
     let huge = RubberBand.offset(for: CGSize(width: -9_000, height: 7_000), limit: limit)
-    #expect((huge.width * huge.width + huge.height * huge.height).squareRoot() < limit)
+    #expect(abs(huge.width) < limit && abs(huge.height) < limit)
 }
 
 @Test func resistanceGrowsTheFurtherYouPull() {
@@ -32,10 +35,34 @@ private let limit: CGFloat = 14
     #expect(late > 0)                       // still monotonic, never dead
 }
 
-@Test func directionIsPreservedExactly() {
-    let t = CGSize(width: -30, height: 40)  // 3-4-5 triangle, pointing up-left
+@Test func signsArePreservedPerAxis() {
+    let t = CGSize(width: -30, height: 40)
     let o = RubberBand.offset(for: t, limit: limit)
     #expect(o.width < 0 && o.height > 0)
-    // Radial application: the ratio between components survives the curve.
-    #expect(abs(o.width / o.height - t.width / t.height) < 0.0001)
+}
+
+/// Anisotropic form: each axis obeys ITS OWN asymptote — the walls are
+/// axis-aligned, so this is the actual constraint. A sideways drag can never
+/// carry a bubble into a wall no matter how the pull is angled.
+@Test func eachAxisObeysItsOwnLimit() {
+    let o = RubberBand.offset(for: CGSize(width: 5_000, height: -5_000),
+                              horizontalLimit: 9, verticalLimit: 14)
+    #expect(o.width < 9)
+    #expect(o.height > -14)
+    #expect(o.width > 8.9 && o.height < -13.9, "a huge pull gets arbitrarily close")
+}
+
+/// The style limits point the never-touch rule at the right walls:
+/// a panel cell stops a pixel short of the grey outline, a card a pixel
+/// short of the neighboring column.
+@Test func styleLimitsMatchTheirBoundaries() {
+    #expect(TileStyle.panelCell.horizontalDragLimit
+            == HUDTheme.sectionPadding - HUDTheme.bubbleMinGap)
+    #expect(TileStyle.doneCard.horizontalDragLimit
+            == HUDTheme.columnSpacing - HUDTheme.bubbleMinGap)
+    #expect(TileStyle.workingCard.horizontalDragLimit
+            == HUDTheme.columnSpacing - HUDTheme.bubbleMinGap)
+    // Strictly inside the container/gap, so the clip can never bite.
+    #expect(TileStyle.panelCell.horizontalDragLimit < HUDTheme.sectionPadding)
+    #expect(TileStyle.workingCard.horizontalDragLimit < HUDTheme.columnSpacing)
 }

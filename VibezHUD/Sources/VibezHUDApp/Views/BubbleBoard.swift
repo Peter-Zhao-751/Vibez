@@ -12,7 +12,7 @@ struct BubbleBoard: View {
     var forcedFade: ScrollFadeState?
 
     var body: some View {
-        HStack(alignment: .top, spacing: 11) {
+        HStack(alignment: .top, spacing: HUDTheme.columnSpacing) {
             // NEEDS YOU is the filled slab (the urgency marker). DONE keeps the
             // panel-grey bubbles but NO section outline — DONE is the middle
             // column and an outlined box's top edge runs under the hardware

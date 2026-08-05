@@ -14,11 +14,21 @@ enum RubberBand {
     }
 
     static func offset(for translation: CGSize, limit: CGFloat) -> CGSize {
-        let mag = (translation.width * translation.width
-                   + translation.height * translation.height).squareRoot()
-        guard mag > 0 else { return .zero }
-        let factor = stretch(mag, limit: limit) / mag
-        return CGSize(width: translation.width * factor,
-                      height: translation.height * factor)
+        offset(for: translation, horizontalLimit: limit, verticalLimit: limit)
+    }
+
+    /// Anisotropic form: each axis gets its own asymptote, because the space
+    /// available sideways (to a panel edge or the neighboring column) differs
+    /// from the space available vertically (where neighbor repulsion rules).
+    /// Per-axis application keeps each component inside its own limit — which
+    /// is the actual constraint, walls being axis-aligned.
+    static func offset(for translation: CGSize,
+                       horizontalLimit: CGFloat, verticalLimit: CGFloat) -> CGSize {
+        CGSize(width: translation.width.sign == .minus
+                   ? -stretch(-translation.width, limit: horizontalLimit)
+                   : stretch(translation.width, limit: horizontalLimit),
+               height: translation.height.sign == .minus
+                   ? -stretch(-translation.height, limit: verticalLimit)
+                   : stretch(translation.height, limit: verticalLimit))
     }
 }

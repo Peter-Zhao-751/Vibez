@@ -136,7 +136,9 @@ struct SessionColumn: View {
         guard let drag, let idx = sessions.firstIndex(where: { $0.id == drag.id }) else {
             return Array(repeating: .zero, count: sessions.count)
         }
-        let banded = RubberBand.offset(for: drag.translation, limit: HUDTheme.bubbleDragLimit)
+        let banded = RubberBand.offset(for: drag.translation,
+                                       horizontalLimit: tileStyle.horizontalDragLimit,
+                                       verticalLimit: HUDTheme.bubbleDragLimit)
         let pushes = BubblePhysics.verticalDisplacements(
             count: sessions.count, draggedIndex: idx, dragY: banded.height,
             spacing: HUDTheme.tileSpacing, minGap: HUDTheme.bubbleMinGap)

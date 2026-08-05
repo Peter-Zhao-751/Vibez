@@ -22,6 +22,18 @@ enum TileStyle {
         self == .panelCell ? HUDTheme.panelCellRadius : 11
     }
     var hasOutline: Bool { self == .workingCard }
+
+    /// How far a bubble of this style may travel SIDEWAYS, asymptotically —
+    /// the distance to its nearest horizontal boundary minus the untouchable
+    /// gap. A panel cell stops a pixel short of the grey outline; a card
+    /// stops a pixel short of the neighboring column. Same never-touch rule
+    /// as bubble-vs-bubble, pointed at walls.
+    var horizontalDragLimit: CGFloat {
+        switch self {
+        case .panelCell: HUDTheme.sectionPadding - HUDTheme.bubbleMinGap
+        case .doneCard, .workingCard: HUDTheme.columnSpacing - HUDTheme.bubbleMinGap
+        }
+    }
 }
 
 /// Every tile uses the SAME neutral material regardless of state. Apple does not
