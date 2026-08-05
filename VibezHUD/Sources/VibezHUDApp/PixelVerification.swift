@@ -24,6 +24,7 @@ enum PixelVerification {
 
         orientationControl()
         everyTileIsTheSameHeight()
+        theScrollFadeIsEarned()
         needsYouIsRingedNotBarred()
         expandedIsPureBlack(notch: notch, bubble: bubble)
         noHaloAroundTheIsland(notch: notch, bubble: bubble, expanded: true)
@@ -109,6 +110,64 @@ enum PixelVerification {
             if p.r > 120 && p.g > 60 && p.g < 170 && p.b < 90 { n += 1 }
         }
         return n
+    }
+
+    // MARK: - The scroll fade
+
+    /// A fade over content that has never scrolled dims the top of the FIRST
+    /// tile to hint at scrolling that has not happened. The user called it "very
+    /// annoying" and they were right.
+    ///
+    /// `ImageRenderer` makes one synchronous pass, so `onScrollGeometryChange`
+    /// never fires inside it and the live wiring cannot be exercised here — the
+    /// rule that maps scroll geometry to fade edges is unit-tested instead
+    /// (`ScrollFadeStateTests`). What IS asserted here is the thing the user
+    /// sees: with no fade due, the first tile's top edge renders at full
+    /// brightness; with one due, it is visibly dimmed.
+    private static func theScrollFadeIsEarned() {
+        // MEASURED LIMITATION: a `ScrollView`'s content does not render under
+        // `ImageRenderer` at all — rendering the whole board yields the column
+        // HEADERS and nothing else (every row below y=40pt comes back pure
+        // black). So the board cannot be the subject here. What is asserted
+        // instead is the mask the column actually applies, over a known solid,
+        // which is the part that decides whether the first tile is dimmed.
+        func render(_ state: ScrollFadeState) -> Raster? {
+            rasterize(Color.white.frame(width: 200, height: 200).mask(state.maskGradient))
+        }
+        guard let none = render(ScrollFadeState(top: false, bottom: false)),
+              let topFaded = render(ScrollFadeState(top: true, bottom: false)),
+              let bottomFaded = render(ScrollFadeState(top: false, bottom: true))
+        else { return check("fade masks rendered", false) }
+
+        let mid = none.height / 2
+        let topRow = 1, bottomRow = none.height - 2
+        line(String(format: "     mask top row: unscrolled=%d scrolled=%d   bottom row: %d / %d",
+                    none.px(100, topRow).a, topFaded.px(100, topRow).a,
+                    none.px(100, bottomRow).a, bottomFaded.px(100, bottomRow).a))
+
+        check("unscrolled, the first tile's top edge is at FULL brightness  "
+              + "[alpha \(none.px(100, topRow).a) vs mid-content \(none.px(100, mid).a)]",
+              none.px(100, topRow).a == none.px(100, mid).a && none.px(100, topRow).a == 255)
+        check("...and with nothing below, the bottom edge is undimmed too  "
+              + "[\(none.px(100, bottomRow).a)]", none.px(100, bottomRow).a == 255)
+        check("once scrolled, the top fade appears  [\(topFaded.px(100, topRow).a) < 255]",
+              topFaded.px(100, topRow).a < 40)
+        check("...while its own mid-content stays untouched  [\(topFaded.px(100, mid).a)]",
+              topFaded.px(100, mid).a == 255)
+        check("with more content below, the bottom fade appears  [\(bottomFaded.px(100, bottomRow).a) < 255]",
+              bottomFaded.px(100, bottomRow).a < 40)
+        check("...and that one leaves the TOP alone  [\(bottomFaded.px(100, topRow).a)]",
+              bottomFaded.px(100, topRow).a == 255)
+    }
+
+    private static func brightestInRow(_ r: Raster, row: Int) -> Int {
+        guard row >= 0 && row < r.height else { return -1 }
+        var best = 0
+        for x in 0..<r.width {
+            let p = r.px(x, row)
+            best = max(best, max(p.r, max(p.g, p.b)))
+        }
+        return best
     }
 
     // MARK: - 0. Which way up is the buffer?
