@@ -85,13 +85,18 @@ final class NotchWindowController {
     /// draws the collapsed island inside it. That keeps the morph inside one view
     /// hierarchy instead of resizing a window mid-animation.
     func layout() {
-        let rect = geometry.bubbleRect(rowCount: max(model.totalRows, 3))
-        let padded = rect.insetBy(dx: -60, dy: 0)
-        // The extra 20pt is slack for the drop shadow and must hang BELOW the
-        // bubble: the panel's top edge stays flush with the screen's top edge,
-        // otherwise the top-anchored bubble is drawn off-screen and clipped.
-        let frame = CGRect(x: padded.minX, y: padded.minY - 20,
-                           width: padded.width, height: rect.height + 20)
+        // Sized from the SAME row count the island uses. It used to use
+        // `totalRows` (the sum of all three columns) while the island used the
+        // longest column, so the window was routinely more than twice the height
+        // of the thing it contained — see `NotchHoverRouter.activeZone`.
+        let rect = expandedIslandRect
+        let padded = rect.insetBy(dx: -NotchHoverRouter.forgiveness * 2, dy: 0)
+        // Slack hangs BELOW the island: the panel's top edge stays flush with
+        // the screen's top edge, otherwise the top-anchored island is drawn
+        // off-screen and clipped.
+        let slack = NotchHoverRouter.forgiveness * 2
+        let frame = CGRect(x: padded.minX, y: padded.minY - slack,
+                           width: padded.width, height: rect.height + slack)
         guard frame != panel.frame else { return }
         panel.setFrame(frame, display: true)
     }
@@ -112,7 +117,11 @@ final class NotchWindowController {
     /// it applies the returned input itself.
     @discardableResult
     func pollPointer() -> HoverInput {
-        apply(route(pointerSource()), notifyModel: false)
+        // Cheap and guarded: the panel has to keep containing the island, and
+        // the island's size follows the row count. While EXPANDED the row count
+        // is frozen, so this can never resize the window mid-morph.
+        layout()
+        return apply(route(pointerSource()), notifyModel: false)
     }
 
     /// The immediate path: something happened that must be reflected before the
@@ -129,7 +138,7 @@ final class NotchWindowController {
         NotchHoverRouter.route(pointer: pointer,
                                isExpanded: model.isExpanded,
                                geometry: geometry,
-                               panelFrame: panel.frame)
+                               expandedRect: expandedIslandRect)
     }
 
     @discardableResult
@@ -158,6 +167,11 @@ final class NotchWindowController {
     private func rectString(_ r: CGRect) -> String {
         String(format: "(%.0f,%.0f %.0fx%.0f)", r.minX, r.minY, r.width, r.height)
     }
+
+    /// Where the EXPANDED island is actually drawn — top-anchored, centred, and
+    /// sized from the same row count the view uses. Distinct from `panel.frame`,
+    /// which is deliberately larger.
+    var expandedIslandRect: CGRect { geometry.bubbleRect(rowCount: model.bubbleRowCount) }
 
     var debugGeometry: NotchGeometry { geometry }
 }

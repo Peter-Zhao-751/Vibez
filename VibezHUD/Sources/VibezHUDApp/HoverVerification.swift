@@ -57,14 +57,14 @@ enum HoverVerification {
               g.hoverRect.contains(live))
         check("...and routes .entered while collapsed",
               NotchHoverRouter.route(pointer: live, isExpanded: false,
-                                     geometry: g, panelFrame: c.panel.frame) == .entered)
+                                     geometry: g, expandedRect: c.expandedIslandRect) == .entered)
 
         // The trap, on real numbers: what a y-flip would have produced.
         let flipped = CGPoint(x: live.x, y: screen.maxY - live.y)
         line("flipped twin  \(fmtP(flipped))  (what a CG-space conversion would hand in)")
         check("the flipped twin routes .exited — a y-flip would kill hover outright",
               NotchHoverRouter.route(pointer: flipped, isExpanded: false,
-                                     geometry: g, panelFrame: c.panel.frame) == .exited)
+                                     geometry: g, expandedRect: c.expandedIslandRect) == .exited)
 
         line("")
         if failures == 0 { line("POINTER SPACE: PASS"); exit(0) }
@@ -85,7 +85,12 @@ enum HoverVerification {
         // Inside the panel, on the menu bar, nowhere near the notch. This is the
         // exact point the old whole-panel tracking area got wrong.
         let menuBarLeft = CGPoint(x: panel.frame.minX + 60, y: g.notchRect.midY)
-        let insideBubble = CGPoint(x: panel.frame.midX, y: panel.frame.minY + 40)
+        // Inside the VISIBLE island, not merely inside the window: those are
+        // different rects, and only the first one is the HUD.
+        let island = c.expandedIslandRect
+        let insideBubble = CGPoint(x: island.midX, y: island.minY + 40)
+        // Inside the window, BELOW the island — the round-2 bug's exact shape.
+        let belowIsland = CGPoint(x: island.midX, y: island.minY - 20)
         let farAway = CGPoint(x: g.metrics.frame.midX, y: g.metrics.frame.minY + 60)
 
         line("screen        \(fmt(g.metrics.frame))  hasNotch=\(g.hasNotch)")
@@ -118,6 +123,22 @@ enum HoverVerification {
         await settle()
         check("the bubble body is interactive", panel.ignoresMouseEvents == false)
         check("the bubble stays open inside its own body", model.isExpanded == true)
+
+        // 4b. Off the slab but still inside the window: this must NOT count as
+        //     hover, or the HUD cannot be dismissed by moving away from it.
+        check("precondition: the window covers a point 20pt below the island",
+              panel.frame.contains(belowIsland) && !island.contains(belowIsland))
+        move(to: belowIsland)
+        await settle()
+        check("pulling off the island stops counting as hover",
+              panel.ignoresMouseEvents == true)
+        await sleepMs(500)
+        check("...and the bubble collapses without a click", model.isExpanded == false)
+        move(to: notchCenter)
+        await sleepMs(300)
+        check("re-entering the notch opens it again", model.isExpanded == true)
+        move(to: insideBubble)
+        await settle()
 
         // 5. Leaving: opacity drops IMMEDIATELY, before the close delay expires,
         //    so a user heading for the menu bar is never blocked by the fade-out.

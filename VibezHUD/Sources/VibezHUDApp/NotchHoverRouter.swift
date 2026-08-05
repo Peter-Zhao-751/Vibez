@@ -12,16 +12,28 @@ import CoreGraphics
 /// So mouse opacity is derived, never assumed: opaque only while the pointer is
 /// genuinely on the HUD, click-through every other instant.
 public enum NotchHoverRouter {
+    /// How far outside the visible island still counts as "on it". Enough to
+    /// forgive a wobble at the edge, nowhere near enough to be invisible.
+    public static let forgiveness: CGFloat = 12
+
     /// The region that counts as "on the HUD" right now.
     ///
     /// Collapsed, only the small hot zone hugging the notch counts, so the rest
-    /// of the menu bar stays reachable. Expanded, the whole panel counts, so the
-    /// pointer can travel from the notch down into the bubble without crossing a
-    /// dead seam that would snap it shut mid-reach.
+    /// of the menu bar stays reachable. Expanded, the VISIBLE ISLAND counts (plus
+    /// `forgiveness`), so the pointer can travel from the notch down into the
+    /// board without crossing a dead seam that would snap it shut mid-reach.
+    ///
+    /// `expandedRect` is the island, NOT the window. That distinction is the
+    /// whole bug this parameter was renamed for: the panel is deliberately
+    /// larger than the island — 1160x470 around a 1040x202 slab on a 14" MBP —
+    /// so using the window here made a 268pt-tall band of empty screen BELOW the
+    /// visible HUD count as hover. Pulling the pointer off the island did
+    /// nothing at all, and the only way to dismiss the thing was to click
+    /// somewhere far away. Measured with `--verify-warp` before the fix.
     public static func activeZone(isExpanded: Bool,
                                   hoverRect: CGRect,
-                                  panelFrame: CGRect) -> CGRect {
-        isExpanded ? panelFrame : hoverRect
+                                  expandedRect: CGRect) -> CGRect {
+        isExpanded ? expandedRect.insetBy(dx: -forgiveness, dy: -forgiveness) : hoverRect
     }
 
     /// The hover signal to feed `HoverPolicy`. All hysteresis lives there; this
@@ -29,8 +41,8 @@ public enum NotchHoverRouter {
     public static func route(pointer: CGPoint,
                              isExpanded: Bool,
                              hoverRect: CGRect,
-                             panelFrame: CGRect) -> HoverInput {
-        activeZone(isExpanded: isExpanded, hoverRect: hoverRect, panelFrame: panelFrame)
+                             expandedRect: CGRect) -> HoverInput {
+        activeZone(isExpanded: isExpanded, hoverRect: hoverRect, expandedRect: expandedRect)
             .contains(pointer) ? .entered : .exited
     }
 
@@ -52,9 +64,9 @@ public enum NotchHoverRouter {
     public static func route(pointer: CGPoint,
                              isExpanded: Bool,
                              geometry: NotchGeometry,
-                             panelFrame: CGRect) -> HoverInput {
+                             expandedRect: CGRect) -> HoverInput {
         route(pointer: pointer, isExpanded: isExpanded,
-              hoverRect: geometry.hoverRect, panelFrame: panelFrame)
+              hoverRect: geometry.hoverRect, expandedRect: expandedRect)
     }
 
     /// Mouse opacity follows the routing exactly: the panel may intercept clicks

@@ -11,17 +11,21 @@ private let mbp = ScreenMetrics(
 
 private let geo = NotchGeometry(metrics: mbp)
 
-/// What the controller actually installs: the bubble rect widened by 60pt a side
-/// with 20pt of shadow slack below. Roughly 1160x470 on this screen.
+/// The VISIBLE island when expanded — the black slab the user can see.
+private let islandRect = geo.bubbleRect(rowCount: 6)
+
+/// The WINDOW that contains it, which is deliberately bigger. Keeping both here
+/// is the point: routing against the window instead of the island is the bug
+/// that made "move the mouse away" do nothing.
 private var panelFrame: CGRect {
-    let r = geo.bubbleRect(rowCount: 6)
-    let padded = r.insetBy(dx: -60, dy: 0)
-    return CGRect(x: padded.minX, y: padded.minY - 20, width: padded.width, height: r.height + 20)
+    let padded = islandRect.insetBy(dx: -24, dy: 0)
+    return CGRect(x: padded.minX, y: padded.minY - 24,
+                  width: padded.width, height: islandRect.height + 24)
 }
 
 private func route(_ p: CGPoint, expanded: Bool) -> HoverInput {
     NotchHoverRouter.route(pointer: p, isExpanded: expanded,
-                           hoverRect: geo.hoverRect, panelFrame: panelFrame)
+                           hoverRect: geo.hoverRect, expandedRect: islandRect)
 }
 
 @Test func collapsedOnlyTheNotchHotSpotCounts() {
@@ -47,28 +51,63 @@ private func route(_ p: CGPoint, expanded: Bool) -> HoverInput {
     #expect(route(belowNotch, expanded: false) == .exited)
 }
 
-@Test func expandedTheWholePanelKeepsItOpen() {
+@Test func expandedTheWholeVisibleIslandKeepsItOpen() {
     let belowNotch = CGPoint(x: geo.notchRect.midX, y: mbp.frame.maxY - 200)
     #expect(route(belowNotch, expanded: true) == .entered)
     #expect(!NotchHoverRouter.ignoresMouseEvents(for: route(belowNotch, expanded: true)))
 }
 
-@Test func expandedStillExitsOutsideThePanel() {
+@Test func expandedStillExitsOutsideTheIsland() {
     let offPanel = CGPoint(x: mbp.frame.midX, y: mbp.frame.minY + 40)
-    #expect(!panelFrame.contains(offPanel))
+    #expect(!islandRect.contains(offPanel))
     #expect(route(offPanel, expanded: true) == .exited)
     #expect(NotchHoverRouter.ignoresMouseEvents(for: route(offPanel, expanded: true)))
 }
 
 @Test func theActiveZoneGrowsOnlyWhenExpanded() {
     let collapsed = NotchHoverRouter.activeZone(isExpanded: false,
-                                                hoverRect: geo.hoverRect, panelFrame: panelFrame)
+                                                hoverRect: geo.hoverRect, expandedRect: islandRect)
     let expanded = NotchHoverRouter.activeZone(isExpanded: true,
-                                               hoverRect: geo.hoverRect, panelFrame: panelFrame)
+                                               hoverRect: geo.hoverRect, expandedRect: islandRect)
     #expect(collapsed == geo.hoverRect)
-    #expect(expanded == panelFrame)
+    #expect(expanded == islandRect.insetBy(dx: -NotchHoverRouter.forgiveness,
+                                           dy: -NotchHoverRouter.forgiveness))
     #expect(expanded.width > collapsed.width)
     #expect(expanded.height > collapsed.height)
+}
+
+/// THE ROUND-2 REGRESSION.
+///
+/// The window is deliberately larger than the island, and routing against the
+/// window made a tall band of empty screen BELOW the visible slab count as
+/// hover. The user pulled the pointer off the HUD and nothing happened; the only
+/// way to dismiss it was to click somewhere else entirely. Measured on the real
+/// panel with `--verify-warp` before the fix: island (236,780 1040x202) inside a
+/// panel (176,512 1160x470), and (756,700) — 80pt below the slab — routed
+/// `.entered`.
+@Test func aPointInsideTheWindowButOffTheVisibleIslandCollapsesIt() {
+    let belowIsland = CGPoint(x: islandRect.midX, y: islandRect.minY - 20)
+    #expect(panelFrame.contains(belowIsland), "precondition: the window still covers it")
+    #expect(!islandRect.contains(belowIsland), "precondition: the island does not")
+    #expect(route(belowIsland, expanded: true) == .exited)
+    #expect(NotchHoverRouter.ignoresMouseEvents(for: route(belowIsland, expanded: true)))
+
+    // And the shape of the original bug: with the OLD, much larger window as the
+    // expanded zone, that same point counted as hover. This is what changed.
+    let oldStylePanel = CGRect(x: islandRect.minX - 60, y: islandRect.minY - 268,
+                               width: islandRect.width + 120, height: islandRect.height + 268)
+    #expect(oldStylePanel.contains(belowIsland))
+    #expect(NotchHoverRouter.route(pointer: belowIsland, isExpanded: true,
+                                   hoverRect: geo.hoverRect, expandedRect: oldStylePanel) == .entered,
+            "routing against the window is what made the HUD undismissable")
+}
+
+/// ...but the edge is forgiving, or a pointer resting on the boundary flickers.
+@Test func aWobbleJustOutsideTheEdgeIsForgiven() {
+    let justBelow = CGPoint(x: islandRect.midX, y: islandRect.minY - 6)
+    let wellBelow = CGPoint(x: islandRect.midX, y: islandRect.minY - 40)
+    #expect(route(justBelow, expanded: true) == .entered)
+    #expect(route(wellBelow, expanded: true) == .exited)
 }
 
 /// Mouse opacity is a pure function of the routing, and it must be OFF in the
@@ -110,7 +149,7 @@ private func route(_ p: CGPoint, expanded: Bool) -> HoverInput {
 // the only way to state the coordinate-space contract as a test at all.
 
 private func poll(_ p: CGPoint, expanded: Bool) -> HoverInput {
-    NotchHoverRouter.route(pointer: p, isExpanded: expanded, geometry: geo, panelFrame: panelFrame)
+    NotchHoverRouter.route(pointer: p, isExpanded: expanded, geometry: geo, expandedRect: islandRect)
 }
 
 @Test func pollingTheNotchWhileCollapsedEntersTheHUD() {
@@ -123,8 +162,8 @@ private func poll(_ p: CGPoint, expanded: Bool) -> HoverInput {
     #expect(poll(.zero, expanded: false) == .exited)   // bottom-left corner of the display
 }
 
-@Test func pollingInsideThePanelWhileExpandedKeepsItOpen() {
-    let deepInside = CGPoint(x: panelFrame.midX, y: panelFrame.minY + 40)
+@Test func pollingInsideTheIslandWhileExpandedKeepsItOpen() {
+    let deepInside = CGPoint(x: islandRect.midX, y: islandRect.minY + 40)
     #expect(poll(deepInside, expanded: true) == .entered)
     #expect(poll(deepInside, expanded: false) == .exited)   // ...but only while expanded
 }

@@ -12,7 +12,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let demo = args.contains("--demo")
         let verifying = args.contains("--verify-hover")
         let morphing = args.contains("--verify-morph")
-        let model = HUDViewModel(demo: demo || verifying || morphing)
+        let warping = args.contains("--verify-warp")
+        let model = HUDViewModel(demo: demo || verifying || morphing || warping)
         self.model = model
         let controller = NotchWindowController(model: model,
                                                logsHover: verifying || args.contains("--debug-hover"))
@@ -23,6 +24,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         if verifying {
             Task { @MainActor in await HoverVerification.run(controller: controller, model: model) }
+        }
+        if warping {
+            Task { @MainActor in await WarpVerification.run(controller: controller, model: model) }
         }
         if morphing {
             Task { @MainActor in await MorphVerification.run(controller: controller, model: model) }
