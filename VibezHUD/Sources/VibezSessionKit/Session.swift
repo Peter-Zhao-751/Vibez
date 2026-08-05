@@ -20,6 +20,7 @@ public struct Session: Sendable, Equatable, Identifiable {
     public var agentStart: String?
     public var appPid: Int32?
     public var app: String?
+    public var machine: String?
 
     public var id: String { sid }
 
@@ -29,12 +30,14 @@ public struct Session: Sendable, Equatable, Identifiable {
     public init(sid: String, agent: AgentTag, proj: String, cwd: String, title: String,
                 detail: String?, tool: String?, state: SessionState,
                 startedAtMs: Int64, lastActivityMs: Int64, stateSinceMs: Int64,
-                agentPid: Int32?, agentStart: String?, appPid: Int32?, app: String?) {
+                agentPid: Int32?, agentStart: String?, appPid: Int32?, app: String?,
+                machine: String? = nil) {
         self.sid = sid; self.agent = agent; self.proj = proj; self.cwd = cwd
         self.title = title; self.detail = detail; self.tool = tool; self.state = state
         self.startedAtMs = startedAtMs; self.lastActivityMs = lastActivityMs
         self.stateSinceMs = stateSinceMs; self.agentPid = agentPid
         self.agentStart = agentStart; self.appPid = appPid; self.app = app
+        self.machine = machine
     }
 }
 

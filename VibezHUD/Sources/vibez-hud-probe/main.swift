@@ -22,6 +22,7 @@ func rows(_ sessions: [Session]) -> [[String: Any]] {
         ]
         if let t = s.tool { row["tool"] = t }
         if let d = s.detail { row["detail"] = d }
+        if let m = s.machine { row["machine"] = m }
         return row
     }
 }

@@ -84,7 +84,7 @@ public final class SessionStore {
         entries[e.sid] = entry
     }
 
-    public func snapshot() -> HUDSnapshot {
+    public func snapshot(remote: [Session] = []) -> HUDSnapshot {
         let now = clock.nowMs
         commitPendingDones(now: now)
         var needsYou: [Session] = [], done: [Session] = [], working: [Session] = []
@@ -107,6 +107,20 @@ public final class SessionStore {
             }
         }
         for sid in evicted { entries.removeValue(forKey: sid) }
+
+        // Remote rows — server-derived sessions from OTHER machines,
+        // pre-resolved by RemoteReducer. Local wins: a sid the local log
+        // already knows is dropped (the local reducer is strictly richer,
+        // and every local push echoes back through the server log).
+        for var s in remote where entries[s.sid] == nil {
+            s.detail = s.detail?.isEmpty == true ? nil : s.detail
+            switch s.state {
+            case .needsYou: needsYou.append(s)
+            case .working:  working.append(s)
+            case .done, .ended: done.append(s)
+            case .idle: continue
+            }
+        }
 
         // Every sort is a TOTAL order: `entries` is a dictionary, so the input
         // arrives in an arbitrary order, and Swift's sort is not stable. Without
