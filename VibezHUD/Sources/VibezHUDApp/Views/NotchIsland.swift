@@ -15,21 +15,35 @@ enum IslandMetrics {
     /// the question is "how many?" — so the counts are back, at 30pt a flank
     /// rather than the 40pt the first attempt cost.
     static let dotDiameter: CGFloat = 6
-    static let dotGap: CGFloat = 4
-    /// 6.5 a side lands the flank on a round 30pt: 6.5 + 6 + 4 + 7 + 6.5.
-    static let flankPadding: CGFloat = 6.5
+    /// Between the dot and the number it sits on top of.
+    static let dotGap: CGFloat = 2
+    static let flankPadding: CGFloat = 5
     /// Advance of one monospaced digit at `countFontSize`. Monospaced so a count
     /// ticking 9 -> 10 changes the island's width by exactly one digit and never
     /// by a fraction of one.
-    static let digitWidth: CGFloat = 7
-    static let countFontSize: CGFloat = 11
+    static let digitWidth: CGFloat = 6.2
+    static let countFontSize: CGFloat = 10
+    /// STACKED, not side by side. Read as a row, a dot-then-number flank is
+    /// lopsided — the dot sits left of centre on one side and right of centre on
+    /// the other, so the two flanks are not mirror images of each other. Stacked,
+    /// both are symmetric about their own centre line and the island reads the
+    /// same on both sides of the notch.
+    static let minFlankWidth: CGFloat = 20
+    /// Digits have no descender, but their line box reserves room for one, so a
+    /// stack centred by layout sits visibly HIGH — measured at 1.25pt on this
+    /// type. Centring is about ink, not boxes; `--verify-pixels` asserts the
+    /// corrected result lands on 0.00pt.
+    static let stackInkNudge: CGFloat = 1.25
 
     /// Zero means GONE, not narrow: a flank with nothing to say contributes no
     /// width at all, which is what lets the quiet state collapse onto the notch.
+    ///
+    /// Intrinsic above the minimum, so a two-digit count widens the flank rather
+    /// than being clipped — "12" must not render as "1".
     static func flankWidth(count: Int) -> CGFloat {
         guard count > 0 else { return 0 }
         let digits = CGFloat(String(count).count)
-        return flankPadding * 2 + dotDiameter + dotGap + digitWidth * digits
+        return max(minFlankWidth, flankPadding * 2 + digitWidth * digits)
     }
 
     /// The collapsed island is exactly the notch's height and the notch's width
@@ -137,7 +151,7 @@ struct NotchIsland<Board: View>: View {
         .offset(y: flankYNudge)
     }
 
-    /// A dot and a number. Amber on the left for what is blocked on you, green
+    /// A dot ABOVE a number. Amber on the left for what is blocked on you, green
     /// on the right for what has finished — the same two colours, and the same
     /// two counts, as the expanded columns' headers, so hovering confirms the
     /// glance instead of restating it differently.
@@ -147,14 +161,16 @@ struct NotchIsland<Board: View>: View {
     @ViewBuilder
     private func flank(count: Int, color: Color) -> some View {
         if count > 0 {
-            HStack(spacing: IslandMetrics.dotGap) {
+            VStack(spacing: IslandMetrics.dotGap) {
                 Circle().fill(color)
                     .frame(width: IslandMetrics.dotDiameter, height: IslandMetrics.dotDiameter)
                 Text("\(count)")
                     .font(.system(size: IslandMetrics.countFontSize,
                                   weight: .semibold, design: .rounded).monospacedDigit())
                     .foregroundStyle(.white)
+                    .fixedSize()
             }
+            .offset(y: IslandMetrics.stackInkNudge)
             // Centred in the FULL notch height, which is what puts the ink on
             // the notch's own centre line instead of a few points above it.
             .frame(width: IslandMetrics.flankWidth(count: count), height: collapsedSize.height)

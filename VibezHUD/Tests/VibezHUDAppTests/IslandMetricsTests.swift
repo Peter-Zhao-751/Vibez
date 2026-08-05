@@ -45,14 +45,25 @@ private let notch = CGSize(width: 200, height: 32)
 @Test func theIslandWidthTracksDigitCountNotDigitIdentity() {
     #expect(IslandMetrics.flankWidth(count: 1) == IslandMetrics.flankWidth(count: 8))
     #expect(IslandMetrics.flankWidth(count: 10) == IslandMetrics.flankWidth(count: 99))
-    #expect(IslandMetrics.flankWidth(count: 10) > IslandMetrics.flankWidth(count: 9))
+    #expect(IslandMetrics.flankWidth(count: 10) >= IslandMetrics.flankWidth(count: 9))
 }
 
-/// A dot AND a number, for 30pt — against the 40pt the very first attempt cost.
-@Test func aFlankCostsThirtyPoints() {
-    #expect(IslandMetrics.flankWidth(count: 1) == 30)
+/// Stacked, a flank is 20pt — and the two flanks are mirror images, which a
+/// dot-then-number row never was.
+@Test func aFlankCostsTwentyPoints() {
+    #expect(IslandMetrics.flankWidth(count: 1) == 20)
     let both = IslandMetrics.collapsedSize(needsYou: 3, done: 4, notchSize: notch)
-    #expect(both.width == notch.width + 60)
+    #expect(both.width == notch.width + 40)
+}
+
+/// ...and a two-digit count widens the flank rather than clipping. "12" must
+/// never render as "1".
+@Test func twoDigitsWidenTheFlankInsteadOfBeingClipped() {
+    let one = IslandMetrics.flankWidth(count: 9)
+    let two = IslandMetrics.flankWidth(count: 12)
+    #expect(two >= one)
+    #expect(two >= IslandMetrics.flankPadding * 2 + IslandMetrics.digitWidth * 2)
+    #expect(IslandMetrics.flankWidth(count: 99) == two)
 }
 
 /// The resting island answers "what is blocked on me" and "what finished". A
