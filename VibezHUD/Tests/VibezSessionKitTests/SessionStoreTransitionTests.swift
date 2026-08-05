@@ -76,7 +76,7 @@ private func newStore(_ clock: FakeClock, _ live: FakeLiveness = FakeLiveness())
         .idle:     [.start: .idle, .prompt: .working, .tool: .working, .needsInput: .needsYou, .done: .idle, .end: .ended],
         .working:  [.start: .working, .prompt: .working, .tool: .working, .needsInput: .needsYou, .done: .working, .end: .ended],
         .needsYou: [.start: .needsYou, .prompt: .working, .tool: .working, .needsInput: .needsYou, .done: .needsYou, .end: .ended],
-        .ended:    [.start: .ended, .prompt: .working, .tool: .working, .needsInput: .needsYou, .done: .ended, .end: .ended],
+        .ended:    [.start: .idle, .prompt: .working, .tool: .working, .needsInput: .needsYou, .done: .ended, .end: .ended],
     ]
     // NOTE: `done` shows the PREVIOUS state here because it is provisional
     // until the grace window elapses — committed behaviour is covered in Task 5.
@@ -91,4 +91,17 @@ private func newStore(_ clock: FakeClock, _ live: FakeLiveness = FakeLiveness())
             #expect(got == want, "\(label) + \(kind.rawValue) => \(String(describing: got)), want \(want)")
         }
     }
+}
+
+@Test func startOnAFinishedSessionResetsToIdle() {
+    // Resume bug: a session that ended (explicit end, or probed-dead pid)
+    // showed "ended" in the done column until the first prompt.
+    let clock = FakeClock(10_000); let s = newStore(clock)
+    s.apply(makeEvent(.prompt, ts: 10_000))
+    s.apply(makeEvent(.end, ts: 11_000))
+    #expect(s.stateForTesting(sid: "s1") == .ended)
+    s.apply(makeEvent(.start, ts: 12_000))
+    #expect(s.stateForTesting(sid: "s1") == .idle)   // no "ended" ghost
+    s.apply(makeEvent(.prompt, ts: 13_000))
+    #expect(s.stateForTesting(sid: "s1") == .working)
 }

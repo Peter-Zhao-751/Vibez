@@ -65,7 +65,14 @@ public final class SessionStore {
         if e.kind != .done { entry.pendingDoneAtMs = nil }
 
         switch e.kind {
-        case .start:  break
+        case .start:
+            // A fresh start on a FINISHED session is a resume — reset to
+            // idle so the row doesn't show "ended"/"done" until the first
+            // prompt. Live states (working/needsYou) are untouched: a
+            // start record there is a replay/rotation artifact.
+            if entry.session.state == .ended || entry.session.state == .done {
+                setState(&entry, .idle, at: e.ts)
+            }
         case .prompt, .tool: setState(&entry, .working, at: e.ts)
         case .needsInput:    setState(&entry, .needsYou, at: e.ts)
         case .end:           setState(&entry, .ended, at: e.ts)
