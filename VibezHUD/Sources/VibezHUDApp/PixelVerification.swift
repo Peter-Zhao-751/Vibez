@@ -57,7 +57,7 @@ enum PixelVerification {
     // MARK: - 1. Pure black, top rows and edges
 
     private static func expandedIsPureBlack(notch: CGSize, bubble: CGSize) {
-        let view = island(needsYou: 2, working: 2, expanded: true, notch: notch, bubble: bubble)
+        let view = island(needsYou: 2, done: 2, expanded: true, notch: notch, bubble: bubble)
         guard let r = rasterize(view) else { return check("expanded island rendered", false) }
         check("expanded raster is the bubble size  [\(r.width)x\(r.height) px @\(Int(scale))x]",
               r.width == Int(bubble.width * scale) && r.height == Int(bubble.height * scale))
@@ -119,7 +119,7 @@ enum PixelVerification {
     /// desktop. Any bleed then shows up as grey that is no longer grey.
     private static func noHaloAroundTheIsland(notch: CGSize, bubble: CGSize, expanded: Bool) {
         let pad: CGFloat = 60          // wider than the deleted shadow's 30pt radius + 18pt offset
-        let view = island(needsYou: 2, working: 3, expanded: expanded, notch: notch, bubble: bubble)
+        let view = island(needsYou: 2, done: 3, expanded: expanded, notch: notch, bubble: bubble)
             .padding(pad)
             .background(Color(white: 0.5))
         guard let r = rasterize(view) else {
@@ -153,19 +153,19 @@ enum PixelVerification {
     // MARK: - 2. The collapsed counts sit on the notch's centre line
 
     private static func collapsedInkIsCentred(notch: CGSize, bubble: CGSize) {
-        let view = island(needsYou: 2, working: 3, expanded: false, notch: notch, bubble: bubble)
+        let view = island(needsYou: 2, done: 3, expanded: false, notch: notch, bubble: bubble)
         guard let r = rasterize(view) else { return check("collapsed island rendered", false) }
 
-        let expected = IslandMetrics.collapsedSize(needsYou: 2, working: 3, notchSize: notch)
+        let expected = IslandMetrics.collapsedSize(needsYou: 2, done: 3, notchSize: notch)
         check("collapsed raster is notch-height and wider than the notch  "
               + "[\(r.width)x\(r.height) px, expected \(Int(expected.width * scale))x\(Int(expected.height * scale))]",
               r.width == Int(expected.width * scale) && r.height == Int(expected.height * scale))
 
-        // The island is now the notch plus two 16pt flanks and nothing else —
-        // minimal enough to read as the notch grown a whisker rather than a pill.
+        // Dot + one digit per flank: 30pt a side, against the 40pt the very
+        // first attempt cost and the 16pt the numberless one did.
         check(String(format: "each flank costs %.0fpt, so the island is notch+%.0fpt",
                      IslandMetrics.flankWidth(count: 1), expected.width - notch.width),
-              expected.width - notch.width == 32)
+              IslandMetrics.flankWidth(count: 1) == 30)
 
         guard let box = inkBounds(r) else { return check("the collapsed island has visible ink", false) }
         let inkCentre = Double(box.minY + box.maxY + 1) / 2 / Double(scale)
@@ -175,25 +175,37 @@ enum PixelVerification {
                      inkCentre, shapeCentre, delta), abs(delta) <= 1.0)
         line(String(format: "     dot rows %d..%d of %d px; %d ink pixels",
                     box.minY, box.maxY, r.height, box.count))
-        check(String(format: "the dots are %.0fpt tall, not a text run  [%.1fpt of ink]",
-                     IslandMetrics.dotDiameter, Double(box.maxY - box.minY + 1) / Double(scale)),
-              abs(Double(box.maxY - box.minY + 1) / Double(scale) - Double(IslandMetrics.dotDiameter)) <= 1.5)
+        // Ink is a dot AND a digit now, so it is taller than a bare dot but
+        // nowhere near the flank's full height.
+        let inkHeight = Double(box.maxY - box.minY + 1) / Double(scale)
+        check(String(format: "the ink is a dot plus a digit  [%.1fpt tall]", inkHeight),
+              inkHeight >= Double(IslandMetrics.dotDiameter) && inkHeight <= 10)
 
-        // ...and each dot is the RIGHT dot. Colour is the only thing carrying
-        // meaning in the resting state now, so it is asserted, not assumed.
+        // ...and each dot is the RIGHT dot. The left one says "blocked on you",
+        // the right one says "finished" — different meanings, so different
+        // colours, asserted rather than assumed.
+        // Both flanks read dot-then-number, so the right flank's dot is at the
+        // START of that flank, not mirrored to its end.
         let midRow = r.height / 2
-        let left = r.px(Int(IslandMetrics.flankWidth(count: 1) / 2 * scale), midRow)
-        let right = r.px(r.width - 1 - Int(IslandMetrics.flankWidth(count: 1) / 2 * scale), midRow)
+        let dotOffset = Int((IslandMetrics.flankPadding + IslandMetrics.dotDiameter / 2) * scale)
+        let rightFlankX = r.width - Int(IslandMetrics.flankWidth(count: 3) * scale)
+        let left = r.px(dotOffset, midRow)
+        let right = r.px(rightFlankX + dotOffset, midRow)
         check("left flank is the amber needs-you dot #FF9F0A  [\(rgb(left))]",
               left.r > 230 && left.g > 130 && left.g < 190 && left.b < 60)
-        check("right flank is the teal working dot #64D2FF  [\(rgb(right))]",
-              right.r > 70 && right.r < 130 && right.g > 190 && right.b > 230)
+        check("right flank is the green done dot #30D158  [\(rgb(right))]",
+              right.r < 90 && right.g > 190 && right.b > 60 && right.b < 130)
+
+        // The counts themselves: white ink somewhere to the right of each dot.
+        let leftDigit = brightestColumnRange(r, from: dotOffset + Int(4 * scale),
+                                             to: Int(IslandMetrics.flankWidth(count: 1) * scale))
+        check("the needs-you count is drawn in white  [brightest=\(leftDigit)]", leftDigit >= 230)
     }
 
     // MARK: - 3. Quiet is invisible
 
     private static func collapsedQuietIsExactlyTheNotch(notch: CGSize, bubble: CGSize) {
-        let view = island(needsYou: 0, working: 0, expanded: false, notch: notch, bubble: bubble)
+        let view = island(needsYou: 0, done: 0, expanded: false, notch: notch, bubble: bubble)
         guard let r = rasterize(view) else { return check("quiet island rendered", false) }
         let widthPt = Double(r.width) / Double(scale)
         check(String(format: "with both counts zero the shape is exactly the notch width  [%.1fpt vs %.1fpt]",
@@ -206,9 +218,9 @@ enum PixelVerification {
 
     // MARK: - Rendering
 
-    private static func island(needsYou: Int, working: Int, expanded: Bool,
+    private static func island(needsYou: Int, done: Int, expanded: Bool,
                                notch: CGSize, bubble: CGSize) -> some View {
-        NotchIsland(needsYou: needsYou, working: working, isExpanded: expanded,
+        NotchIsland(needsYou: needsYou, done: done, isExpanded: expanded,
                     notchSize: notch, bubbleSize: bubble) {
             BubbleBoard(snapshot: DemoData.snapshot(),
                         nowMs: Int64(Date().timeIntervalSince1970 * 1000)) { _ in }
@@ -241,6 +253,19 @@ enum PixelVerification {
         guard let data = ctx.data else { return nil }
         let buf = UnsafeRawBufferPointer(start: data, count: w * h * 4)
         return Raster(width: w, height: h, bytes: [UInt8](buf))
+    }
+
+    /// Brightest pixel anywhere in a column band — used to find the white digits
+    /// without depending on exactly where the text engine placed them.
+    private static func brightestColumnRange(_ r: Raster, from x0: Int, to x1: Int) -> Int {
+        var best = 0
+        for x in max(0, x0)..<min(r.width, x1) {
+            for y in 0..<r.height {
+                let p = r.px(x, y)
+                best = max(best, min(p.r, min(p.g, p.b)))     // min channel: white only
+            }
+        }
+        return best
     }
 
     /// Rows and brightness of everything that is not the black shape. Alpha

@@ -21,7 +21,9 @@ struct HUDRootView: View {
 
     var body: some View {
         NotchIsland(needsYou: model.needsYouCount,
-                    working: model.workingCount,
+                    // The DONE column's count, ended sessions included, so the
+                    // glance and the header the user sees on hover agree.
+                    done: model.doneCount,
                     isExpanded: model.isExpanded,
                     notchSize: CGSize(width: geometry.notchRect.width,
                                       height: geometry.notchRect.height),
