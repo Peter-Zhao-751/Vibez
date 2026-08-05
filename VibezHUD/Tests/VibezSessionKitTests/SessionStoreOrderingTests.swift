@@ -42,7 +42,14 @@ private func store(_ c: FakeClock) -> SessionStore {
     // The store walks a DICTIONARY, and Swift's sort is not stable: rows with
     // equal timestamps would otherwise be free to swap places on every 5 Hz
     // poll. sid is the tiebreaker, in all three columns.
-    let clock = FakeClock(); let s = store(clock)
+    //
+    // This is about ordering, not retention: FakeClock()'s default start
+    // (1_000_000) is ~999s ahead of these events' ts (1_000-3_000), so the
+    // default 5-minute retention would prune the `done` rows outright before
+    // the ordering assertions ever run. An explicit, generous retention keeps
+    // this test about what it says it's about.
+    let clock = FakeClock()
+    let s = SessionStore(config: StoreConfig(retentionMs: 60 * 60 * 1_000), clock: clock, liveness: FakeLiveness())
     for sid in ["mike", "alpha", "zulu", "delta"] {
         s.apply(makeEvent(.needsInput, ts: 2_000, sid: "n-\(sid)"))
         s.apply(makeEvent(.tool, ts: 3_000, sid: "w-\(sid)"))

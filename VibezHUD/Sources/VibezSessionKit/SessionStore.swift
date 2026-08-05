@@ -6,7 +6,7 @@ public struct StoreConfig: Sendable {
     public var staleMs: Int64
 
     public init(stopGraceMs: Int64 = 3_000,
-                retentionMs: Int64 = 60 * 60 * 1_000,
+                retentionMs: Int64 = 5 * 60 * 1_000,
                 staleMs: Int64 = 30 * 60 * 1_000) {
         self.stopGraceMs = stopGraceMs
         self.retentionMs = retentionMs
@@ -78,8 +78,15 @@ public final class SessionStore {
         let now = clock.nowMs
         var needsYou: [Session] = [], done: [Session] = [], working: [Session] = []
 
-        for (_, entry) in entries {
-            guard var s = resolve(entry, now: now) else { continue }
+        var evicted: [String] = []
+        for (sid, entry) in entries {
+            guard var s = resolve(entry, now: now) else {
+                // resolve() returns nil ONLY for retention-pruned done/ended
+                // rows — evict, or a long-lived HUD accumulates one Entry
+                // per sid forever.
+                evicted.append(sid)
+                continue
+            }
             s.detail = s.detail?.isEmpty == true ? nil : s.detail
             switch s.state {
             case .needsYou: needsYou.append(s)
@@ -88,6 +95,7 @@ public final class SessionStore {
             case .idle: continue
             }
         }
+        for sid in evicted { entries.removeValue(forKey: sid) }
 
         // Every sort is a TOTAL order: `entries` is a dictionary, so the input
         // arrives in an arbitrary order, and Swift's sort is not stable. Without
