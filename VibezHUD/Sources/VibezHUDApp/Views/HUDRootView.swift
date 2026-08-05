@@ -18,54 +18,22 @@ extension EnvironmentValues {
 struct HUDRootView: View {
     let model: HUDViewModel
     @Environment(\.notchGeometry) private var geometry
-    @Namespace private var glass
 
     var body: some View {
-        GlassEffectContainer {
-            ZStack(alignment: .top) {
-                if model.isExpanded {
-                    bubble
-                        .transition(.identity)
-                } else {
-                    CollapsedEars(needsYou: model.needsYouCount,
-                                  working: model.workingCount,
-                                  notchWidth: geometry.notchRect.width,
-                                  namespace: glass)
-                        .padding(.top, 4)
-                }
-            }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-            .animation(HUDTheme.expand, value: model.isExpanded)
+        NotchIsland(needsYou: model.needsYouCount,
+                    working: model.workingCount,
+                    isExpanded: model.isExpanded,
+                    notchSize: CGSize(width: geometry.notchRect.width,
+                                      height: geometry.notchRect.height),
+                    bubbleSize: bubbleSize) {
+            // Built lazily, INSIDE the island's expanded branch: `model.clockMs`
+            // is what keeps the tiles' age labels ticking, and it is the only
+            // observable that moves while the log is quiet. Reading it here means
+            // a collapsed HUD never re-renders on the clock — the board does not
+            // exist to read it.
+            BubbleBoard(snapshot: model.snapshot, nowMs: model.clockMs) { TerminalJumper.jump(to: $0) }
         }
-    }
-
-    private var bubble: some View {
-        // Reading model.clockMs here is what keeps the tiles' age labels ticking:
-        // it is the ONLY observable that changes while the log is quiet, and it
-        // changes at most once a second. Only the expanded bubble reads it, so
-        // the collapsed ears still never re-render on the clock.
-        BubbleBoard(snapshot: model.snapshot, nowMs: model.clockMs) { TerminalJumper.jump(to: $0) }
-            .frame(width: bubbleSize.width, height: bubbleSize.height)
-            .background(
-                // Opaque black, top-anchored, wider than the notch so it
-                // swallows it: one continuous object, not a window under a notch.
-                UnevenRoundedRectangle(bottomLeadingRadius: HUDTheme.bubbleCornerRadius,
-                                       bottomTrailingRadius: HUDTheme.bubbleCornerRadius)
-                    .fill(HUDTheme.bubbleFill)
-                    .overlay(
-                        UnevenRoundedRectangle(bottomLeadingRadius: HUDTheme.bubbleCornerRadius,
-                                               bottomTrailingRadius: HUDTheme.bubbleCornerRadius)
-                            .fill(LinearGradient(colors: [.white.opacity(0.055), .clear],
-                                                 startPoint: .top, endPoint: .bottom))
-                    )
-                    .overlay(
-                        UnevenRoundedRectangle(bottomLeadingRadius: HUDTheme.bubbleCornerRadius,
-                                               bottomTrailingRadius: HUDTheme.bubbleCornerRadius)
-                            .strokeBorder(.white.opacity(0.13), lineWidth: 0.5)
-                    )
-                    .shadow(color: .black.opacity(0.7), radius: 30, y: 18)
-            )
-            .glassEffectID("bubble", in: glass)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var bubbleSize: CGSize {

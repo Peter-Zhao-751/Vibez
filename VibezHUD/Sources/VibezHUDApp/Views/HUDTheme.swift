@@ -27,14 +27,18 @@ enum HUDTheme {
         switch agent { case .claude: "✳"; case .codex: "◆"; case .cursor: "▲" }
     }
 
-    // The bubble is opaque black in BOTH appearances: it is the Dynamic Island,
-    // and the island is black on iPhone regardless of light/dark. A light bubble
-    // exposes the seam against the black notch and kills the illusion.
-    static let bubbleFill = Color.black
+    // The island is PURE black in both appearances, with nothing layered over
+    // it: it is the Dynamic Island, and the island is black on iPhone regardless
+    // of light/dark. Anything translucent — glass, a material, a specular
+    // gradient, a rim stroke — reads grey next to the real notch and exposes the
+    // seam, which is exactly what the first build got wrong.
+    static let islandFill = Color.black
     static let tileFill = Color.white.opacity(0.075)
     static let tileStroke = Color.white.opacity(0.085)
-    static let bubbleCornerRadius: CGFloat = 30
-    static let earCornerRadius: CGFloat = 10
+    static let expandedCornerRadius: CGFloat = 30
+    /// Matches the notch's own bottom-corner radius, so the resting island's
+    /// silhouette is the notch's silhouette.
+    static let collapsedCornerRadius: CGFloat = 13
 
     static let expand = Animation.spring(response: 0.42, dampingFraction: 0.78)
     static let contentFadeDelay: Double = 0.16
