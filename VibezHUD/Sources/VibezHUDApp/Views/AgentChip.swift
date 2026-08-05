@@ -1,76 +1,96 @@
 import SwiftUI
 import VibezSessionKit
 
-/// The agent identity chip on every tile — real brand marks, not glyph text.
+/// The agent identity chip on every tile — the SAME art the iOS app uses,
+/// on a white plate:
 ///
-/// Claude: the app-icon look — WHITE rounded square, orange spark. Drawn as a
-/// vector (no asterisk asset exists in the repo, and a shape stays crisp at
-/// any scale) in the standardized Claude orange #d97757.
-/// Codex: the codex logo the iOS app ships (`codex.imageset`), white on the
-/// codex-blue square.
-/// Cursor: has no mark in this codebase — renders the Claude chip, mirroring
-/// the iOS convention where unknown/`cu` agents fall back to the Claude theme.
+/// - Claude: the Clawd resting sprite (the "little crab"), an exact port of
+///   `ClawdRestingSprite` from `Vibez/ShieldCardRenderer.swift` — same cell,
+///   same critter crop, same drawn-on eye boxes, nearest-neighbor scaling.
+/// - Codex: `assets/agents/Codex.png` (the blue pixel-Z art).
+/// - Cursor: `assets/agents/Cursor.png` (yes, it exists — assets/agents/).
+///
+/// All three ship as transparent-background art, so every chip sits on the
+/// same white rounded plate.
 struct AgentChip: View {
     let agent: AgentTag
 
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 5).fill(background)
+            RoundedRectangle(cornerRadius: 5).fill(.white)
             mark
         }
         .frame(width: 15, height: 15)
-    }
-
-    private var background: Color {
-        agent == .codex ? HUDTheme.chip(.codex) : .white
+        .clipShape(RoundedRectangle(cornerRadius: 5))
     }
 
     @ViewBuilder private var mark: some View {
-        if agent == .codex {
-            if let logo = Self.codexLogo {
-                Image(nsImage: logo)
-                    .renderingMode(.template)
-                    .resizable().scaledToFit()
-                    .foregroundStyle(.white)
-                    .frame(width: 10, height: 10)
-            } else {
-                // Resource missing (odd bundle layout): the old glyph, never a blank chip.
-                Text("◆").font(.system(size: 8, weight: .bold)).foregroundStyle(.white)
-            }
-        } else {
-            ClaudeSpark()
-                .fill(HUDTheme.chip(.claude))
-                .frame(width: 11, height: 11)
+        switch agent {
+        case .claude:
+            ClawdChip(critterWidth: 11)
+        case .codex:
+            brandImage(Self.codexArt, fallbackGlyph: "◆", fallbackColor: HUDTheme.chip(.codex))
+        case .cursor:
+            brandImage(Self.cursorArt, fallbackGlyph: "▲", fallbackColor: HUDTheme.chip(.cursor))
         }
     }
 
-    private static let codexLogo: NSImage? = Bundle.module.image(forResource: "codex-logo")
+    @ViewBuilder
+    private func brandImage(_ image: NSImage?, fallbackGlyph: String, fallbackColor: Color) -> some View {
+        if let image {
+            Image(nsImage: image)
+                .resizable().scaledToFit()
+                .frame(width: 11, height: 11)
+        } else {
+            // Resource missing (odd bundle layout): the old glyph, never a blank chip.
+            Text(fallbackGlyph).font(.system(size: 8, weight: .bold)).foregroundStyle(fallbackColor)
+        }
+    }
+
+    private static let codexArt: NSImage? = Bundle.module.image(forResource: "agent-codex")
+    private static let cursorArt: NSImage? = Bundle.module.image(forResource: "agent-cursor")
 }
 
-/// The Claude spark: ten tapered rays radiating from center, alternating two
-/// lengths — an approximation of the Anthropic mark that reads correctly at
-/// chip size.
-struct ClaudeSpark: Shape {
-    func path(in rect: CGRect) -> Path {
-        var p = Path()
-        let c = CGPoint(x: rect.midX, y: rect.midY)
-        let long = min(rect.width, rect.height) / 2
-        let short = long * 0.72
-        let halfWidth = long * 0.13
+/// Chip-sized Clawd: the real `clawd-resting` frame with the open-pose eyes
+/// drawn on top, cropped to the critter's opaque box — constants copied
+/// verbatim from `ClawdRestingSprite` (Vibez/ShieldCardRenderer.swift), which
+/// is the single source of truth for this pose. Keep them in sync.
+struct ClawdChip: View {
+    var critterWidth: CGFloat = 11
 
-        for i in 0..<10 {
-            let angle = CGFloat(i) * .pi / 5 - .pi / 2
-            let len = i.isMultiple(of: 2) ? long : short
-            let dir = CGPoint(x: cos(angle), y: sin(angle))
-            let normal = CGPoint(x: -dir.y, y: dir.x)
-            let tip = CGPoint(x: c.x + dir.x * len, y: c.y + dir.y * len)
-            // A tapered ray: a thin triangle from a base chord through the
-            // center region out to the tip.
-            p.move(to: CGPoint(x: c.x + normal.x * halfWidth, y: c.y + normal.y * halfWidth))
-            p.addLine(to: CGPoint(x: c.x - normal.x * halfWidth, y: c.y - normal.y * halfWidth))
-            p.addLine(to: tip)
-            p.closeSubpath()
+    private static let cell = CGSize(width: 330, height: 226)
+    private static let critterBox = CGRect(x: 88, y: 128, width: 144, height: 96)
+    private static let eyeBoxes = [
+        CGRect(x: 124, y: 140, width: 12, height: 12),
+        CGRect(x: 184, y: 140, width: 12, height: 12),
+    ]
+
+    private static let sprite: NSImage? = Bundle.module.image(forResource: "clawd-resting")
+
+    var body: some View {
+        if let sprite = Self.sprite {
+            let k = critterWidth / Self.critterBox.width
+            ZStack(alignment: .topLeading) {
+                Image(nsImage: sprite)
+                    .resizable()
+                    .interpolation(.none)     // nearest-neighbor keeps the pixel art crisp
+                    .frame(width: Self.cell.width * k, height: Self.cell.height * k)
+                ForEach(0..<Self.eyeBoxes.count, id: \.self) { i in
+                    let box = Self.eyeBoxes[i]
+                    Rectangle()
+                        .fill(.black)
+                        .frame(width: box.width * k, height: box.height * k)
+                        .offset(x: box.minX * k, y: box.minY * k)
+                }
+            }
+            .frame(width: Self.cell.width * k, height: Self.cell.height * k, alignment: .topLeading)
+            .offset(x: -Self.critterBox.minX * k, y: -Self.critterBox.minY * k)
+            .frame(width: Self.critterBox.width * k, height: Self.critterBox.height * k,
+                   alignment: .topLeading)
+            .clipped()
+        } else {
+            Text("✳").font(.system(size: 8, weight: .bold))
+                .foregroundStyle(HUDTheme.chip(.claude))
         }
-        return p
     }
 }

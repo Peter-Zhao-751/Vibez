@@ -25,7 +25,7 @@ enum DemoData {
             ],
             working: [
                 s("d5", .codex, "vibez-backend", "Rate-limit escalation", .working, "Edit", "ratelimit.ts", 3_000),
-                s("d6", .claude, "VibezExtension", "Popup analytics", .working, "Bash", "npm test", 40_000),
+                s("d6", .cursor, "VibezExtension", "Popup analytics", .working, "Bash", "npm test", 40_000),
             ])
     }
 }
