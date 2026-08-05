@@ -1,0 +1,175 @@
+{
+  "blocked": {
+    "claude": {
+      "done": [],
+      "needsYou": [
+        {
+          "agent": "cc",
+          "detail": "Bash: vibez-hud-e2e-noexec",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cc",
+          "state": "needsYou",
+          "title": "ship the notch app ",
+          "tool": "Bash"
+        }
+      ],
+      "working": []
+    },
+    "codex": {
+      "done": [],
+      "needsYou": [
+        {
+          "agent": "cx",
+          "detail": "Bash: {\"command\":\"vibez-hud-e2e-noexec\"}",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cx",
+          "state": "needsYou",
+          "title": "ship the notch app",
+          "tool": "Bash"
+        }
+      ],
+      "working": []
+    },
+    "cursor": {
+      "done": [],
+      "needsYou": [
+        {
+          "agent": "cu",
+          "detail": "Should I rebase before merging?",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cu",
+          "state": "needsYou",
+          "title": "ship the notch app"
+        }
+      ],
+      "working": []
+    }
+  },
+  "mixed": {
+    "all-three": {
+      "done": [
+        {
+          "agent": "cu",
+          "detail": "ship the notch app",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cu",
+          "state": "ended",
+          "title": "ship the notch app"
+        }
+      ],
+      "needsYou": [
+        {
+          "agent": "cc",
+          "detail": "Edit: {\"file_path\":\"/tmp/x\"}",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cc",
+          "state": "needsYou",
+          "title": "ship the notch app ",
+          "tool": "Edit"
+        }
+      ],
+      "working": [
+        {
+          "agent": "cx",
+          "detail": "ship the notch app",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cx",
+          "state": "working",
+          "title": "ship the notch app"
+        }
+      ]
+    }
+  },
+  "resumed": {
+    "claude": {
+      "done": [],
+      "needsYou": [],
+      "working": [
+        {
+          "agent": "cc",
+          "detail": "yes, go ahead",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cc",
+          "state": "working",
+          "title": "ship the notch app ",
+          "tool": "Bash"
+        }
+      ]
+    },
+    "codex": {
+      "done": [],
+      "needsYou": [],
+      "working": [
+        {
+          "agent": "cx",
+          "detail": "yes, go ahead",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cx",
+          "state": "working",
+          "title": "ship the notch app",
+          "tool": "Bash"
+        }
+      ]
+    },
+    "cursor": {
+      "done": [],
+      "needsYou": [],
+      "working": [
+        {
+          "agent": "cu",
+          "detail": "yes, go ahead",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cu",
+          "state": "working",
+          "title": "ship the notch app"
+        }
+      ]
+    }
+  },
+  "settled": {
+    "claude": {
+      "done": [
+        {
+          "agent": "cc",
+          "detail": "Pushed the branch.",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cc",
+          "state": "done",
+          "title": "ship the notch app ",
+          "tool": "Bash"
+        }
+      ],
+      "needsYou": [],
+      "working": []
+    },
+    "codex": {
+      "done": [
+        {
+          "agent": "cx",
+          "detail": "Pushed the branch.",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cx",
+          "state": "done",
+          "title": "ship the notch app",
+          "tool": "Bash"
+        }
+      ],
+      "needsYou": [],
+      "working": []
+    },
+    "cursor": {
+      "done": [
+        {
+          "agent": "cu",
+          "detail": "Pushed the branch.",
+          "proj": "Vibez",
+          "sid": "hud-e2e-cu",
+          "state": "done",
+          "title": "ship the notch app"
+        }
+      ],
+      "needsYou": [],
+      "working": []
+    }
+  }
+}
